@@ -151,6 +151,11 @@ impl AppState {
 #[derive(Resource, Debug, Clone)]
 pub struct StartState(pub String);
 
+/// A native document (`.cadrs`) to open at start (`cadrs <path>`, `cadrs --open <path>`): it is
+/// imported into the store as a new document, as a drop on the documents page imports one.
+#[derive(Resource, Debug, Clone)]
+pub struct OpenAtStart(pub std::path::PathBuf);
+
 /// Where documents are stored. `main` sets it from `--data-dir`, `CADRS_DATA_DIR`, the
 /// scenario's private data dir, or the platform default.
 #[derive(Resource, Debug, Clone)]
@@ -755,7 +760,12 @@ impl Plugin for CadrsAppPlugin {
             })
             .add_systems(
                 Startup,
-                (apply_start_state, flush_deleted, set_document_loader),
+                (
+                    apply_start_state,
+                    flush_deleted,
+                    set_document_loader,
+                    open_at_start.after(apply_start_state),
+                ),
             );
     }
 }
@@ -773,6 +783,12 @@ fn set_document_loader(store: Res<DocumentStore>) {
 fn flush_deleted(store: Res<DocumentStore>) {
     if let Err(e) = store.0.flush_deleted() {
         warn!("cannot remove deleted documents: {e}");
+    }
+}
+
+fn open_at_start(world: &mut World) {
+    if let Some(OpenAtStart(path)) = world.remove_resource::<OpenAtStart>() {
+        native_document::import(world, &path);
     }
 }
 

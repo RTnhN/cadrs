@@ -521,33 +521,30 @@ fn case_114_cone_34() {
 /// SMLib fillet test 115: `filleted_box.smb`, radius 1.0, edges [(3, 3), (6, 6), (9, 9), (12, 12), (15, 15), (17, 17), (20, 20), (23, 23)].
 #[test]
 fn case_115_filleted_box() {
-    known_failure(
-        blend(
-            "filleted_box.smb",
-            &[
-                (3, 3),
-                (6, 6),
-                (9, 9),
-                (12, 12),
-                (15, 15),
-                (17, 17),
-                (20, 20),
-                (23, 23),
-            ],
-            true,
-            Op::Fillet(1.0),
-            &Expect {
-                volume: Some(983.501477554),
-                area: Some(564.238969815),
-                faces: Some(18),
-                edges: Some(36),
-                solid: Some(true),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_115_filleted_box",
-    );
+    blend(
+        "filleted_box.smb",
+        &[
+            (3, 3),
+            (6, 6),
+            (9, 9),
+            (12, 12),
+            (15, 15),
+            (17, 17),
+            (20, 20),
+            (23, 23),
+        ],
+        true,
+        Op::Fillet(1.0),
+        &Expect {
+            volume: Some(983.501477554),
+            area: Some(564.238969815),
+            faces: Some(18),
+            edges: Some(36),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 116: `filleted_box.smb`, radius 2.0, edges [(3, 3), (6, 6), (9, 9), (12, 12), (15, 15), (17, 17), (20, 20), (23, 23)].
@@ -1231,24 +1228,21 @@ fn case_217_caps_nside() {
 /// SMLib fillet test 218: `fillet1010.smb`, radius 38.1, edges [(2, 2), (4, 4), (8, 8), (9, 9)].
 #[test]
 fn case_218_fillet1010() {
-    known_failure(
-        blend(
-            "fillet1010.smb",
-            &[(2, 2), (4, 4), (8, 8), (9, 9)],
-            true,
-            Op::Fillet(38.1),
-            &Expect {
-                volume: Some(289583.320619),
-                area: Some(22801.8487784),
-                faces: Some(9),
-                edges: Some(16),
-                solid: Some(true),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_218_fillet1010",
-    );
+    blend(
+        "fillet1010.smb",
+        &[(2, 2), (4, 4), (8, 8), (9, 9)],
+        true,
+        Op::Fillet(38.1),
+        &Expect {
+            volume: Some(289583.320619),
+            area: Some(22801.8487784),
+            faces: Some(9),
+            edges: Some(16),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 219: `fillet0227.smb`, radius 400.0, edges [(2, 2), (4, 4)].

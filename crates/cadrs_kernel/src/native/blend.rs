@@ -1001,7 +1001,7 @@ fn chamfer_plane(b: &Body, c: usize, v: usize, d1: f64, d2: f64) -> Option<(P3, 
 
 /// Whether edge `e` is convex (the material's corner between its faces is under 180°), at
 /// its middle.
-fn edge_convex(b: &Body, e: usize) -> Option<bool> {
+pub(crate) fn edge_convex(b: &Body, e: usize) -> Option<bool> {
     let ed = &b.edges[e];
     if ed.degenerate {
         return None;
@@ -1597,14 +1597,17 @@ pub fn blend(
             {
                 continue;
             }
-            // Ends meeting other blended edges were mitred above; only free ends here.
+            // Ends meeting other blended edges were mitred above; only free ends here. (Fills
+            // too: two fills meeting round a convex corner of the wall between them run on past
+            // it to their mitre, as Onshape's do, the corner filled up to the lower of their two
+            // faces; cut flush at the wall's plane, the corner was left empty.)
             let mine = edge_convex(&b, e);
             let others = at_vertex.get(v).map_or(0, |x| {
                 x.iter()
                     .filter(|&&o| o != e && edge_convex(&b, o) == mine)
                     .count()
             });
-            if tool.convex && others > 0 {
+            if others > 0 {
                 continue;
             }
             // A cut ending where a fill runs (a chamfered top edge over a filled inside corner):
@@ -1762,11 +1765,41 @@ fn check_fits(b: &Body, e: usize, kind: &dyn Fn(f64) -> SectionKind) -> Result<(
     Ok(())
 }
 
-/// Blends of two edges that share a flat face but no vertex must not overlap on it: the edges
-/// lie at least the sum of the blends' contact offsets apart.
+/// Blends of two edges that share a flat face but no vertex must not overlap on it: the strips
+/// they take of it (from each edge into the face, as wide as its contact offset) may not meet.
+/// (Edges nearer than the two offsets can blend away from each other: the corners either side
+/// of a narrow hole.)
 fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
-    // Per edge: (planar face, contact offset on it) for both sides.
-    let mut info: Vec<(usize, [(usize, f64); 2])> = Vec::new();
+    // Whether a point of the face lies inside the strip edge `e` takes of face `fi` (coedge
+    // direction `fwd`), `w` wide: beside the edge, within the strip's width, short of its far
+    // side by a hair (strips that only touch don't overlap).
+    let in_strip = |e: usize, fi: usize, fwd: bool, w: f64, p: &P3| {
+        let ed = &b.edges[e];
+        let t = ed.curve.closest(p, ed.t[0], ed.t[1]);
+        if t <= ed.t[0].min(ed.t[1]) || t >= ed.t[0].max(ed.t[1]) {
+            return false;
+        }
+        let (n, into) = face_dirs(b, fi, e, fwd, t);
+        let v = p - ed.point(t);
+        let across = v.dot(&into);
+        v.dot(&n).abs() < 1e-6 * (1.0 + w) && across > 1e-7 && across < w - 1e-7
+    };
+    // Points of the strip: across it at a few widths, along it at a few places.
+    let strip_points = |e: usize, fi: usize, fwd: bool, w: f64| -> Vec<P3> {
+        let ed = &b.edges[e];
+        let mut pts = Vec::new();
+        for k in 1..16 {
+            let t = ed.t[0] + (ed.t[1] - ed.t[0]) * k as f64 / 16.0;
+            let (_, into) = face_dirs(b, fi, e, fwd, t);
+            for s in [0.05, 0.25, 0.5, 0.75, 0.95] {
+                pts.push(ed.point(t) + into * (w * s));
+            }
+        }
+        pts
+    };
+    // Per edge: (planar face, contact offset on it, coedge direction) for both sides.
+    type Side = (usize, f64, bool);
+    let mut info: Vec<(usize, [Side; 2])> = Vec::new();
     for (e, kind, _) in edges {
         let e = e.0 as usize;
         let Ok([s1, s2]) = edge_sides(b, e) else {
@@ -1788,7 +1821,7 @@ fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
                 (r1 / (theta / 2.0).tan(), r2 / (theta / 2.0).tan())
             }
         };
-        info.push((e, [(s1.0, a1), (s2.0, a2)]));
+        info.push((e, [(s1.0, a1, s1.1), (s2.0, a2, s2.1)]));
     }
     for i in 0..info.len() {
         for j in i + 1..info.len() {
@@ -1798,8 +1831,8 @@ fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
             if a.v.iter().any(|v| c.v.contains(v)) {
                 continue;
             }
-            for &(fi, ai) in &si {
-                for &(fj, aj) in &sj {
+            for &(fi, ai, fwd_i) in &si {
+                for &(fj, aj, fwd_j) in &sj {
                     if fi != fj
                         || !matches!(b.faces[fi].surf, Surface::Plane { .. })
                         || !(ai + aj).is_finite()
@@ -1812,7 +1845,14 @@ fn check_overlaps(b: &Body, edges: &[EdgeBlend]) -> Result<()> {
                         let t = c.curve.closest(&p, c.t[0], c.t[1]);
                         d = d.min((c.point(t) - p).norm());
                     }
-                    if d < ai + aj - 1e-7 {
+                    if d < ai + aj - 1e-7
+                        && (strip_points(ei, fi, fwd_i, ai)
+                            .iter()
+                            .any(|p| in_strip(ej, fj, fwd_j, aj, p))
+                            || strip_points(ej, fj, fwd_j, aj)
+                                .iter()
+                                .any(|p| in_strip(ei, fi, fwd_i, ai, p)))
+                    {
                         return Err(KernelError::TooLarge { op: "blend", why: "the blends of two edges overlap: the size is too large for the face between them".into() });
                     }
                 }

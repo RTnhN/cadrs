@@ -2104,3 +2104,32 @@ fn doc_remote_sentry_chamfer1() {
         Vec::<String>::new()
     );
 }
+
+/// A user's document (ekgpulse, the bracket's Chamfer 1): 5 mm equal chamfers on 23 inside
+/// corners of a 3D-printed bracket, among them two meeting under its lid round an outside corner
+/// of the walls below (mitred: the corner filled up to the lower of their faces). Onshape's own
+/// evaluation of the document (its volume before and after the chamfer, 63 700.87 and
+/// 65 172.88 mm³, each to about ±1.6) has the chamfer add 1 472.02 mm³, the reference here. (The
+/// input is the import's, 91.8 mm³ short of Onshape's before the chamfer; and where a hole in
+/// the lid runs over one chamfer Onshape carries it on through the fill, which this kernel
+/// doesn't yet: 1.4 mm³ more.)
+#[test]
+fn ekgpulse_bracket_chamfer() {
+    let mut k = NativeKernel::new();
+    let b =
+        k.insert(bodyio::read(include_bytes!("data/docs/ekgpulse_bracket_chamfer.body")).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let edges = [
+        244, 246, 247, 253, 251, 99, 88, 93, 95, 292, 296, 305, 299, 359, 348, 360, 349, 50, 52,
+        48, 54, 352, 353,
+    ]
+    .map(EdgeId);
+    let out = k
+        .chamfer(b, &edges, ChamferSpec::EqualDistance(5.0))
+        .unwrap()
+        .bodies[0];
+    let issues = k.get(out).unwrap().check();
+    assert!(issues.is_empty(), "{issues:?}");
+    let added = k.mass_properties(out).unwrap().volume - v0;
+    assert!((1_470.4..1_473.7).contains(&added), "added {added}");
+}

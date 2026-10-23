@@ -225,7 +225,17 @@ pub fn unify_faces(
             continue;
         }
         if let Some(face) = merge_group(b, &g) {
-            b.faces[g[0]] = face;
+            // A merged face whose loops cross in (u, v) is no face: the pieces stay apart. (A
+            // region wrapping a cylinder more than once, as the faces round a helical thread
+            // joined to it: every iso-u seam from its bottom to its top crosses the thread.)
+            let piece = std::mem::replace(&mut b.faces[g[0]], face);
+            if b.check_face_domain(g[0])
+                .iter()
+                .any(|e| e.contains("cross"))
+            {
+                b.faces[g[0]] = piece;
+                continue;
+            }
             replace[g[0]] = true;
             for &f in &g[1..] {
                 drop[f] = true;

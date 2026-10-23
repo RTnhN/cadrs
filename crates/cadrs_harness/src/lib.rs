@@ -52,6 +52,9 @@ pub struct HarnessOptions {
     pub data_dir: Option<PathBuf>,
     /// `--no-cursor`: never draw the software cursor into screenshots.
     pub no_cursor: bool,
+    /// A native document to open at start (`--open <path>`, or the path alone, as an editor
+    /// takes one).
+    pub open: Option<PathBuf>,
 }
 
 impl Default for HarnessOptions {
@@ -63,12 +66,13 @@ impl Default for HarnessOptions {
             out_dir: None,
             data_dir: None,
             no_cursor: false,
+            open: None,
         }
     }
 }
 
 pub const USAGE: &str = "usage: cadrs [--headless] [--scenario <name>] [--window-size WxH] \
-                         [--out <dir>] [--data-dir <dir>] [--no-cursor]";
+                         [--out <dir>] [--data-dir <dir>] [--no-cursor] [[--open] <file.cadrs>]";
 
 impl HarnessOptions {
     pub fn from_args(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
@@ -92,7 +96,9 @@ impl HarnessOptions {
                     o.data_dir = Some(args.next().ok_or("--data-dir needs a directory")?.into())
                 }
                 "--no-cursor" => o.no_cursor = true,
+                "--open" => o.open = Some(args.next().ok_or("--open needs a file")?.into()),
                 "-h" | "--help" => return Err(USAGE.into()),
+                path if !path.starts_with('-') && o.open.is_none() => o.open = Some(path.into()),
                 other => return Err(format!("unknown argument {other:?}\n{USAGE}")),
             }
         }

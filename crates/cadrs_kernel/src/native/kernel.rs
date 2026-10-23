@@ -1250,10 +1250,19 @@ impl Kernel for NativeKernel {
     fn tangent_chain(&self, body: BodyId, edge: EdgeId) -> Result<Vec<EdgeId>> {
         // (The edges without their lengths: the chain doesn't read them, and rebuilds ask for
         // chains over bodies of many B-spline edges again and again.)
+        // Along tangent edges of the same kind: a blend filling a concave corner can't run on
+        // round a convex one (an edge continuing in line where one face turns the other way:
+        // Onshape's tangent propagation stops there too).
+        let b = self.get(body)?;
+        let convex = |e: EdgeId| super::blend::edge_convex(b, e.0 as usize);
         crate::tangent_chain_of(
-            &edge_infos_with(self.get(body)?, false),
+            &edge_infos_with(b, false),
             &self.vertices(body)?,
             edge,
+            &|a, c| match (convex(a), convex(c)) {
+                (Some(x), Some(y)) => x == y,
+                _ => true,
+            },
         )
     }
 
@@ -1517,7 +1526,15 @@ mod tests {
             for e in edges.iter().step_by(3) {
                 assert_eq!(
                     k.tangent_chain(id, e.id).unwrap(),
-                    crate::tangent_chain_of(&edges, &vertices, e.id).unwrap(),
+                    crate::tangent_chain_of(&edges, &vertices, e.id, &|a, c| {
+                        let b = k.get(id).unwrap();
+                        let convex = |e: EdgeId| super::super::blend::edge_convex(b, e.0 as usize);
+                        match (convex(a), convex(c)) {
+                            (Some(x), Some(y)) => x == y,
+                            _ => true,
+                        }
+                    })
+                    .unwrap(),
                     "{name} {:?}",
                     e.id
                 );

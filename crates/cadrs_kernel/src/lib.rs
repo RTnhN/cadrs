@@ -519,7 +519,7 @@ pub trait Kernel {
     /// let s = [(0.0, 0.0), (5.0, 0.0), (5.0, 3.0), (0.0, 3.0)];
     /// let square = Region { outer: Loop { curves: (0..4).map(|i| line(s[i], s[(i + 1) % 4])).collect() }, holes: vec![], source: None };
     /// let mut k = DefaultKernel::new();
-    /// let r = k.evolved(&spine, &[square])?;
+    /// let r = Kernel::evolved(&mut k, &spine, &[square])?;
     /// // Four prisms along the sides and four quarter turns at the corners: h (2w(a + b) + πw²).
     /// let want = 3.0 * (2.0 * 5.0 * 60.0 + std::f64::consts::PI * 25.0);
     /// assert!((k.mass_properties(r.bodies[0])?.volume - want).abs() < 1e-6 * want);
@@ -1291,16 +1291,20 @@ pub trait Kernel {
     /// every edge reached from it through vertices where the two edges' tangents are parallel
     /// (within [`TANGENT_ANGLE`]). In id order.
     fn tangent_chain(&self, body: BodyId, edge: EdgeId) -> Result<Vec<EdgeId>> {
-        tangent_chain_of(&self.edges(body)?, &self.vertices(body)?, edge)
+        tangent_chain_of(&self.edges(body)?, &self.vertices(body)?, edge, &|_, _| {
+            true
+        })
     }
 }
 
 /// [`Kernel::tangent_chain`] over a body's edges and vertices (their lengths aren't used: a
-/// kernel may leave them out).
+/// kernel may leave them out). `joins(a, b)` says whether a blend along edge `a` may run on
+/// along tangent edge `b` (a kernel that knows: not from a concave edge onto a convex one).
 pub(crate) fn tangent_chain_of(
     edges: &[EdgeInfo],
     vertices: &[VertexInfo],
     edge: EdgeId,
+    joins: &dyn Fn(EdgeId, EdgeId) -> bool,
 ) -> Result<Vec<EdgeId>> {
     let tol = naming::joint_tolerance(edges);
     let get = |id: EdgeId| edges.iter().find(|e| e.id == id);
@@ -1333,7 +1337,7 @@ pub(crate) fn tangent_chain_of(
                 let tangent = tangents_at(o, v.point)
                     .iter()
                     .any(|t| mine.iter().any(|m| m.dot(t).abs() >= cos));
-                if tangent {
+                if tangent && joins(cur, other) {
                     chain.push(other);
                     todo.push(other);
                 }
