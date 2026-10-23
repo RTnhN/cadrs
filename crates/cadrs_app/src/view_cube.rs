@@ -775,13 +775,7 @@ fn view_menu(st: ViewMenuState) -> cadrs_ui::Menu {
         )
 }
 
-fn on_view_menu(
-    ev: On<cadrs_ui::MenuAction>,
-    rect: Res<crate::viewport::ViewportRect>,
-    mut view: ResMut<ViewportView>,
-    mut commands: Commands,
-) {
-    let target = view.target();
+fn on_view_menu(ev: On<cadrs_ui::MenuAction>, view: Res<ViewportView>, mut commands: Commands) {
     if let Some(slug) = ev.item.strip_prefix("view-render-") {
         if let Some(mode) = crate::camera::RenderMode::ALL
             .into_iter()
@@ -792,17 +786,32 @@ fn on_view_menu(
         }
         return;
     }
-    let to = match ev.item.as_str() {
+    match ev.item.as_str() {
+        // The isometric, dimetric (two axes foreshortened equally) and trimetric (Onshape's
+        // default) views turn and zoom to fit, so a big model is framed whole.
         "view-isometric" => {
-            crate::viewport::fitted_isometric_for(view.view.perspective, rect.0.size())
+            commands.queue(crate::viewport::isometric_and_fit);
+            return;
         }
-        // Dimetric: two axes foreshortened equally; trimetric: Onshape's default view.
-        "view-dimetric" => ViewState {
-            azimuth: DIMETRIC.0,
-            elevation: DIMETRIC.1,
-            ..target
-        },
-        "view-trimetric" => target.oriented(crate::camera::StandardView::Default),
+        "view-dimetric" => {
+            commands.queue(|world: &mut World| {
+                crate::viewport::orient_and_fit(world, |v| ViewState {
+                    azimuth: DIMETRIC.0,
+                    elevation: DIMETRIC.1,
+                    roll: 0.0,
+                    ..v
+                })
+            });
+            return;
+        }
+        "view-trimetric" => {
+            commands.queue(|world: &mut World| {
+                crate::viewport::orient_and_fit(world, |v| {
+                    v.oriented(crate::camera::StandardView::Default)
+                })
+            });
+            return;
+        }
         "view-zoom-to-fit" => {
             commands.queue(crate::viewport::zoom_to_fit);
             return;
@@ -827,11 +836,9 @@ fn on_view_menu(
         }
         "view-section-item" => {
             commands.queue(crate::section_view::toggle);
-            return;
         }
-        _ => return,
-    };
-    view.animate_to(to);
+        _ => {}
+    }
 }
 
 /// The cube camera's projection (P3D.4: the Repair panel's cube uses it too).

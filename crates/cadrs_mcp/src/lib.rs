@@ -53,6 +53,9 @@ pub enum Call {
     EditSketch(EditSketch),
     GetFeature(FeatureName),
     DeleteFeature(FeatureName),
+    RenameFeature(RenameFeature),
+    SetPart(SetPart),
+    SetFeatureVisible(SetFeatureVisible),
     ListFaces(PartStudio),
     ListEdges(PartStudio),
     Undo,
@@ -417,6 +420,33 @@ impl Cadrs {
         Parameters(p): Parameters<FeatureName>,
     ) -> Result<CallToolResult, ErrorData> {
         self.call(Call::GetFeature(p)).await
+    }
+
+    #[tool(description = "Rename a feature of a Part Studio (one undo step).")]
+    async fn rename_feature(
+        &self,
+        Parameters(p): Parameters<RenameFeature>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::RenameFeature(p)).await
+    }
+
+    #[tool(description = "Show or hide a sketch or a Plane feature (its eye in the feature list).")]
+    async fn set_feature_visible(
+        &self,
+        Parameters(p): Parameters<SetFeatureVisible>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::SetFeatureVisible(p)).await
+    }
+
+    #[tool(
+        description = "Rename a part and/or set its colour ([r, g, b], with an optional alpha for \
+        see-through parts such as glass). Returns the part's name and id."
+    )]
+    async fn set_part(
+        &self,
+        Parameters(p): Parameters<SetPart>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.call(Call::SetPart(p)).await
     }
 
     #[tool(description = "Delete a feature.")]

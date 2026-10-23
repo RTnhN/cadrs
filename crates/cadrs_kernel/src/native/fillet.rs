@@ -7008,9 +7008,14 @@ mod tests {
     #[test]
     fn a_rail_exit_on_a_free_edge_off_its_curve() {
         use crate::native::draw::Shape;
+        // The fast gate sets CADRS_OCCT_DATA without the dataset being there.
         let Ok(root) = std::env::var("CADRS_OCCT_DATA") else { return };
+        let path = format!("{root}/brep/4_N1(hlacg05).draw");
+        if !std::path::Path::new(&path).exists() {
+            return;
+        }
         let mut k = NativeKernel::new();
-        let s = k.restore(&format!("{root}/brep/4_N1(hlacg05).draw")).unwrap();
+        let s = k.restore(&path).unwrap();
         let s = k.tscale(&s, 0.0, 0.0, 0.0, 1000.0).unwrap();
         let Shape::BodyEdge(id, e) = k.explode_edges(&s).unwrap()[0].clone() else { unreachable!() };
         let b = (**k.get(id).unwrap()).clone();

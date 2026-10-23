@@ -1412,3 +1412,67 @@ fn loft_normal_and_tangent_direction() {
     let f = features.iter().find(|f| f.id == l).unwrap();
     assert!(f.parents().contains(&bottom) && f.parents().contains(&top));
 }
+
+#[test]
+fn a_sketch_on_an_offset_plane_regenerates_where_the_rebuild_puts_the_plane() {
+    // A plane 510 under Top, another 1360 in front of Front (against its normal), and a third
+    // offset from the first: the frames worked out without a rebuild (for sketches on them, and
+    // plane_feature_ref) are the rebuild's.
+    let mut d = Doc::new();
+    let c = d.sketch(
+        PlaneRef::Top,
+        vec![SketchOp::AddCircle {
+            center: Vec2::new(0.0, 0.0),
+            radius: 10.0,
+            construction: false,
+        }],
+    );
+    d.extrude(c, &[Vec2::new(0.0, 0.0)], 20.0, |_| {});
+    let offset = |d: &mut Doc, on: PlaneRef, by: f64, flip: bool| {
+        d.add(AddFeature {
+            element: d.el,
+            feature: FeatureId::new(),
+            base_name: "Plane".into(),
+            kind: FeatureKind::Plane(PlaneFeature {
+                kind: PlaneType::Offset,
+                entities: vec![PlaneEntity::Plane(on)],
+                offset: by,
+                offset_expr: format!("{by} mm"),
+                flip,
+                ..PlaneFeature::default()
+            }),
+        })
+    };
+    let a = offset(&mut d, PlaneRef::Top, 510.0, true);
+    let b = offset(&mut d, PlaneRef::Front, 1360.0, true);
+    let a_ref = cadrs_core::parts::plane_feature_ref(&d.features(), a).unwrap();
+    let c = offset(&mut d, a_ref, 255.0, false);
+    let built = d.build();
+    for p in [a, b, c] {
+        let fast = cadrs_core::parts::plane_feature_ref(&d.features(), p).unwrap();
+        let want = built.planes[&p];
+        let got = fast.frame();
+        for (g, w) in [(got.origin, want.origin), (got.u, want.u), (got.v, want.v)] {
+            for k in 0..3 {
+                assert!((g[k] - w[k]).abs() < 1e-9, "{p:?}: {got:?} vs {want:?}");
+            }
+        }
+    }
+    // A sketch on the third plane sits where the rebuild has it.
+    let s = d.sketch(c_ref(&d, c), vec![]);
+    let plane = d
+        .features()
+        .iter()
+        .find(|f| f.id == s)
+        .and_then(|f| f.sketch())
+        .and_then(|sk| sk.plane)
+        .unwrap();
+    assert!(
+        (plane.frame().origin[2] - (-510.0 + 255.0)).abs() < 1e-9,
+        "{plane:?}"
+    );
+}
+
+fn c_ref(d: &Doc, plane: FeatureId) -> PlaneRef {
+    cadrs_core::parts::plane_feature_ref(&d.features(), plane).unwrap()
+}

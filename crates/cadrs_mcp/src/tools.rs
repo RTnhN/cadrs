@@ -154,6 +154,49 @@ pub struct Screenshot {
     pub view: Option<String>,
 }
 
+/// Renames a feature of the active (or named) Part Studio.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RenameFeature {
+    /// The feature's current name ("Extrude 3").
+    pub name: String,
+    /// The new name.
+    pub to: String,
+    /// The Part Studio tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+}
+
+/// Shows or hides a sketch or Plane feature with its eye.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SetFeatureVisible {
+    /// The sketch's or plane's name.
+    pub name: String,
+    /// Shown (true) or hidden (false).
+    pub visible: bool,
+    /// The Part Studio tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+}
+
+/// Renames a part and/or sets its colour.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SetPart {
+    /// The part's current name ("Part 3"), as get_document lists it.
+    pub part: String,
+    /// A new name for the part.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Its colour as [r, g, b] (0-255).
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+    /// Its opacity, 0-255 (255: opaque, the default); with `color`.
+    #[serde(default)]
+    pub alpha: Option<u8>,
+    /// The Part Studio tab's name; omitted: the active tab.
+    #[serde(default)]
+    pub part_studio: Option<String>,
+}
+
 /// A feature of the active (or named) Part Studio, by name.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FeatureName {

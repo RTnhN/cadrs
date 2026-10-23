@@ -189,10 +189,23 @@ pub fn editing(world: &World) -> bool {
 }
 
 /// Loads or starts the log of the document opened, and appends every committed change.
-fn track_history(world: &mut World) {
+fn track_history(world: &mut World, mut seen: Local<Option<bevy::ecs::change_detection::Tick>>) {
     let Some(id) = world.get_resource::<ActiveDocument>().map(|d| d.doc.id) else {
         return;
     };
+    // Nothing changed since the last frame this ran to the end: no need to compare (or clone)
+    // the whole document, which costs milliseconds a frame in a big Part Studio.
+    let tick = world
+        .get_resource_ref::<ActiveDocument>()
+        .map(|d| d.last_changed());
+    let logged = world
+        .resource::<DocLog>()
+        .log
+        .as_ref()
+        .is_some_and(|l| l.document == id);
+    if logged && tick.is_some() && *seen == tick {
+        return;
+    }
     // Another document was opened in its place: the last one's log is done with.
     if world
         .resource::<DocLog>()
@@ -265,6 +278,7 @@ fn track_history(world: &mut World) {
     if editing(world) {
         return;
     }
+    *seen = tick;
     let doc = world.resource::<ActiveDocument>();
     let (prev_undo, prev_redo) = world.resource::<DocLog>().stacks;
     let undo_label = doc.history.undo_label().unwrap_or_default().to_string();
@@ -280,13 +294,19 @@ fn track_history(world: &mut World) {
     } else {
         Origin::Command(undo_label)
     };
+    let same = world.resource_scope(|world, mut l: Mut<DocLog>| {
+        let doc = world.resource::<ActiveDocument>();
+        l.log.as_mut().is_some_and(|log| log.head() == &doc.doc)
+    });
+    if same {
+        world.resource_mut::<DocLog>().stacks = stacks;
+        return;
+    }
+    let doc = world.resource::<ActiveDocument>();
     let d = doc.doc.clone();
     let mut l = world.resource_mut::<DocLog>();
     l.stacks = stacks;
     let Some(log) = l.log.as_mut() else { return };
-    if log.head() == &d {
-        return;
-    }
     log.record(&d, origin, now, &user);
     if let Some(s) = store.as_ref().filter(|_| stored) {
         log.save_in_background(s);
