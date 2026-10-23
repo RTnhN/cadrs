@@ -63,7 +63,11 @@ impl Plugin for ViewportPlugin {
                 flag_pending_work.run_if(in_state(AppState::Document)),
             )
             .add_message::<PickRequest>()
-            .add_systems(Startup, (spawn_main_camera, configure_gizmos))
+            .add_observer(no_light_clusters)
+            .add_systems(
+                Startup,
+                (spawn_main_camera, configure_gizmos, cpu_light_clusters),
+            )
             .add_systems(OnEnter(AppState::Document), spawn_scene)
             .add_systems(OnExit(AppState::Document), reset_viewport)
             .add_systems(
@@ -671,6 +675,22 @@ pub fn ortho_projection(scale: f32) -> Projection {
         far: camera::camera_far(scale),
         ..OrthographicProjection::default_3d()
     })
+}
+
+/// No light clustering: the app lights with directional lights only, so there is nothing to
+/// cluster, but Bevy's GPU clustering allocates and uploads every 3D camera's cluster buffers
+/// each frame, at capacities that only grow (half a second a frame after a long session). On the
+/// CPU (GPU clustering fails with no clusters), with none.
+fn cpu_light_clusters(settings: Option<ResMut<bevy::light::cluster::GlobalClusterSettings>>) {
+    if let Some(mut settings) = settings {
+        settings.gpu_clustering = None;
+    }
+}
+
+fn no_light_clusters(add: On<Add, Camera3d>, mut commands: Commands) {
+    commands
+        .entity(add.entity)
+        .insert(bevy::light::cluster::ClusterConfig::None);
 }
 
 fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme: Res<Theme>) {

@@ -412,12 +412,11 @@ pub fn between_point(
     };
     Ok(match b {
         ConnectorOrigin::Face(face) => {
-            let planar =
-                find_face(parts, face).is_some_and(|(part, i)| part.solid.faces[i].plane.is_some());
-            if planar {
-                onto_plane(&f)
-            } else {
-                onto_line(&f)
+            // The plane's own origin, not the face's centre (`f`'s): a centroid is off by
+            // rounding, which put a connector midway between two mirrored faces at x = -1e-14.
+            match find_face(parts, face).and_then(|(part, i)| part.solid.faces[i].plane) {
+                Some(pl) => onto_plane(&pl),
+                None => onto_line(&f),
             }
         }
         ConnectorOrigin::Edge(e) => {

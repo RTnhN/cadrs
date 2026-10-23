@@ -193,6 +193,9 @@ struct EdgeFillet {
     /// How far a contact may lie from the spine (farther is a far branch of a curved face):
     /// a few radii, more where the faces meet at a sharp angle and the ball sits deep in it.
     reach: f64,
+    /// Welded to another strip across a face between them ([`Weld`]): its law changes fast
+    /// toward its welded end.
+    welded: bool,
 }
 
 impl EdgeFillet {
@@ -630,6 +633,7 @@ fn edge_fillet(
         at_vertex: [true, true],
         budget: budget.clone(),
         reach: 4.0 * rr + tol::ROUNDOFF,
+        welded: false,
     };
     // The contacts lie r / tan(θ/2) from the edge in a wedge of angle θ.
     let theta = (0..=8)
@@ -753,6 +757,17 @@ enum End {
         t: [f64; 2],
         balls: [Ball; 2],
         n: V3,
+    },
+    /// The rails leave into two faces that only touch at the vertex, tangent there (a corner
+    /// of rounds whose next round was taken away, as an outward shell's opening leaves it): the
+    /// strip is cut by the surface `surf` that round had, one end edge at the vertex swept along
+    /// the other (a line), each rail where it crosses its end edge (spine parameters `t`, balls
+    /// `balls`), and a face on that surface closes the end, between the cut and the end edges'
+    /// pieces from the vertex to the rails ([`cap_end`]).
+    Cap {
+        t: [f64; 2],
+        balls: [Ball; 2],
+        surf: Surface,
     },
     /// A set-back corner ([`Hole`] `c`): the strip stops at its section at spine parameter `t`
     /// (ball `ball`), which is part of the hole's rim.
@@ -965,6 +980,431 @@ fn square_end(b: &Body, ef: &EdgeFillet, j: usize) -> Result<End> {
     Ok(End::Square { t, balls, n })
 }
 
+/// The capped end j of `ef` ([`End::Cap`]), where its rails leave across the edges at the
+/// vertex into faces that only touch there, tangent: the surface of the round that met both
+/// along those edges (one swept along the other, a line), none if they aren't so.
+fn cap_end(b: &Body, ef: &EdgeFillet, j: usize, exits: &[Exit; 2]) -> Option<End> {
+    let v = b.edges[ef.e].v[j];
+    let vp = b.verts[v].p;
+    // The edge at the vertex between rail k's face and the face it leaves into.
+    let end_edge = |k: usize| {
+        vertex_edges(b, v).into_iter().find(|&d| {
+            d != ef.e
+                && sides(b, d).is_ok_and(|[(a, _), (o, _)]| {
+                    (a == ef.faces[k] && o == exits[k].into)
+                        || (o == ef.faces[k] && a == exits[k].into)
+                })
+        })
+    };
+    let (ea, eb) = (end_edge(0)?, end_edge(1)?);
+    let normal = |fi: usize| {
+        let f = &b.faces[fi];
+        geom::contact(f, geom::foot(f, &vp, None)).n.normalize()
+    };
+    if normal(exits[0].into).cross(&normal(exits[1].into)).norm() > tol::ANGULAR {
+        return None;
+    }
+    let line = |e: usize| match &b.edges[e].curve {
+        Curve::Line { d, .. } => Some(*d),
+        _ => None,
+    };
+    let (swept, d) = match (line(ea), line(eb)) {
+        (Some(d), _) => (eb, d),
+        (None, Some(d)) => (ea, d),
+        (None, None) => return None,
+    };
+    let surf = match &b.edges[swept].curve {
+        Curve::Circle { c, x, y, r } if x.cross(y).cross(&d).norm() < tol::ANGULAR => {
+            Surface::Cylinder {
+                f: Frame {
+                    o: *c,
+                    x: *x,
+                    y: *y,
+                    z: x.cross(y),
+                },
+                r: *r,
+            }
+        }
+        Curve::Line { d: s, .. } => {
+            let z = s.cross(&d);
+            if z.norm() < tol::ANGULAR {
+                return None;
+            }
+            Surface::Plane {
+                f: Frame {
+                    o: vp,
+                    x: *s,
+                    y: z.normalize().cross(s),
+                    z: z.normalize(),
+                },
+            }
+        }
+        c => Surface::Extrusion { c: c.clone(), d },
+    };
+    debug(|| {
+        format!(
+            "edge {} end {j}: capped by edge {swept} swept along {d:?} ({:?})",
+            ef.e,
+            surf.kind()
+        )
+    });
+    Some(End::Cap {
+        t: [exits[0].t, exits[1].t],
+        balls: [exits[0].ball, exits[1].ball],
+        surf,
+    })
+}
+
+/// Two strips welded across the face between them (both round the same way, their edges not
+/// meeting, the face too narrow there for both): where a ball of the radius would reach past
+/// the other strip's far face, each strip's radius is that of the ball touching all three faces
+/// (a full round there), and their rails on the shared face run together along its contacts
+/// (a cone between two square walls, the face a pie).
+struct Weld {
+    sides: [WeldSide; 2],
+}
+
+/// A welded strip: its index, its rail on the shared face, the end the weld runs from (0 or 1,
+/// by spine parameter; none: all along) and the spine parameter where it parts (its radius the
+/// full one again past there).
+#[derive(Debug, Clone, Copy)]
+struct WeldSide {
+    i: usize,
+    k: usize,
+    end: Option<usize>,
+    t_m: f64,
+}
+
+/// How far ball `ball`'s centre is from face `wall`'s surface on the side the fillet's offsets
+/// go (outside for a concave one), less its radius `rho`: positive while the ball clears it.
+fn clearance(b: &Body, ef: &EdgeFillet, ball: &Ball, rho: f64, wall: usize) -> f64 {
+    let g = &b.faces[wall];
+    let c = geom::contact(g, geom::foot(g, &ball.c, None));
+    (ball.c - c.p).dot(&c.n) * ef.k[0].signum() - rho
+}
+
+/// The ball of `ef`'s section at spine parameter t with radius `rho`, from contacts near
+/// `guess`.
+fn ball_of_radius(b: &Body, ef: &EdgeFillet, t: f64, rho: f64, guess: [P2; 2]) -> Option<Ball> {
+    let f = [&b.faces[ef.faces[0]], &b.faces[ef.faces[1]]];
+    let (p, d) = ef.spine.at(t);
+    let s = ef.k[0].signum();
+    geom::ball_in_plane(f, [s * rho, s * rho * ef.ratio], &p, &d, guess)
+}
+
+/// `ef`'s radius at spine parameter t where its ball would reach past face `wall`: that of the
+/// ball touching `wall` too (0 where even a small one doesn't clear it), none where the full
+/// one clears it (`guess`: contacts near by, updated).
+fn reach_radius(
+    b: &Body,
+    ef: &EdgeFillet,
+    t: f64,
+    wall: usize,
+    guess: &mut [P2; 2],
+) -> Result<Option<f64>> {
+    let r = ef.r();
+    let lost = || {
+        failed(
+            "weld",
+            "the fillet's ball is lost welding it to its neighbour",
+        )
+    };
+    let full = ball_of_radius(b, ef, t, r, *guess).ok_or_else(lost)?;
+    *guess = [full.q[0].uv, full.q[1].uv];
+    if clearance(b, ef, &full, r, wall) >= 0.0 {
+        return Ok(None);
+    }
+    let (mut lo, mut hi) = (0.02 * r, r);
+    let mut g = *guess;
+    let small = ball_of_radius(b, ef, t, lo, g).ok_or_else(lost)?;
+    if clearance(b, ef, &small, lo, wall) <= 0.0 {
+        return Ok(Some(0.0));
+    }
+    for _ in 0..60 {
+        let m = 0.5 * (lo + hi);
+        let bl = ball_of_radius(b, ef, t, m, g).ok_or_else(lost)?;
+        g = [bl.q[0].uv, bl.q[1].uv];
+        if clearance(b, ef, &bl, m, wall) > 0.0 {
+            lo = m;
+        } else {
+            hi = m;
+        }
+    }
+    Ok(Some(0.5 * (lo + hi)))
+}
+
+/// A welded strip's law, the end it's welded from and where it parts ([`weld_law`]).
+type WeldLaw = (Vec<(f64, f64)>, Option<usize>, f64);
+
+/// `ef`'s law welded to the strip whose far face is `wall`, and the end it's welded from
+/// (none: all along) and where it parts; none where its full ball clears `wall` all along its
+/// reach (past its edge's ends as far as its ends may run).
+fn weld_law(b: &Body, ef: &EdgeFillet, wall: usize) -> Result<Option<WeldLaw>> {
+    let r = ef.r();
+    let [t0, t1] = ef.spine.t;
+    // Past the edge's ends as far as a rail may run on to its exit.
+    let speed = |t: f64| ef.spine.at_d(t).2.norm().max(tol::TINY);
+    let (lo, hi) = (t0 - 2.0 * r / speed(t0), t1 + 2.0 * r / speed(t1));
+    let n = 32;
+    let ts: Vec<f64> = (0..=n)
+        .map(|i| lo + (hi - lo) * i as f64 / n as f64)
+        .collect();
+    let mut clamp: Vec<Option<f64>> = vec![None; ts.len()];
+    // From the middle out, each side's balls from the one before.
+    let im = ts
+        .iter()
+        .enumerate()
+        .min_by(|a, c| (a.1 - ef.tm).abs().total_cmp(&(c.1 - ef.tm).abs()))
+        .map_or(0, |x| x.0);
+    let start = [ef.mid.q[0].uv, ef.mid.q[1].uv];
+    // Past the edge, as far as the ball has room (where it would shrink to nothing the faces
+    // close in: the strip ends before there).
+    let (mut first_ok, mut last_ok) = (0, ts.len() - 1);
+    let on_edge = |t: f64| t >= t0.min(t1) && t <= t0.max(t1);
+    for (up, order) in [
+        (true, (im..ts.len()).collect::<Vec<_>>()),
+        (false, (0..im).rev().collect::<Vec<_>>()),
+    ] {
+        let mut g = start;
+        for i in order {
+            let c = reach_radius(b, ef, ts[i], wall, &mut g)?;
+            if c.is_some_and(|c| c <= 0.0) {
+                if on_edge(ts[i]) {
+                    return Err(unsupported(
+                        "a fillet welding to its neighbour down to nothing",
+                    ));
+                }
+                if up {
+                    match i.checked_sub(1) {
+                        Some(x) => last_ok = x,
+                        None => return Ok(None),
+                    }
+                } else {
+                    first_ok = i + 1;
+                }
+                break;
+            }
+            clamp[i] = c;
+        }
+    }
+    if first_ok > last_ok {
+        return Ok(None);
+    }
+    let (ts, clamp) = (&ts[first_ok..=last_ok], &clamp[first_ok..=last_ok]);
+    let (lo, hi) = (ts[0], ts[ts.len() - 1]);
+    let welded: Vec<bool> = clamp.iter().map(|c| c.is_some()).collect();
+    let Some(first) = welded.iter().position(|&w| w) else {
+        return Ok(None);
+    };
+    let last = welded.iter().rposition(|&w| w).unwrap_or(first);
+    if welded[first..=last].iter().any(|&w| !w) {
+        return Err(unsupported(
+            "a fillet welded to its neighbour in more than one stretch",
+        ));
+    }
+    let end = match (first == 0, last == ts.len() - 1) {
+        (true, true) => None,
+        (true, false) => Some(0),
+        (false, true) => Some(1),
+        (false, false) => {
+            return Err(unsupported(
+                "a fillet welded to its neighbour in its middle only",
+            ));
+        }
+    };
+    // Where it parts: between the last welded sample and the next, where the full ball just
+    // touches the wall.
+    let t_m = match end {
+        None => hi,
+        Some(j) => {
+            let (mut a, mut z) = if j == 0 {
+                (ts[last], ts[last + 1])
+            } else {
+                (ts[first], ts[first - 1])
+            };
+            let mut g = start;
+            let _ = reach_radius(b, ef, z, wall, &mut g)?;
+            for _ in 0..60 {
+                let m = 0.5 * (a + z);
+                let mut gm = g;
+                if reach_radius(b, ef, m, wall, &mut gm)?.is_some() {
+                    a = m;
+                } else {
+                    z = m;
+                }
+                g = gm;
+            }
+            0.5 * (a + z)
+        }
+    };
+    let mut law: Vec<(f64, f64)> = ts
+        .iter()
+        .zip(clamp)
+        .filter_map(|(&t, c)| c.map(|c| (t, c)))
+        .collect();
+    // Parting past the edge's far end (or clamped all along): the radius asked for is nowhere
+    // along the edge, past the full round.
+    let slack = tol::REL_POINT * (1.0 + (t1 - t0).abs());
+    if match end {
+        Some(0) => t_m > t0.max(t1) + slack,
+        Some(_) => t_m < t0.min(t1) - slack,
+        None => true,
+    } {
+        return Err(too_large(
+            "the fillet is larger than the full round between its faces",
+        ));
+    }
+    // Past where it parts, the full radius (to the samples' far end).
+    match end {
+        None => {}
+        Some(0) => law.extend([(t_m, r), (hi, r)]),
+        Some(_) => law.extend([(lo, r), (t_m, r)]),
+    }
+    law.sort_by(|a, c| a.0.total_cmp(&c.0));
+    law.dedup_by(|a, c| (a.0 - c.0).abs() <= tol::REL_FINE * (1.0 + a.0.abs()));
+    debug(|| {
+        format!(
+            "edge {}: welded at its end {end:?}, parting at t {t_m}: law {law:?}",
+            ef.e
+        )
+    });
+    Ok(Some((law, end, t_m)))
+}
+
+/// The welds between `efs`' strips ([`Weld`]), their laws set to them.
+fn welds(b: &Body, efs: &mut [EdgeFillet]) -> Result<Vec<Weld>> {
+    let mut out = Vec::new();
+    for i in 0..efs.len() {
+        for i2 in i + 1..efs.len() {
+            let (a, c) = (&efs[i], &efs[i2]);
+            if a.closed
+                || c.closed
+                || a.flat
+                || c.flat
+                || a.law.is_some()
+                || c.law.is_some()
+                || a.e == c.e
+                || (a.k[0] > 0.0) != (c.k[0] > 0.0)
+            {
+                continue;
+            }
+            // Edges meeting at a vertex are a corner's.
+            let (ea, ec) = (&b.edges[a.e], &b.edges[c.e]);
+            if ea.v.iter().any(|v| ec.v.contains(v)) {
+                continue;
+            }
+            let Some(ka) = (0..2).find(|&k| c.faces.contains(&a.faces[k])) else {
+                continue;
+            };
+            let face = a.faces[ka];
+            let kc = if c.faces[0] == face { 0 } else { 1 };
+            let (wa, wc) = (c.faces[1 - kc], a.faces[1 - ka]);
+            if wa == wc {
+                continue;
+            }
+            // (Best effort: a pair it can't weld is left as before.)
+            let law = |ef: &EdgeFillet, wall: usize| {
+                weld_law(b, ef, wall).unwrap_or_else(|e| {
+                    debug(|| format!("edge {}: not welded: {e}", ef.e));
+                    None
+                })
+            };
+            let (la, lc) = (law(a, wa), law(c, wc));
+            let (Some((law_a, end_a, tm_a)), Some((law_c, end_c, tm_c))) = (la, lc) else {
+                continue;
+            };
+            // Welded only where the welded stretch's contacts (where the strips meet) are on the
+            // shared face: else the rails leave it first, the strips never meet (each keeps its
+            // own, exact, strip).
+            let meets_on = |ef: &EdgeFillet, k: usize, law: &[(f64, f64)], t_m: f64| {
+                let mut g = [ef.mid.q[0].uv, ef.mid.q[1].uv];
+                law.iter()
+                    .copied()
+                    .filter(|x| x.1 < ef.r() * (1.0 - tol::REL_FINE))
+                    .chain(std::iter::once((t_m, ef.r())))
+                    .any(|(t, rho)| match ball_of_radius(b, ef, t, rho, g) {
+                        Some(x) => {
+                            g = [x.q[0].uv, x.q[1].uv];
+                            point_in_face(b, face, &x.q[k].p)
+                        }
+                        None => false,
+                    })
+            };
+            if !meets_on(a, ka, &law_a, tm_a) || !meets_on(c, kc, &law_c, tm_c) {
+                debug(|| {
+                    format!(
+                        "edges {} and {}: would weld across face {face} past it",
+                        a.e, c.e
+                    )
+                });
+                continue;
+            }
+            debug(|| format!("edges {} and {}: welded across face {face}", a.e, c.e));
+            let sides = [
+                WeldSide {
+                    i,
+                    k: ka,
+                    end: end_a,
+                    t_m: tm_a,
+                },
+                WeldSide {
+                    i: i2,
+                    k: kc,
+                    end: end_c,
+                    t_m: tm_c,
+                },
+            ];
+            for (ws, law) in [(sides[0], law_a), (sides[1], law_c)] {
+                let ef = &mut efs[ws.i];
+                let guess = [ef.mid.q[0].uv, ef.mid.q[1].uv];
+                ef.law = Some(law);
+                ef.exact = None;
+                ef.welded = true;
+                ef.mid = ef
+                    .ball(b, ef.tm, Some(guess))
+                    .ok_or_else(|| failed("weld", "a welded fillet's middle ball is lost"))?;
+            }
+            out.push(Weld { sides });
+        }
+    }
+    Ok(out)
+}
+
+/// Where the section of `ef` at spine parameter t crosses face `g`'s surface (between its
+/// contacts).
+fn kink_point(b: &Body, ef: &EdgeFillet, g: &Face, t: f64) -> Option<P3> {
+    let ball = ef.ball_from(b, &ef.mid, ef.tm, t)?;
+    let (arc, a0, a1) = ball.arc()?;
+    let sd = |s: f64| {
+        let p = arc.point(s);
+        let c = geom::contact(g, geom::foot(g, &p, None));
+        (p - c.p).dot(&c.n)
+    };
+    let (mut lo, mut hi) = (a0, a1);
+    let flo = sd(lo);
+    if flo * sd(hi) > 0.0 {
+        return None;
+    }
+    for _ in 0..60 {
+        let m = 0.5 * (lo + hi);
+        if (sd(m) < 0.0) == (flo < 0.0) {
+            lo = m;
+        } else {
+            hi = m;
+        }
+    }
+    Some(arc.point(0.5 * (lo + hi)))
+}
+
+/// A face on `s` with no boundary, to march and fit a cut on.
+fn bare_face(s: &Surface) -> Face {
+    Face {
+        surf: s.clone(),
+        sense: true,
+        loops: Vec::new(),
+    }
+}
+
 /// Where rail k of `ef` leaves its face near the end j (`end_ball` is the ball at the edge's
 /// end): the crossing nearest that ball of the edges `which` picks.
 fn rail_exit(
@@ -977,18 +1417,29 @@ fn rail_exit(
 ) -> Result<Option<Exit>> {
     let ed = &b.edges[ef.e];
     let (v, te) = (ed.v[j], ed.t[j]);
+    let wanted = |e: usize| {
+        let x = &b.edges[e];
+        match which {
+            Which::AtVertex => x.v.contains(&v),
+            Which::Elsewhere => !x.v.contains(&v),
+            Which::Edge(w) => e == w,
+        }
+    };
+    // A welded strip's radius changes fast toward its welded end: crossings found with the
+    // radius at the edge's end miss where the rail really goes, so it's followed out instead.
+    if ef.welded
+        && let Some((e, x)) = marched_exit(b, ef, j, k, end_ball)
+        && wanted(e)
+    {
+        return Ok(Some(x));
+    }
     let f = [&b.faces[ef.faces[0]], &b.faces[ef.faces[1]]];
     let reach = ef.reach + ed_len(b, ef.e);
     let fi = ef.faces[k];
     let mut best: Option<(f64, Exit)> = None;
     for c in b.faces[fi].loops.iter().flatten() {
         let x = &b.edges[c.edge];
-        let wanted = match which {
-            Which::AtVertex => x.v.contains(&v),
-            Which::Elsewhere => !x.v.contains(&v),
-            Which::Edge(e) => c.edge == e,
-        };
-        if c.edge == ef.e || x.degenerate || !wanted {
+        if c.edge == ef.e || x.degenerate || !wanted(c.edge) {
             continue;
         }
         let bd = Boundary {
@@ -1019,6 +1470,13 @@ fn rail_exit(
                 ball = ef
                     .ball(b, t, Some([ball.q[0].uv, ball.q[1].uv]))
                     .unwrap_or(ball);
+                // (Settled past the edge's end, on its curve run on: no crossing of it.)
+                let q = ball.q[k].p;
+                if (x.point(x.curve.closest(&q, x.t[0], x.t[1])) - q).norm()
+                    > tol::REL_POINT * (1.0 + ef.r())
+                {
+                    continue;
+                }
             }
             best = Some((
                 d,
@@ -1032,6 +1490,105 @@ fn rail_exit(
         }
     }
     Ok(best.map(|x| x.1))
+}
+
+/// Where rail k of `ef` leaves its face past the edge's end j, followed out from the ball
+/// there (`end_ball`) in short steps and bisected: the face's edge it crosses and the exit;
+/// none if it doesn't leave within the strip's reach.
+fn marched_exit(
+    b: &Body,
+    ef: &EdgeFillet,
+    j: usize,
+    k: usize,
+    end_ball: &Ball,
+) -> Option<(usize, Exit)> {
+    let ed = &b.edges[ef.e];
+    let fi = ef.faces[k];
+    let te = ed.t[j];
+    let dir = if j == 0 { -1.0 } else { 1.0 };
+    let speed = ef.spine.at_d(te).2.norm().max(tol::TINY);
+    let h = 0.05 * ef.r() / speed;
+    let n = ((2.0 * ef.reach / (0.05 * ef.r())).ceil() as usize).clamp(1, 400);
+    let inside = |bl: &Ball| point_in_face(b, fi, &bl.q[k].p);
+    let uv = |bl: &Ball| [bl.q[0].uv, bl.q[1].uv];
+    // Out from the edge's end; or back toward the middle where the rail has left its face
+    // before the end (a welded strip's rail reaching the face's far edge first).
+    let out = inside(end_ball);
+    let step = if out { dir * h } else { -dir * h };
+    let (mut t, mut ball) = (te, *end_ball);
+    for _ in 0..n {
+        let tn = t + step;
+        let bn = ef.ball(b, tn, Some(uv(&ball)))?;
+        if inside(&bn) == out {
+            (t, ball) = (tn, bn);
+            continue;
+        }
+        // (a inside, z outside.)
+        let (mut a, mut z) = if out { (t, tn) } else { (tn, t) };
+        if !out {
+            ball = bn;
+        }
+        for _ in 0..50 {
+            let m = 0.5 * (a + z);
+            let bm = ef.ball(b, m, Some(uv(&ball)))?;
+            if inside(&bm) {
+                (a, ball) = (m, bm);
+            } else {
+                z = m;
+            }
+        }
+        let q = ball.q[k].p;
+        let gap = |e: usize| {
+            let x = &b.edges[e];
+            (x.point(x.curve.closest(&q, x.t[0], x.t[1])) - q).norm()
+        };
+        let e = b.faces[fi]
+            .loops
+            .iter()
+            .flatten()
+            .map(|c| c.edge)
+            .filter(|&e| e != ef.e && !b.edges[e].degenerate)
+            .min_by(|&x, &y| gap(x).total_cmp(&gap(y)))?;
+        // On that edge exactly: its crossing with the radius where it is, till it settles.
+        let x = &b.edges[e];
+        let c = b.faces[fi].loops.iter().flatten().find(|c| c.edge == e)?;
+        let bd = Boundary {
+            curve: &x.curve,
+            pc: &c.pc,
+            t: x.t,
+        };
+        let f = [&b.faces[ef.faces[0]], &b.faces[ef.faces[1]]];
+        let reach = ef.reach + ed_len(b, ef.e);
+        let mut t = a;
+        for _ in 0..8 {
+            let Some((_, y)) = crossings(ef, f, ef.k_at(t), k, &bd, &ball.c, reach)
+                .into_iter()
+                .min_by(|p, q| (p.1.c - ball.c).norm().total_cmp(&(q.1.c - ball.c).norm()))
+            else {
+                break;
+            };
+            ball = y;
+            t = ef.spine.param_of(&ball.c, t);
+        }
+        let ball = ef.ball(b, t, Some(uv(&ball))).unwrap_or(ball);
+        let q = ball.q[k].p;
+        if (q - x.point(x.curve.closest(&q, x.t[0], x.t[1]))).norm()
+            > tol::REL_POINT * (1.0 + ef.r())
+        {
+            return None;
+        }
+        let into = beyond(b, e, fi).unwrap_or(OPEN);
+        return Some((
+            e,
+            Exit {
+                ball,
+                t,
+                into,
+                ext: None,
+            },
+        ));
+    }
+    None
 }
 
 /// Exit `x` of rail k (found away from the vertex) moved back to where the rail first meets
@@ -3424,6 +3981,7 @@ struct Plan {
     /// Whether some strips were mitred where a three-sided corner could go instead (convex
     /// strips round a concave edge's end, or the reverse).
     mixed_mitres: bool,
+    welds: Vec<Weld>,
 }
 
 /// A corner where some of a vertex's edges are filleted and the others left as they are, or
@@ -3843,6 +4401,7 @@ fn clone_fillet(f: &EdgeFillet) -> EdgeFillet {
         at_vertex: f.at_vertex,
         budget: f.budget.clone(),
         reach: f.reach,
+        welded: f.welded,
     }
 }
 
@@ -3890,6 +4449,7 @@ fn plan(
             efs.push(f);
         }
     }
+    let welds = welds(b, &mut efs)?;
     let mut ends: Vec<[Option<End>; 2]> = vec![[None, None]; efs.len()];
     let mut inside = vec![false; efs.len()];
     for &(i, j, id) in &roll_ends {
@@ -3982,12 +4542,12 @@ fn plan(
                         exits,
                     }
                 } else if exits[0].into != exits[1].into && exits.iter().all(|x| x.ext.is_none()) {
-                    End::Chain {
-                        links: end_chain(b, ef, j, &exits).or_else(|e| {
-                            debug(|| format!("edge {} end {j}: {e}; the cut traced instead", ef.e));
-                            end_chain_traced(b, ef, j, &exits).map_err(|_| e)
-                        })?,
-                        exits,
+                    match end_chain(b, ef, j, &exits).or_else(|e| {
+                        debug(|| format!("edge {} end {j}: {e}; the cut traced instead", ef.e));
+                        end_chain_traced(b, ef, j, &exits).map_err(|_| e)
+                    }) {
+                        Ok(links) => End::Chain { links, exits },
+                        Err(e) => cap_end(b, ef, j, &exits).ok_or(e)?,
                     }
                 } else {
                     End::Free { exits }
@@ -4371,6 +4931,7 @@ fn plan(
         knees,
         flushes,
         mixed_mitres,
+        welds,
     })
 }
 
@@ -6193,6 +6754,9 @@ struct Pieces {
     /// the rail, its strip's source); the grown face is that face's surface between the loop
     /// it grew over and the rail.
     grown: Vec<(usize, usize, FaceSrc)>,
+    /// Each weld's shared rail edge and the vertex where its strips part ([`Weld`]).
+    weld_edges: HashMap<usize, usize>,
+    weld_verts: HashMap<usize, usize>,
 }
 
 /// Traces the strip's curve on face `g`'s surface from `a` to `z` (both on it) in the strip's
@@ -6907,6 +7471,8 @@ struct StripRails<'a> {
     rv: [[usize; 2]; 2],
     rt: [[f64; 2]; 2],
     vtol: f64,
+    /// The strip's weld (its index in the plan's) if it has one.
+    weld: Option<(usize, WeldSide)>,
 }
 
 impl StripRails<'_> {
@@ -7052,6 +7618,86 @@ impl StripRails<'_> {
         }
     }
 
+    /// The rail on a welded strip's shared face ([`Weld`] w): from its welded end to where the
+    /// strips part an edge of both strips (the first of them to come adds it, the face has
+    /// nothing there), on from there a cut in the face as any rail's; all of it shared, the
+    /// face taken whole, where they're welded all along.
+    #[allow(clippy::too_many_arguments)]
+    fn welded_rail(
+        &self,
+        b: &Body,
+        nb: &mut Body,
+        w: usize,
+        ws: WeldSide,
+        fe: &mut Vec<usize>,
+        given: &mut Vec<(usize, Curve)>,
+        out: &mut Pieces,
+    ) -> Result<()> {
+        let k = ws.k;
+        let ends = [
+            (self.rv[0][k], self.rt[0][k]),
+            (self.rv[1][k], self.rt[1][k]),
+        ];
+        let shared = |nb: &mut Body,
+                      fe: &mut Vec<usize>,
+                      given: &mut Vec<(usize, Curve)>,
+                      out: &mut Pieces,
+                      (v0, t0): (usize, f64),
+                      (v1, t1): (usize, f64)|
+         -> Result<()> {
+            match out.weld_edges.get(&w) {
+                Some(&e) => {
+                    let ev = nb.edges[e].v;
+                    if !(ev == [v0, v1] || ev == [v1, v0]) {
+                        return Err(failed("weld", "welded fillets' rails don't end together"));
+                    }
+                    fe.push(e);
+                }
+                None => {
+                    let e = add_edge(nb, self.st.rails[k].clone(), t0, t1, v0, v1);
+                    fe.push(e);
+                    given.extend(rail_pcurve(self.st, k, t0, t1).map(|c| (e, c)));
+                    out.weld_edges.insert(w, e);
+                }
+            }
+            Ok(())
+        };
+        // (Welded past its far end: all along; parting before its welded end (the strip ends
+        // first, across a face beyond): not welded.)
+        let (lo, hi) = (ends[0].1.min(ends[1].1), ends[0].1.max(ends[1].1));
+        let j = match ws.end {
+            Some(0) if ws.t_m < hi => 0,
+            Some(1) if ws.t_m > lo => 1,
+            _ => {
+                out.consumed.insert(self.ef.faces[k]);
+                return shared(nb, fe, given, out, ends[0], ends[1]);
+            }
+        };
+        if (j == 0 && ws.t_m <= lo) || (j == 1 && ws.t_m >= hi) {
+            self.rail(nb, k, ends[0], ends[1], fe, given, out);
+            return Ok(());
+        }
+        // Where they part: the full ball there, touching all three faces.
+        let ball = self
+            .ef
+            .ball_from(b, &self.ef.mid, self.ef.tm, ws.t_m)
+            .ok_or_else(|| failed("weld", "a welded fillet's ball is lost where it parts"))?;
+        let vm = *out
+            .weld_verts
+            .entry(w)
+            .or_insert_with(|| nb.add_vertex(ball.q[k].p));
+        let near = self.rt[0][k] + (self.rt[1][k] - self.rt[0][k]) * 0.5;
+        let m = (vm, self.st.rail_param(k, &nb.verts[vm].p, ws.t_m, near));
+        if j == 0 {
+            shared(nb, fe, given, out, ends[0], m)?;
+            self.rail(nb, k, m, ends[1], fe, given, out);
+        } else {
+            self.rail(nb, k, ends[0], m, fe, given, out);
+            shared(nb, fe, given, out, m, ends[1])?;
+        }
+        Ok(())
+    }
+
     /// Each rail on its own, cut where it runs off its face and back (`offs`, per rail).
     fn each(
         &self,
@@ -7063,6 +7709,13 @@ impl StripRails<'_> {
     ) -> Result<Vec<usize>> {
         let mut fe = Vec::new();
         for k in 0..2 {
+            if let Some((w, ws)) = self.weld.filter(|x| x.1.k == k) {
+                if !offs[k].is_empty() {
+                    return Err(unsupported("a welded fillet's rail running off its face"));
+                }
+                self.welded_rail(b, nb, w, ws, &mut fe, given, out)?;
+                continue;
+            }
             let mut at = (self.rv[0][k], self.rt[0][k]);
             for (a, z) in &offs[k] {
                 let xa = self.at(nb, k, a, at.1)?;
@@ -8896,6 +9549,18 @@ fn prepare(b: &Body, p: &Plan, fit_tol: f64) -> Vec<Option<Result<Pre>>> {
                     cover.extend(pts.iter().map(|x| x.0));
                     marched[j] = Some(pts);
                 }
+                Some(End::Cap { t, balls, surf }) => {
+                    cover.extend(t.iter().copied());
+                    let pts = march_on(
+                        b,
+                        ef,
+                        &Mark::rail(t[0], balls[0], 0),
+                        &Mark::rail(t[1], balls[1], 1),
+                        &bare_face(surf),
+                    )?;
+                    cover.extend(pts.iter().map(|x| x.0));
+                    marched[j] = Some(pts);
+                }
                 Some(End::Open { exits, .. }) => cover.extend([exits[0].t, exits[1].t]),
                 Some(End::Point { t }) => {
                     cover.push(*t);
@@ -8919,6 +9584,14 @@ fn prepare(b: &Body, p: &Plan, fit_tol: f64) -> Vec<Option<Result<Pre>>> {
                 None => {}
             }
         }
+        // A welded strip's section where it parts from the other (its rail's vertex there).
+        cover.extend(
+            p.welds
+                .iter()
+                .flat_map(|w| w.sides)
+                .filter(|s| s.i == i && s.end.is_some())
+                .map(|s| s.t_m),
+        );
         let st = build_strip(b, ef, &cover, &pinned, fit_tol)?;
         Ok((cover, pinned, marched, st))
     };
@@ -9515,6 +10188,110 @@ fn trim(
                         pcurves: Vec::new(),
                     });
                 }
+                End::Cap { t, balls, surf } => {
+                    let v = b.edges[ef.e].v[j];
+                    let mut sides = Vec::new();
+                    for k in 0..2 {
+                        let fi = ef.faces[k];
+                        let q = balls[k].q[k].p;
+                        // The rail ends on its end edge: that edge's piece from the vertex up to
+                        // the rail is the cap's.
+                        let side = vertex_on_boundary(&mut nb, fi, &q, vtol).and_then(|vq| {
+                            rv[j][k] = vq;
+                            nb.faces[fi]
+                                .loops
+                                .iter()
+                                .flatten()
+                                .map(|c| c.edge)
+                                .find(|&e| {
+                                    let ev = nb.edges[e].v;
+                                    !nb.edges[e].degenerate && (ev == [v, vq] || ev == [vq, v])
+                                })
+                        });
+                        sides.push(side.ok_or_else(|| {
+                            unsupported("a capped fillet end whose rail misses its end edge")
+                        })?);
+                        rt[j][k] = st.rail_param(k, &q, t[k], t[k]);
+                    }
+                    let pts = marched[j]
+                        .clone()
+                        .ok_or_else(|| failed("end", "a capped fillet end without its cut"))?;
+                    let centres = if ef.flat {
+                        [None, None]
+                    } else {
+                        [Some(balls[0].c), Some(balls[1].c)]
+                    };
+                    let cap = bare_face(surf);
+                    // Where a welded strip's law kinks (it parts from the other strip there),
+                    // the cut kinks too: in two at that section's point on the cap.
+                    let kink = p
+                        .welds
+                        .iter()
+                        .flat_map(|w| w.sides)
+                        .find(|s| s.i == i && s.end.is_some())
+                        .map(|s| s.t_m)
+                        .filter(|&tk| (tk - pts[0].0) * (tk - pts[pts.len() - 1].0) < 0.0)
+                        .and_then(|tk| kink_point(b, ef, &cap, tk).map(|q| (tk, q)));
+                    let ends = [nb.verts[rv[j][0]].p, nb.verts[rv[j][1]].p];
+                    // Each piece: its points, the ball centres it's square to at its ends (none
+                    // at the kink) and its end vertices.
+                    type Piece = (Vec<P3>, [Option<P3>; 2], [usize; 2]);
+                    let mut pieces: Vec<Piece> = Vec::new();
+                    match kink {
+                        Some((tk, q)) => {
+                            let vk = nb.add_vertex(q);
+                            let (a, z) = (pts[0].0, pts[pts.len() - 1].0);
+                            let inner = &pts[1..pts.len() - 1];
+                            let near = 1e-9 * (1.0 + (z - a).abs());
+                            // The marched points strictly on one side of the kink.
+                            let side = |end: f64| {
+                                inner
+                                    .iter()
+                                    .filter(move |x| {
+                                        (x.0 - tk) * (end - tk) > 0.0 && (x.0 - tk).abs() > near
+                                    })
+                                    .map(|x| x.1)
+                            };
+                            let before: Vec<P3> = std::iter::once(ends[0])
+                                .chain(side(a))
+                                .chain(std::iter::once(q))
+                                .collect();
+                            let after: Vec<P3> = std::iter::once(q)
+                                .chain(side(z))
+                                .chain(std::iter::once(ends[1]))
+                                .collect();
+                            pieces.push((before, [centres[0], None], [rv[j][0], vk]));
+                            pieces.push((after, [None, centres[1]], [vk, rv[j][1]]));
+                        }
+                        None => {
+                            let mut xs: Vec<P3> = pts.iter().map(|x| x.1).collect();
+                            let last = xs.len() - 1;
+                            xs[0] = ends[0];
+                            xs[last] = ends[1];
+                            pieces.push((xs, centres, [rv[j][0], rv[j][1]]));
+                        }
+                    }
+                    let mut cap_edges = Vec::new();
+                    for (xs, cs, [v0, v1]) in pieces {
+                        let (c, c0, c1) = fit_cut(&xs, Some(&cap), cs);
+                        let e = add_edge(&mut nb, c, c0, c1, v0, v1);
+                        across.push(e);
+                        cap_edges.push(e);
+                    }
+                    cap_edges.extend(sides);
+                    let vi = super::blend::vertex_index(b, v);
+                    out.new_faces.push(NewFace {
+                        surf: surf.clone(),
+                        edges: cap_edges,
+                        src: FaceSrc::New(Origin::FromVertex {
+                            body: input,
+                            vertex: VertexId(vi as u64),
+                        }),
+                        u_period: None,
+                        beside: ef.faces[0],
+                        pcurves: Vec::new(),
+                    });
+                }
                 End::Hole { c, t, ball } => {
                     for k in 0..2 {
                         let q = ball.q[k].p;
@@ -9775,12 +10552,18 @@ fn trim(
             more.extend(offs.iter().flatten().flat_map(|(a, z)| [a.t, z.t]));
             st = build_strip(b, ef, &more, &pinned, fit_tol)?;
         }
+        let weld = p
+            .welds
+            .iter()
+            .enumerate()
+            .find_map(|(w, x)| x.sides.iter().find(|s| s.i == i).map(|s| (w, *s)));
         let rails = StripRails {
             ef,
             st: &st,
             rv,
             rt,
             vtol,
+            weld,
         };
         let (nb0, out0, given0) = (nb.clone(), out.clone(), given.clone());
         let fe = match rails.each(b, &mut nb, &offs, &mut given, &mut out) {
