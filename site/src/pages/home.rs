@@ -324,7 +324,7 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                                 "Parametric CAD, written in Rust"
                             </h1>
                             <p class="mt-6 max-w-lg text-pretty text-lg leading-8 text-muted-foreground">
-                                "Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them. cadrs follows Onshape's workflow, with a Bevy UI and an OpenCASCADE kernel, and runs on your own machine."
+                                "Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them. cadrs follows Onshape's workflow, with a Bevy UI and its own B-rep kernel written in Rust, and runs on your own machine."
                             </p>
                         </div>
                         <div class="relative mx-auto w-full max-w-2xl">
@@ -393,7 +393,7 @@ impl<L: DataLoader> WebRenderSync<L> for HomePage {
                                         }}
                                         {CardDescription {
                                             class: None,
-                                            children: Some("A Rust toolchain, CMake and a C++ compiler. The first build compiles OpenCASCADE, which takes several minutes."),
+                                            children: Some("A Rust toolchain and a C compiler. The modeling kernel is pure Rust, so there is no C++ or CMake build."),
                                         }}
                                     }),
                                 }}
@@ -489,7 +489,7 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for HomePage {
 
             Open source under MIT or Apache\-2\.0\.
 
-            Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them\. cadrs follows Onshape's workflow, with a Bevy UI and an OpenCASCADE kernel, and runs on your own machine\.
+            Sketch on a plane, constrain and dimension, build parts from features, put them together in assemblies, and make drawings from them\. cadrs follows Onshape's workflow, with a Bevy UI and its own B\-rep kernel written in Rust, and runs on your own machine\.
 
             From sketch to part to PCB, in one document: [watch the 90\-second demo](https://youtu.be/qT1FKZqUAxA)\.
 
@@ -497,7 +497,7 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for HomePage {
 
             ## Build from source
 
-            A Rust toolchain, CMake and a C\+\+ compiler\. The first build compiles OpenCASCADE, which takes several minutes\. [Full build notes](https://github.com/rvdende/cadrs#building)\.
+            A Rust toolchain and a C compiler\. The modeling kernel is pure Rust, so there is no C\+\+ or CMake build\. [Full build notes](https://github.com/rvdende/cadrs#building)\.
 
                 git clone https://github.com/rvdende/cadrs
                 cd cadrs
