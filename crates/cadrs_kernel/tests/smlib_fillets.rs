@@ -1476,24 +1476,21 @@ fn case_227_fillet1018() {
 /// SMLib fillet test 228: `crown.smb`, radius 0.2, edges [(12, 12), (24, 26)].
 #[test]
 fn case_228_crown() {
-    known_failure(
-        blend(
-            "crown.smb",
-            &[(12, 12), (24, 26)],
-            true,
-            Op::Fillet(0.2),
-            &Expect {
-                volume: Some(88.3348688933),
-                area: Some(416.569221898),
-                faces: Some(17),
-                edges: Some(48),
-                solid: Some(true),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_228_crown",
-    );
+    blend(
+        "crown.smb",
+        &[(12, 12), (24, 26)],
+        true,
+        Op::Fillet(0.2),
+        &Expect {
+            volume: Some(88.3348688933),
+            area: Some(416.569221898),
+            faces: Some(17),
+            edges: Some(48),
+            solid: Some(true),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 229: `loft_brick.smb`, radius 6.348, edges [(1, 1), (5, 5), (8, 8), (10, 10)].
