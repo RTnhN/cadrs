@@ -343,3 +343,57 @@ fn glancing_cut_at_a_rim_off_its_cylinder() {
         }
     }
 }
+
+/// Whether a hole of a face on a surface periodic in u straddles the face's seam (its
+/// coedges' middles in different period windows counted from the seam's lower side): the seam
+/// edge then runs through the hole.
+fn hole_across_seam(b: &Body) -> bool {
+    b.faces.iter().any(|f| {
+        let l0 = &f.loops[0];
+        let mid = |c: &cadrs_kernel::native::topo::Coedge| {
+            let e = &b.edges[c.edge];
+            c.pc.point(0.5 * (e.t[0] + e.t[1])).x
+        };
+        let seam = l0
+            .iter()
+            .filter(|c| l0.iter().any(|d| d.edge == c.edge && d.fwd != c.fwd))
+            .map(mid)
+            .reduce(f64::min);
+        let Some(lo) = seam.filter(|_| f.surf.u_periodic()) else {
+            return false;
+        };
+        f.loops.iter().skip(1).any(|l| {
+            let w: Vec<f64> = l.iter().map(|c| ((mid(c) - lo) / TAU).floor()).collect();
+            w.iter().any(|x| *x != w[0])
+        })
+    })
+}
+
+/// Dr Browns cap, the union before Fillet 1 (the document's Boolean 3): the dome's face has a
+/// window across its seam (the seam split at the window, the window part of the outer loop);
+/// the union imprints the collar's face on it and merges the pieces again, and the merged
+/// face's new seam ran straight through the window, now a hole straddling it ("a hole outside
+/// the outer loop"; the fillet then couldn't place its cuts). The merge puts the seam clear of
+/// the hole. The inputs are a private document's, kept out of the repository:
+/// `$CADRS_DOC_FIXTURES/drbrowns_window_{target,tool}.body` (skipped without it).
+#[test]
+fn drbrowns_window_across_a_torus_seam() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let read = |n: &str| {
+        cadrs_kernel::native::bodyio::read(&std::fs::read(format!("{dir}/{n}.body")).unwrap())
+            .unwrap()
+    };
+    let mut k = NativeKernel::new();
+    let a = k.insert(read("drbrowns_window_target"));
+    let t = k.insert(read("drbrowns_window_tool"));
+    let r = k.boolean(BoolOp::Union, a, &[t]).unwrap().bodies[0];
+    let b = k.get(r).unwrap();
+    assert!(
+        b.check_with(CheckLevel::Full).is_empty(),
+        "{:?}",
+        b.check_with(CheckLevel::Full)
+    );
+    assert!(!hole_across_seam(b), "a hole straddles its face's seam");
+}

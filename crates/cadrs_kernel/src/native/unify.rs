@@ -593,13 +593,41 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
             let m = c.pc.point(0.5 * (e.t[0] + e.t[1])).x;
             !e.degenerate && (a - z).abs() * mu < tol::POINT && (a - m).abs() * mu < tol::POINT
         };
-        let good = |ch: &[Coedge]| (0..ch.len()).find(|&k| !along_iso(&ch[k]) && !along_iso(&ch[(k + ch.len() - 1) % ch.len()]));
+        // The holes' spans in u (their p-curves run on continuously): a seam at a u inside one
+        // (or a whole turn from it) would run through that hole (Dr Browns cap: a window
+        // through the dome's seam, the dome's pieces merged again after a union).
+        let spans: Vec<(f64, f64)> = (0..chains.len())
+            .filter(|&i| i != i1 && i != i2)
+            .map(|i| {
+                chains[i].iter().flat_map(|c| [co_uv(b, c, false).x, co_uv(b, c, true).x, { let e = &b.edges[c.edge]; c.pc.point(0.5 * (e.t[0] + e.t[1])).x }]).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), u| (lo.min(u), hi.max(u)))
+            })
+            .collect();
+        let clear = |u: f64| spans.iter().all(|&(lo, hi)| { let w = unwrap_near(u, 0.5 * (lo + hi), TAU); !(w > lo + tol::ROUNDOFF && w < hi - tol::ROUNDOFF) });
+        let ok_at = |ch: &[Coedge], k: usize| !along_iso(&ch[k]) && !along_iso(&ch[(k + ch.len() - 1) % ch.len()]);
+        let good = |ch: &[Coedge]| (0..ch.len()).find(|&k| ok_at(ch, k) && clear(co_uv(b, &ch[k], false).x)).or_else(|| (0..ch.len()).find(|&k| ok_at(ch, k)));
         // (From the other chain when every vertex of the first has such an edge.)
         if good(&chains[i1]).is_none() && good(&chains[i2]).is_some() {
             std::mem::swap(&mut i1, &mut i2);
         }
         if let Some(k) = good(&chains[i1]) {
             chains[i1].rotate_left(k);
+        }
+        // No vertex of chain 1 clear of the holes: one made on it where it is.
+        if !clear(co_uv(b, &chains[i1][0], false).x) {
+            let at = chains[i1].iter().enumerate().filter(|(_, c)| !along_iso(c) && !b.edges[c.edge].degenerate).find_map(|(k, c)| {
+                let e = &b.edges[c.edge];
+                (1..16).map(|i| e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 16.0).find(|&t| clear(c.pc.point(t).x)).map(|t| (k, t))
+            });
+            if let Some((k, t)) = at {
+                let c = chains[i1][k].clone();
+                let e_id = c.edge;
+                split_edge(b, e_id, t);
+                let e2 = b.edges.len() - 1;
+                let (first, second) = (Coedge { edge: e_id, fwd: c.fwd, pc: c.pc.clone() }, Coedge { edge: e2, fwd: c.fwd, pc: c.pc });
+                let (pa, pb) = if c.fwd { (first, second) } else { (second, first) };
+                chains[i1].splice(k..=k, [pa, pb]);
+                chains[i1].rotate_left(k + 1);
+            }
         }
         let s1 = b.co_start(&chains[i1][0]);
         let us = co_uv(b, &chains[i1][0], false).x;

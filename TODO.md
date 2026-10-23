@@ -23,12 +23,13 @@ Fixed (dropped from the list): open sketch loops (d4 desk device v2/v3, d4_desk_
 squish's profile), the open-shell and 3-face booleans, plant_pot's extrude direction, the stroller,
 pvc and rianatest blends, Dr Browns cap's Fillet 1 (rounds round a window across the dome's seam)
 and the cable organizer's Fillet 2 (full rounds meeting at a corner), references (mate connectors, pibox thicken, t20, trimmer's unnamed
-faces), mirror_test's mesh import, squish's Extrude 6 (the fuzzy boolean) and the kids cart and
-trimmer.
+faces), mirror_test's mesh import, squish's Extrude 6 (the fuzzy boolean), the kids cart and
+trimmer, Dr Browns cap's Boolean 3 (a merged face's seam now placed clear of its holes) and
+nightlight's Boolean 7 (a circle clipping a thin cylinder between two samples).
 
 Still new against main:
-- [ ] Dr Browns: the cap's seam through a window (fb11, blocked; see Kernel correctness).
-- [ ] Flagged boolean results: volumemaker_f5, shape_type_a_a1, nightlight's Boolean 7.
+- [ ] Flagged boolean result: shape_type_a_a1 (a near-tangent tube on a slab cylinder; the SSI
+  gives 8 curves without vertex ends). volumemaker_f5 and nightlight's Boolean 7 are fixed.
 
 Differences without errors, still to check:
 - [ ] Part counts that differ from main (garbage_cabinet 7 vs 3, TubeAdapter 3 vs 1 from chamfer
@@ -61,17 +62,6 @@ Differences without errors, still to check:
 - [ ] Remaining known failures: about 486 in all (`tools/occt_known_failures.txt`,
   `tools/smlib_known_failures/`); besides the above they are in feat (47), pipe (27), sewing
   (20), heal (12), thrusection (10), the SMLib ssi suites and a few others.
-- [ ] Dr Browns cap: a merged face's new seam can run through one of its holes. The boolean
-  merges the pieces of one face back (`unify::merge_group`) and gives the merged face a seam at a
-  vertex of its boundary chain; in the cap that put the seam at u = 0, inside the span of a
-  window across the dome's seam, and the fillet can't place its cuts (`fillet::open_seam_holes`
-  works around it). The seam fix (fb11) makes the cap pass, but it breaks
-  `smlib_offset offset_12_offset_bracket2` ("open shell"): offset_12 has a near-tangent
-  cylinder, and the tube `offset/round.rs` builds there has a radius 1.6e-3 off. Fix the tube
-  first, then land fb11. Earlier tries: cutting the seam at the hole afterwards
-  (`cut_seams_at_holes`) and splitting the chain at a clear u each broke offset_12; no seam vertex
-  clear of the holes exists in the cap's chain. The inputs are in
-  `doc_fixtures/drbrowns_window_{target,tool}.body` (private, outside the repository).
 - [ ] `explode` in the test harness should list degenerated edges in the scripts' order. That
   would turn 13 blend topology mismatches into real comparisons.
 - [ ] The BRep-text reader: 5 dataset files the reference reads; CFI_5_b12fgg.rle edge count.

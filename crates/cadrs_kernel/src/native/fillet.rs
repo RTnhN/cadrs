@@ -3222,9 +3222,10 @@ fn split(b: &Body, f: &Face, cuts: &[usize], given: &dyn Fn(usize) -> Option<Cur
                 (false, true) => ed.point(ed.t[0]),
                 _ => ed.point(ed.mid_t()),
             };
-            // With one end on the seam, where its middle lies inside the face (its other end's
-            // nearest boundary point may be on the seam too, in either chart).
-            let inside = if s0 != s1 { chart_inside(b, f, &ed.point(ed.mid_t())) } else { None };
+            // With an end on the seam, where its middle lies inside the face (its other end's
+            // nearest boundary point may be on the seam too, in either chart; a rail split
+            // where it crosses the seam and back has a piece with both ends on it).
+            let inside = if s0 || s1 { chart_inside(b, f, &ed.point(ed.mid_t())) } else { None };
             let near = inside.or_else(|| near_chart(b, f, &at));
             let pc = match given(e).and_then(|pc| given_pcurve(&f.surf, &ed.curve, ed.t[0], ed.t[1], pc, near)) {
                 Some(pc) => pc,
@@ -4378,6 +4379,58 @@ struct StripRails<'a> {
 }
 
 impl StripRails<'_> {
+    /// Where rail k between rail parameters t0 and t1 crosses its face's seam (an edge the face
+    /// has on both sides, along an iso-line of a periodic surface) away from its ends: the rail
+    /// parameter, from the rail's (u, v) followed along it past the seam's coordinate (in any
+    /// period), bisected; and the rail's foot on the surface there (on the seam: a B-spline
+    /// strip's rail lies off its face by the strip's fit).
+    fn seam_crossing(&self, nb: &Body, k: usize, t0: f64, t1: f64) -> Option<(f64, P3)> {
+        let fi = self.ef.faces[k];
+        let f = &nb.faces[fi];
+        let periods = super::pcurve::closed_periods(&f.surf);
+        let seam = f.loops.iter().flatten().find(|c| is_seam(nb, fi, c.edge))?;
+        let se = &nb.edges[seam.edge];
+        let (a, z) = (seam.pc.point(se.t[0]), seam.pc.point(se.t[1]));
+        let axis = if (a.x - z.x).abs() < (a.y - z.y).abs() { 0 } else { 1 };
+        let period = periods[axis]?;
+        let sv = a[axis];
+        let rail = &self.st.rails[k];
+        let uv = |t: f64, hint: Option<P2>| super::pcurve::project_along(&f.surf, &rail.point(t), hint.map(|q| (q.x, q.y)), periods);
+        // The seam's coordinate in the period between two values of the rail's.
+        let between = |x: f64, y: f64| {
+            let m = ((x.min(y) - sv) / period).ceil();
+            let c = sv + m * period;
+            (c > x.min(y) && c < x.max(y)).then_some(c)
+        };
+        let n = 64;
+        let margin = 1e-6 * (t1 - t0).abs();
+        let mut prev = (t0, uv(t0, None));
+        for i in 1..=n {
+            let t = t0 + (t1 - t0) * i as f64 / n as f64;
+            let q = uv(t, Some(prev.1));
+            if let Some(c) = between(prev.1[axis], q[axis]) {
+                let (mut lo, mut hi, mut ql) = (prev.0, t, prev.1);
+                for _ in 0..60 {
+                    let m = 0.5 * (lo + hi);
+                    let qm = uv(m, Some(ql));
+                    if (qm[axis] - c) * (ql[axis] - c) > 0.0 {
+                        (lo, ql) = (m, qm);
+                    } else {
+                        hi = m;
+                    }
+                }
+                let ts = 0.5 * (lo + hi);
+                if (ts - t0).abs() > margin && (t1 - ts).abs() > margin {
+                    let mut at = uv(ts, Some(ql));
+                    at[axis] = c;
+                    return Some((ts, f.surf.eval(at.x, at.y)));
+                }
+            }
+            prev = (t, q);
+        }
+        None
+    }
+
     /// Rail k's crossing `c` of its face's boundary: its vertex there and its rail parameter.
     fn at(&self, nb: &mut Body, k: usize, c: &Crossing, near: f64) -> Result<(usize, f64)> {
         let p = c.ball.q[k].p;
@@ -4403,6 +4456,16 @@ impl StripRails<'_> {
             debug(|| format!("edge {}: rail {k} runs along edge {e} of face {fi}: the strip takes the face", self.ef.e));
             out.consumed.insert(fi);
             fe.push(e);
+            return;
+        }
+        // Across the face's seam: in two cuts, the seam split where the rail crosses it (the
+        // face split takes cuts ending on its seam, each in the chart of its other end).
+        if let Some((ts, q)) = self.seam_crossing(nb, k, t0, t1)
+            && let Some(vs) = vertex_on_boundary(nb, fi, &q, self.vtol)
+        {
+            debug(|| format!("edge {}: rail {k} crosses face {fi}'s seam at {:?}", self.ef.e, nb.verts[vs].p));
+            self.rail(nb, k, (v0, t0), (vs, ts), fe, given, out);
+            self.rail(nb, k, (vs, ts), (v1, t1), fe, given, out);
             return;
         }
         let e = add_edge(nb, self.st.rails[k].clone(), t0, t1, v0, v1);
@@ -5349,6 +5412,56 @@ pub fn chamfer_edges(b: &Body, input: BodyId, edges: &[(usize, [f64; 2])]) -> Re
     local_blend(b, input, &laws, &ratios, true)
 }
 
+/// A face on a periodic surface whose inner loop lies a whole period from its outer loop's
+/// chart (Dr Browns cap: the dome's seam moved round past a window the boolean left where it
+/// was; the check takes such a loop, its points the same on the surface): the loop's p-curves
+/// moved by the periods that bring it into the outer loop's (u, v) box, so the cuts trimming
+/// places in that chart meet it. `None` when no face needs it.
+fn loops_in_chart(b: &Body) -> Option<Body> {
+    let uv_box = |l: &[super::topo::Coedge]| {
+        let (mut lo, mut hi) = (P2::new(f64::INFINITY, f64::INFINITY), P2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        for c in l {
+            let e = &b.edges[c.edge];
+            for k in 0..=8 {
+                let q = c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * k as f64 / 8.0);
+                (lo, hi) = (P2::new(lo.x.min(q.x), lo.y.min(q.y)), P2::new(hi.x.max(q.x), hi.y.max(q.y)));
+            }
+        }
+        (lo, hi)
+    };
+    let mut out: Option<Body> = None;
+    for (fi, f) in b.faces.iter().enumerate() {
+        let periods = super::pcurve::closed_periods(&f.surf);
+        if f.loops.len() < 2 || periods.iter().all(Option::is_none) {
+            continue;
+        }
+        let (olo, ohi) = uv_box(&f.loops[0]);
+        for li in 1..f.loops.len() {
+            let (lo, hi) = uv_box(&f.loops[li]);
+            // The whole periods (per direction) that bring the loop's middle nearest the outer
+            // loop's, kept only where the loop then lies inside the outer loop's box.
+            let shift = |k: usize, (a, z): (f64, f64), (oa, oz): (f64, f64)| match periods[k] {
+                Some(p) if p > 0.0 => {
+                    let d = ((0.5 * (oa + oz) - 0.5 * (a + z)) / p).round() * p;
+                    let slack = 1e-9 * (1.0 + p);
+                    if d != 0.0 && a + d >= oa - slack && z + d <= oz + slack { d } else { 0.0 }
+                }
+                _ => 0.0,
+            };
+            let (du, dv) = (shift(0, (lo.x, hi.x), (olo.x, ohi.x)), shift(1, (lo.y, hi.y), (olo.y, ohi.y)));
+            if du == 0.0 && dv == 0.0 {
+                continue;
+            }
+            debug(|| format!("face {fi}: loop {li} moved by ({du}, {dv}) into its outer loop's chart"));
+            let nb = out.get_or_insert_with(|| b.clone());
+            for c in nb.faces[fi].loops[li].iter_mut() {
+                c.pc = c.pc.transformed(&Affine::translation(V3::new(du, dv, 0.0)));
+            }
+        }
+    }
+    out
+}
+
 /// A face of a closed surface may come with a hole whose loop crosses the surface's seam
 /// without the seam edge being split there: the seam then runs through the hole, and the
 /// loop's p-curves jump a period where it touches the seam (Dr Browns cap: a window cut into a
@@ -5504,6 +5617,8 @@ fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], fla
     if edges.iter().any(|(e, law)| *e >= b.edges.len() || law.is_empty()) {
         return Err(KernelError::InvalidParameter("unknown edge or empty radius law".into()));
     }
+    let charted = loops_in_chart(b);
+    let b = charted.as_ref().unwrap_or(b);
     let fixed = open_seam_holes(b);
     let b = fixed.as_ref().unwrap_or(b);
     let budget = Budget::new(BALL_SOLVES);
@@ -6690,8 +6805,9 @@ fn path_coedges(b: &Body, fi: usize, li: usize, ci: usize, path: &[(usize, bool)
 }
 
 /// Closes small gaps between a closed surface's seam and the fitted p-curve of a cut ending on
-/// it (projected near the seam, a cut's end comes out a hair off its period's edge): the end of
-/// the fitted (clamped spline) p-curve moves onto the seam's. Only gaps the loop's check would
+/// it (projected near the seam, a cut's end comes out a hair off its period's edge), and
+/// between two cuts' p-curves no farther apart in space than their vertex's tolerance: the end
+/// of the fitted (clamped spline) p-curve moves onto the other's. Only gaps the loop's check would
 /// refuse and under `lim` (in the surface's metric: a pole's points far apart in (u, v) are one
 /// point in space).
 fn close_gaps(b: &Body, s: &Surface, l: &mut [Coedge], lim: f64) {
@@ -6705,15 +6821,24 @@ fn close_gaps(b: &Body, s: &Surface, l: &mut [Coedge], lim: f64) {
     // Coedge c's p-curve with its start (or end) moved to `to`.
     let moved = |c: &Coedge, start: bool, to: P2| -> Option<Curve> {
         let Curve::Nurbs(nc) = &c.pc else { return None };
+        let e = &b.edges[c.edge];
+        let near = |a: f64, z: f64| (a - z).abs() <= tol::REL_FINE * (1.0 + z.abs());
+        // A piece of a longer curve (a rail split at a seam, its p-curve the whole rail's): cut
+        // to the edge's range first.
+        let mut nc = (**nc).clone();
+        if nc.knots[0] < e.t[0] && !near(nc.knots[0], e.t[0]) {
+            nc = nc.split(e.t[0]).ok()?.1;
+        }
+        if nc.knots[nc.knots.len() - 1] > e.t[1] && !near(nc.knots[nc.knots.len() - 1], e.t[1]) {
+            nc = nc.split(e.t[1]).ok()?.0;
+        }
         let (p, k) = (nc.degree, &nc.knots);
         let clamped = k[..=p].iter().all(|x| *x == k[0]) && k[k.len() - 1 - p..].iter().all(|x| *x == k[k.len() - 1]);
-        // Its ends the edge's ends (not a piece of a longer curve).
-        let e = &b.edges[c.edge];
-        let whole = (k[0] - e.t[0]).abs() <= tol::REL_FINE * (1.0 + e.t[0].abs()) && (k[k.len() - 1] - e.t[1]).abs() <= tol::REL_FINE * (1.0 + e.t[1].abs());
+        // Its ends the edge's ends.
+        let whole = near(k[0], e.t[0]) && near(k[k.len() - 1], e.t[1]);
         if !clamped || !whole {
             return None;
         }
-        let mut nc = (**nc).clone();
         let i = if start == c.fwd { 0 } else { nc.cps.len() - 1 };
         let w = nc.cps[i].w;
         nc.cps[i] = super::nurbs::hom(&P3::new(to.x, to.y, 0.0), w);
@@ -6722,7 +6847,7 @@ fn close_gaps(b: &Body, s: &Surface, l: &mut [Coedge], lim: f64) {
     let seam: Vec<bool> = l.iter().map(|c| l.iter().filter(|x| x.edge == c.edge).count() == 2).collect();
     for k in 0..n {
         let j = (k + 1) % n;
-        if b.edges[l[k].edge].degenerate || b.edges[l[j].edge].degenerate || seam[k] == seam[j] {
+        if b.edges[l[k].edge].degenerate || b.edges[l[j].edge].degenerate || (seam[k] && seam[j]) {
             continue;
         }
         let (a, z) = (end_uv(&l[k], true), end_uv(&l[j], false));
@@ -6731,6 +6856,12 @@ fn close_gaps(b: &Body, s: &Surface, l: &mut [Coedge], lim: f64) {
         let gap = ((a.x - z.x).abs() * mu).max((a.y - z.y).abs() * mv);
         let vtol = b.verts.get(b.co_end(&l[k])).map_or(0.0, |v| v.tol).max(tol::LOOP_GAP);
         if gap <= vtol || gap > lim {
+            continue;
+        }
+        // Two cuts (no seam between them, two strips' rails meeting where their p-curves were
+        // fitted apart): only a gap within the vertex's tolerance in space that the loop's check,
+        // measuring (u, v) by the surface's largest metric, refuses (a torus's inner side).
+        if !seam[k] && !seam[j] && (s.eval(a.x, a.y) - s.eval(z.x, z.y)).norm() > vtol {
             continue;
         }
         if let Some(pc) = moved(&l[j], true, a) {

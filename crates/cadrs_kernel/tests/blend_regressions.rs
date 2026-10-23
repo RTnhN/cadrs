@@ -1507,3 +1507,33 @@ fn fillet_round_a_boss_rolling_over_a_hole_round_and_off_a_corner() {
     assert!((v - 1687855.613231097).abs() < 1e-6 * v, "volume {v}");
     assert!((a - 113478.325943454).abs() < 1e-6 * a, "area {a}");
 }
+
+/// Dr Browns cap, Fillet 1, its input as the boolean before it now makes it: the dome's seam
+/// moved round clear of the window (to u = π/4), the window's loop still drawn a period away
+/// (valid: the check takes a loop a whole period off), and the R4 rails round the window
+/// crossing the seam and back (the window lies 0.04 rad from it). The window's loop is moved
+/// into the outer loop's chart, each rail split where it crosses the seam (a vertex on the
+/// seam, at the rail's foot), and the rails' p-curves closed onto each other where the two
+/// strips meet. By local trimming alone, valid. The input is a user document's, so it lives
+/// outside the repo: `$CADRS_DOC_FIXTURES/drbrowns_fillet1_window.body` (skipped without it).
+#[test]
+fn fillet_round_a_window_by_a_moved_seam() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let bytes = std::fs::read(format!("{dir}/drbrowns_fillet1_window.body")).unwrap();
+    let b = bodyio::read(&bytes).unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let laws: Vec<FilletLaw> = [64u64, 65, 17, 28]
+        .iter()
+        .map(|&e| FilletLaw {
+            edge: EdgeId(e),
+            radii: vec![(0.0, 4.0), (1.0, 4.0)],
+        })
+        .collect();
+    let out = blend::fillet_laws_local(&mut k, id, &laws).unwrap().bodies[0];
+    let o = k.get(out).unwrap();
+    assert_eq!(o.check_with(topo::CheckLevel::Full), Vec::<String>::new());
+    assert_eq!(o.solids.len(), 1);
+}
