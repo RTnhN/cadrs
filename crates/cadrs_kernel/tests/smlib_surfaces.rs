@@ -7,6 +7,7 @@
 //! - my_test_sp_nurb: the SM_SO_NORMALIZE counts (156, 86): every foot of the normal from a point (all critical points of the distance): the kernel finds the nearest and farthest points only
 //! - my_test_analytic_surfaces: the surface of revolution of a parabola: the kernel has no parabola curve
 //! - my_test_analytic_surfaces: `LiftCurve` of each surface's uv diagonal: lifting a uv curve to a 3D B-spline within a tolerance is not a kernel operation
+//! - my_test_drop_curve_near_seam: the helix (kind 4) and the swapped cylinder (swap 1): the kernel has no helix curve; its cylinder has one parametrisation (the swapped one is the same surface)
 //! - my_test_sp_analy after its first block: dead: the function returns after it (smSurfaceTest.cpp:4250)
 //! - my_test_csi_analy, my_test_csi_tangency, my_test_csi_tol: in the cci suite (tools/smlib/cci.py)
 //! - my_test_csi_coincidence, my_test_cs_nurb, my_test_ss_nurb: overlap ranges of a curve on a surface, and local extrema of curve–surface and surface–surface distance: not kernel operations
@@ -27,6 +28,7 @@ use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::curve::Curve;
 use cadrs_kernel::native::math::{Affine, Frame, P3, V3};
 use cadrs_kernel::native::nurbs::{NurbsCurve, NurbsSurface, hom};
+use cadrs_kernel::native::pcurve;
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::surface::Surface;
 use cadrs_kernel::{DistanceTarget, FaceId, Kernel};
@@ -341,6 +343,60 @@ fn axes(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
         y,
         z: x.cross(&y),
     }
+}
+
+/// `my_test_drop_curve_near_seam` (smSurfaceTest.cpp:1950): a cylinder of radius 0.25 about z
+/// (heights 0 to 20) and a curve on it (`kind` 0–2: the vertical line x = 0.25 from z = 1 to 18
+/// ending (kind − 1)·2e-5 off its seam; 3: three quarters of a circle at z = 1), maybe reversed:
+/// its p-curve (`pcurve::pcurve`, SMLib's `DropCurve`) lifts back onto the curve within 1.01e-5 at
+/// the same parameter, at 5 points of each of 64 spans.
+fn drop_on_cylinder(kind: usize, reverse: bool) -> Result<(), String> {
+    let f = Frame {
+        o: P3::origin(),
+        x: V3::x(),
+        y: V3::y(),
+        z: V3::z(),
+    };
+    let s = Surface::Cylinder { f, r: 0.25 };
+    let (c, t0, t1) = if kind == 3 {
+        let c = Curve::Circle {
+            c: P3::new(0.0, 0.0, 1.0),
+            x: V3::x(),
+            y: V3::y(),
+            r: 0.25,
+        };
+        if reverse {
+            c.reversed(0.0, 1.5 * std::f64::consts::PI)
+        } else {
+            (c, 0.0, 1.5 * std::f64::consts::PI)
+        }
+    } else {
+        let (a, b) = (
+            P3::new(0.25, 0.0, 1.0),
+            P3::new(0.25, (kind as f64 - 1.0) * 2.0e-5, 18.0),
+        );
+        let (c, l) = if reverse {
+            Curve::line(b, a)
+        } else {
+            Curve::line(a, b)
+        };
+        (c, 0.0, l)
+    };
+    let pc = pcurve::pcurve(&s, &c, t0, t1, None);
+    let n = 64;
+    for i in 0..n {
+        for k in 0..=4 {
+            let t = t0 + (t1 - t0) * (i as f64 + k as f64 / 4.0) / n as f64;
+            let uv = pc.point(t);
+            let d = (s.eval(uv.x, uv.y) - c.point(t)).norm();
+            if d > 1.01e-5 {
+                return Err(format!(
+                    "at t = {t}: the p-curve's point is {d:.2e} from the curve"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The 7-point cubic of `my_test_analytic_surfaces`' surfaces of revolution and extrusion.
@@ -4452,6 +4508,54 @@ fn analytic_extrusion_z() {
         "surfaces",
         "analytic_extrusion_z",
     );
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: a vertical line ending 2e-5 before the seam of a cylinder of radius 0.25, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_0() {
+    drop_on_cylinder(0, false).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: a vertical line ending 2e-5 before the seam of a cylinder of radius 0.25, reversed, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_0_reversed() {
+    drop_on_cylinder(0, true).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: a vertical line on the seam of a cylinder of radius 0.25, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_1() {
+    drop_on_cylinder(1, false).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: a vertical line on the seam of a cylinder of radius 0.25, reversed, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_1_reversed() {
+    drop_on_cylinder(1, true).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: a vertical line ending 2e-5 past the seam of a cylinder of radius 0.25, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_2() {
+    drop_on_cylinder(2, false).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: a vertical line ending 2e-5 past the seam of a cylinder of radius 0.25, reversed, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_2_reversed() {
+    drop_on_cylinder(2, true).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: three quarters of a circle from the seam of a cylinder of radius 0.25, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_3() {
+    drop_on_cylinder(3, false).unwrap();
+}
+
+/// SMLib `my_test_drop_curve_near_seam`: three quarters of a circle from the seam of a cylinder of radius 0.25, reversed, its p-curve lifted back within 1.01e-5.
+#[test]
+fn drop_near_seam_3_reversed() {
+    drop_on_cylinder(3, true).unwrap();
 }
 
 /// SMLib `my_test_sp_analy`: a 101 × 101 grid of the full surface of revolution of a cubic about the axis through (0, 2, 0) along (1, 1, 0) found again.

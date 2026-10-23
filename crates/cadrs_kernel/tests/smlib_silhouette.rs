@@ -667,3 +667,20 @@ fn silhouette_34_vase_rev_persp() {
     )
     .unwrap();
 }
+
+/// SMLib trimmed-surface regression 25: `ellips_ts2.smb` seen along (1, 0, −0.1); SMLib's test asserts 2, SMLib's length 6.19606 (2 curves).
+#[test]
+fn silhouette_tsurf_25_ellips_ts2_par() {
+    silhouette(
+        "ellips_ts2.smb",
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, -0.1],
+        false,
+        &Want {
+            any: true,
+            length: Some(6.19605583812),
+            samples: &[],
+        },
+    )
+    .unwrap();
+}

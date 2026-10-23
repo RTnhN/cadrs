@@ -19,6 +19,8 @@
   and SMLib's sample points (8 per curve) against SMLib's own curves (the oracle's `psection` and
   `pproject`), none against some where SMLib's curves have length (SMLib also returns touching
   points as curves of no length: the planes through the box's corners).
+- `my_test_drop_curve_near_seam` (smSurfaceTest.cpp:1950): lines along a cylinder's seam (just
+  before, on, just past it) and a circle from it, their p-curves lifted back onto them.
 - `my_test_analytic_surfaces` (smSurfaceTest.cpp:5298) and the live block of `my_test_sp_analy`
   (smSurfaceTest.cpp:4165, a surface of revolution of a cubic B-spline about a skew axis): an
   11 × 11 grid (101 × 101 for the revolution) of points of each surface found again
@@ -37,6 +39,7 @@ NOT_CONVERTED = [
     ("my_test_sp_nurb: the SM_SO_NORMALIZE counts (156, 86)", "every foot of the normal from a point (all critical points of the distance): the kernel finds the nearest and farthest points only"),
     ("my_test_analytic_surfaces: the surface of revolution of a parabola", "the kernel has no parabola curve"),
     ("my_test_analytic_surfaces: `LiftCurve` of each surface's uv diagonal", "lifting a uv curve to a 3D B-spline within a tolerance is not a kernel operation"),
+    ("my_test_drop_curve_near_seam: the helix (kind 4) and the swapped cylinder (swap 1)", "the kernel has no helix curve; its cylinder has one parametrisation (the swapped one is the same surface)"),
     ("my_test_sp_analy after its first block", "dead: the function returns after it (smSurfaceTest.cpp:4250)"),
     ("my_test_csi_analy, my_test_csi_tangency, my_test_csi_tol", "in the cci suite (tools/smlib/cci.py)"),
     ("my_test_csi_coincidence, my_test_cs_nurb, my_test_ss_nurb", "overlap ranges of a curve on a surface, and local extrema of curve–surface and surface–surface distance: not kernel operations"),
@@ -53,6 +56,7 @@ use std::sync::Arc;
 use cadrs_kernel::native::curve::Curve;
 use cadrs_kernel::native::math::{Affine, Frame, P3, V3};
 use cadrs_kernel::native::nurbs::{hom, NurbsCurve, NurbsSurface};
+use cadrs_kernel::native::pcurve;
 use cadrs_kernel::native::smb;
 use cadrs_kernel::native::NativeKernel;
 use cadrs_kernel::native::surface::Surface;
@@ -279,6 +283,37 @@ fn axes(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Frame {
     Frame { o: p3(o), x, y, z: x.cross(&y) }
 }
 
+/// `my_test_drop_curve_near_seam` (smSurfaceTest.cpp:1950): a cylinder of radius 0.25 about z
+/// (heights 0 to 20) and a curve on it (`kind` 0–2: the vertical line x = 0.25 from z = 1 to 18
+/// ending (kind − 1)·2e-5 off its seam; 3: three quarters of a circle at z = 1), maybe reversed:
+/// its p-curve (`pcurve::pcurve`, SMLib's `DropCurve`) lifts back onto the curve within 1.01e-5 at
+/// the same parameter, at 5 points of each of 64 spans.
+fn drop_on_cylinder(kind: usize, reverse: bool) -> Result<(), String> {
+    let f = Frame { o: P3::origin(), x: V3::x(), y: V3::y(), z: V3::z() };
+    let s = Surface::Cylinder { f, r: 0.25 };
+    let (c, t0, t1) = if kind == 3 {
+        let c = Curve::Circle { c: P3::new(0.0, 0.0, 1.0), x: V3::x(), y: V3::y(), r: 0.25 };
+        if reverse { c.reversed(0.0, 1.5 * std::f64::consts::PI) } else { (c, 0.0, 1.5 * std::f64::consts::PI) }
+    } else {
+        let (a, b) = (P3::new(0.25, 0.0, 1.0), P3::new(0.25, (kind as f64 - 1.0) * 2.0e-5, 18.0));
+        let (c, l) = if reverse { Curve::line(b, a) } else { Curve::line(a, b) };
+        (c, 0.0, l)
+    };
+    let pc = pcurve::pcurve(&s, &c, t0, t1, None);
+    let n = 64;
+    for i in 0..n {
+        for k in 0..=4 {
+            let t = t0 + (t1 - t0) * (i as f64 + k as f64 / 4.0) / n as f64;
+            let uv = pc.point(t);
+            let d = (s.eval(uv.x, uv.y) - c.point(t)).norm();
+            if d > 1.01e-5 {
+                return Err(format!("at t = {t}: the p-curve's point is {d:.2e} from the curve"));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The 7-point cubic of `my_test_analytic_surfaces`' surfaces of revolution and extrusion.
 const PROFILE: [[f64; 3]; 7] = [[0.0, 0.1, 0.0], [0.3, 0.5, 0.0], [0.5, 1.0, 0.2], [0.6, 0.3, 0.3], [1.0, 1.0, 0.0], [1.3, 0.3, 0.1], [1.5, 0.5, 0.0]];
 '''
@@ -457,6 +492,11 @@ def extract(ctx):
     for name, make, ((u0, u1), (v0, v1)), doc in analytic:
         cases.append(Case("analytic_" + name, "SMLib `my_test_analytic_surfaces`: an 11 × 11 grid of %s found again." % doc,
                           "round_trip(&%s, ((%s, %s), (%s, %s)), 11)" % (make, rust_f64(u0), rust_f64(u1), rust_f64(v0), rust_f64(v1))))
+    assert "SmStatus my_test_drop_curve_near_seam()" in src
+    for kind, what in [(0, "a vertical line ending 2e-5 before the seam"), (1, "a vertical line on the seam"), (2, "a vertical line ending 2e-5 past the seam"), (3, "three quarters of a circle from the seam")]:
+        for rev in (False, True):
+            cases.append(Case("drop_near_seam_%d%s" % (kind, "_reversed" if rev else ""), "SMLib `my_test_drop_curve_near_seam`: %s of a cylinder of radius 0.25%s, its p-curve lifted back within 1.01e-5." % (what, ", reversed" if rev else ""),
+                              "drop_on_cylinder(%d, %s)" % (kind, "true" if rev else "false")))
     cases.append(Case("sp_analy_revolution", "SMLib `my_test_sp_analy`: a 101 × 101 grid of the full surface of revolution of a cubic about the axis through (0, 2, 0) along (1, 1, 0) found again.",
                       "round_trip(&Surface::Revolution { f: frame(P3::new(0.0, 2.0, 0.0), V3::new(1.0, 1.0, 0.0)), m: nurb([0.0; 3], &[[0.0, 0.1, 0.0], [0.3, 0.5, 0.0], [0.5, 1.0, 0.0], [0.6, 0.3, 0.0], [1.0, 1.0, 0.0], [1.3, 0.3, 0.0], [1.5, 0.5, 0.0]], 3) }, ((0.0, std::f64::consts::TAU), (0.0, 1.0)), 101)"))
     return cases

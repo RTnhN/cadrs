@@ -22,6 +22,7 @@
 //   smlib_oracle ptsolve    surf min|max|normalize nx ny nz        (--dom=a,b,c,d, --move=x,y,z)
 //   smlib_oracle closest    surf x y z [x y z ...]
 //   smlib_oracle tgrid      in n                                   (--move=x,y,z)
+//   smlib_oracle bsolve     file.smp min|max
 //
 // A `surf` (smSurfaceTest.cpp's commands) is a bare B-spline surface: a .sms or .srf file, or
 // `grid:tx:ty:tz:nu:nv:du:dv:x0:y0:z0:...` (my_create_nurb_surf: nu × nv points, v fastest).
@@ -1119,6 +1120,35 @@ int main(int argc0, char** argv0) {
                    num(dom.GetMax().y) + "], \"inside\": " + std::to_string(fi) + ", \"found\": " + std::to_string(ff) + "}";
         }
         std::printf("{\"ok\": true, \"status\": \"ok\", \"inside\": %lu, \"found\": %lu, \"faces\": [%s]}\n", (unsigned long)inside, (unsigned long)found, out.c_str());
+        return 0;
+    }
+
+    // bsolve file.smp min|max: SmTopologySolver::BrepBrepSolve between the part's first two
+    // B-reps (my_test_tsurface_tsurface_solve, smTopoTest.cpp:2585): the extreme distance and each
+    // solution's points and distance.
+    if (cmd == "bsolve" && argc == 4) {
+        Part* p = read_part(argv[2]);
+        if (p->breps.GetSize() < 2) fail("bsolve needs two breps");
+        std::string op = argv[3];
+        if (op != "min" && op != "max") usage();
+        SmSolverOperationType so = op == "min" ? SM_SO_MINIMIZE : SM_SO_MAXIMIZE;
+        double best = so == SM_SO_MAXIMIZE ? 0.0 : SM_BIG_DOUBLE;
+        SmVector3d vecs[3] = {SmVector3d(0, 0, 1), SmVector3d(1, 0, 0), SmVector3d(0, 0, 0)};
+        SmSolutionArray sols;
+        SmStatus st = SmTopologySolver::BrepBrepSolve(p->breps[0], p->breps[1], so, SM_SR_ALL, SM_ZONE_TOL_3D, best, vecs, sols);
+        if (st != SM_SUCCESS) fail("BrepBrepSolve status " + std::to_string((int)st));
+        std::string out;
+        // (The solver's own best value isn't passed back: the extreme of its solutions'.)
+        best = so == SM_SO_MAXIMIZE ? 0.0 : SM_BIG_DOUBLE;
+        for (ULONG k = 0; k < sols.GetSize(); ++k) {
+            SmPoint3d a, b;
+            sols[k].GetPoint(0, a);
+            sols[k].GetPoint(1, b);
+            double d = a.DistanceBetween(b);
+            best = so == SM_SO_MAXIMIZE ? std::max(best, d) : std::min(best, d);
+            out += std::string(k ? ", " : "") + "{\"a\": " + pt(a) + ", \"b\": " + pt(b) + ", \"distance\": " + num(d) + "}";
+        }
+        std::printf("{\"ok\": true, \"status\": \"ok\", \"best\": %s, \"count\": %lu, \"solutions\": [%s]}\n", num(best).c_str(), (unsigned long)sols.GetSize(), out.c_str());
         return 0;
     }
 

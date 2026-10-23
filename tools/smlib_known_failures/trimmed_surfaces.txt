@@ -1,1 +1,10 @@
-# SMLib trimmed-surface cases (tests/smlib_trimmed_surfaces.rs, from tools/smlib/trimmed_surfaces.py) that fail: none.
+# SMLib trimmed-surface cases (tests/smlib_trimmed_surfaces.rs, from tools/smlib/trimmed_surfaces.py) that fail: `name`, or `name slow`.
+
+# ss_plane_sph2/3: the same sphere band boundary as ss_plane_sph1/4 (the same vertices) run the
+# other way round, which on a closed sphere bounds the other region (SMLib's nearest points are
+# the band's corners, 3.5858 from the square, not (8, 2, 2) at 3). The reader takes the same
+# face for both directions (the kernel's own, as sph1's / sph4's: 3.0, 8.484 / 3.385, 12.336).
+tsurf_solve_plane_sph2_min
+tsurf_solve_plane_sph2_max
+tsurf_solve_plane_sph3_min
+tsurf_solve_plane_sph3_max

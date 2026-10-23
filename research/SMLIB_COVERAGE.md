@@ -66,7 +66,9 @@ Corrections to the generators' NOT_CONVERTED notes, found by the audit:
 ## Converted since the audit
 
 The tables further down are as audited. These conversions came after them and take precedence
-(new tests, of which known failures in brackets):
+(new tests, of which known failures in brackets). In all: 192 new tests (16 → 20 SMLib suites,
+442 → 634 tests), 11 of them known failures, each asserting the right value with its reason in
+`tools/smlib_known_failures/`.
 
 | Source items | Suite: tests | Checks |
 |---|---|---|
@@ -84,6 +86,9 @@ The tables further down are as audited. These conversions came after them and ta
 | smAdvancedTest `my_test_tsurface_regression` 25 (`ellips_ts2.smb`): benchmark point solve, point classify, point intersect | smlib_trimmed_surfaces: `tsurf_25_*` (3) | distance 2870.476090 as SMLib's run prints; 389 grid points inside / on the face (new oracle `tgrid`) |
 | SM_API_test: `TestSmMergeBreps` (5), `TestSmShellBrepFull` (4), `TestSmMassProperties` (2), `TestSmPrecisePropertySelection` (4), `TestSmBrepDistance` (4), `TestSmGetClosestPoint`/`FindEdge`/`FindFaces`/`GetFaces`/`GetEdges` (1), `TestSmIntersectCurveSurface`/`CurveFace`/`CurveBrep` (5), `TestSmBooleanBoundsExample`, `TestSmBooleanWithOptions`, `TestSmNonManifoldBoolean`, `TestSmPiecewiseMerge`/`BooleanLists` (4), `TestSmSweepAlongPlanarPath` (3), `TestSmCurveSweep`, `TestSmCreateLinearSweep*`/`RotationalSweep` (4), `TestSmCircularFillet`, `TestSmCreateOffsetSurface` (2), `TestSmHealBrep`, `TestSmImportExport`, `TestSmTessellateBoundaries` | smlib_sm_api (43) | SMLib's asserted values (merge, shell, mass, areas, distances, points) or, where it asserts only success, the closed form |
 | test_omni_solid.py: `TestBooleans` planar booleans (16 squares, 4 discs), `TestOffsetShell` (4 box shells, 2 cylinder shells), `TestSkinPrimitiveGeometry`, `TestSweeps` (4), `TestQueries` relationships (5) and values (7), `TestTransforms` reflections (4) | smlib_python (48, [3]) | the test's literal tables and closed forms; its merges and distances are SM_API_test's (smlib_sm_api) |
+| smAdvancedTest `my_test_tsurface_regression` 18–23: `ss_plane_sph2/3/4`, `ss_plane_tor1/2`, `ss_tor_tor` min and max distances | smlib_trimmed_surfaces: `tsurf_solve_*` (12, [4]) | SMLib's extreme distance (new oracle `bsolve`) to 1e-5 |
+| smSurfaceTest `my_test_drop_curve_near_seam` (lines and a circle at a cylinder's seam, both directions) | smlib_surfaces: `drop_near_seam_*` (8) | the p-curve lifts back onto the curve within 1.01e-5 |
+| smAdvancedTest `my_test_tsurface_regression` 25: `ellips_ts2.smb` seen along (1, 0, −0.1) | smlib_silhouette: `silhouette_tsurf_25_ellips_ts2_par` (1) | the silhouette's length against SMLib's (oracle `silhouette`) |
 
 Feature gaps found on the way: no degree-1 (piecewise ruled) skin through many sections; no
 non-uniform scale; no parabola or hyperbola curves (`my_test_analytic_curves`,

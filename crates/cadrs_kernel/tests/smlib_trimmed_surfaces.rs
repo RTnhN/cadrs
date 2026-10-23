@@ -267,6 +267,94 @@ fn tsurf_25_ellips_point_intersect() {
     ellips_grid(33, [0.0, 0.0, 20.7377339153, 18.987358035], true, 389).unwrap();
 }
 
+/// SMLib trimmed surfaces: `ss_plane_sph2` minimize (`my_test_tsurface_tsurface_solve`): the faces' least distance, SMLib's 3.58578644 (the oracle's `bsolve`; its test asserts only the solution count, 6 here).
+#[test]
+fn tsurf_solve_plane_sph2_min() {
+    known_failure(
+        solve("ss_plane_sph2.smp", false, 3.58578643763, 1e-5),
+        "trimmed_surfaces",
+        "tsurf_solve_plane_sph2_min",
+    );
+}
+
+/// SMLib trimmed surfaces: `ss_plane_sph2` maximize (`my_test_tsurface_tsurface_solve`): the faces' greatest distance, SMLib's 8.55743817 (the oracle's `bsolve`; its test asserts only the solution count, 3 here).
+#[test]
+fn tsurf_solve_plane_sph2_max() {
+    known_failure(
+        solve("ss_plane_sph2.smp", true, 8.55743817017, 1e-5),
+        "trimmed_surfaces",
+        "tsurf_solve_plane_sph2_max",
+    );
+}
+
+/// SMLib trimmed surfaces: `ss_plane_sph3` minimize (`my_test_tsurface_tsurface_solve`): the faces' least distance, SMLib's 3.96917649 (the oracle's `bsolve`; its test asserts only the solution count, 2 here).
+#[test]
+fn tsurf_solve_plane_sph3_min() {
+    known_failure(
+        solve("ss_plane_sph3.smp", false, 3.96917648679, 1e-5),
+        "trimmed_surfaces",
+        "tsurf_solve_plane_sph3_min",
+    );
+}
+
+/// SMLib trimmed surfaces: `ss_plane_sph3` maximize (`my_test_tsurface_tsurface_solve`): the faces' greatest distance, SMLib's 12.6301457 (the oracle's `bsolve`; its test asserts only the solution count, 3 here).
+#[test]
+fn tsurf_solve_plane_sph3_max() {
+    known_failure(
+        solve("ss_plane_sph3.smp", true, 12.6301456629, 1e-5),
+        "trimmed_surfaces",
+        "tsurf_solve_plane_sph3_max",
+    );
+}
+
+/// SMLib trimmed surfaces: `ss_plane_sph4` minimize (`my_test_tsurface_tsurface_solve`): the faces' least distance, SMLib's 3.38516481 (the oracle's `bsolve`; its test asserts only the solution count, 1 here).
+#[test]
+fn tsurf_solve_plane_sph4_min() {
+    solve("ss_plane_sph4.smp", false, 3.38516480713, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_plane_sph4` maximize (`my_test_tsurface_tsurface_solve`): the faces' greatest distance, SMLib's 12.3372852 (the oracle's `bsolve`; its test asserts only the solution count, 3 here).
+#[test]
+fn tsurf_solve_plane_sph4_max() {
+    solve("ss_plane_sph4.smp", true, 12.3372851858, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_plane_tor1` minimize (`my_test_tsurface_tsurface_solve`): the faces' least distance, SMLib's 3.52786404 (the oracle's `bsolve`; its test asserts only the solution count, 1 here).
+#[test]
+fn tsurf_solve_plane_tor1_min() {
+    solve("ss_plane_tor1.smp", false, 3.527864045, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_plane_tor1` maximize (`my_test_tsurface_tsurface_solve`): the faces' greatest distance, SMLib's 13.3995833 (the oracle's `bsolve`; its test asserts only the solution count, 3 here).
+#[test]
+fn tsurf_solve_plane_tor1_max() {
+    solve("ss_plane_tor1.smp", true, 13.3995833408, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_plane_tor2` minimize (`my_test_tsurface_tsurface_solve`): the faces' least distance, SMLib's 3.52786404 (the oracle's `bsolve`; its test asserts only the solution count, 55 here).
+#[test]
+fn tsurf_solve_plane_tor2_min() {
+    solve("ss_plane_tor2.smp", false, 3.527864045, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_plane_tor2` maximize (`my_test_tsurface_tsurface_solve`): the faces' greatest distance, SMLib's 10.2730349 (the oracle's `bsolve`; its test asserts only the solution count, 3 here).
+#[test]
+fn tsurf_solve_plane_tor2_max() {
+    solve("ss_plane_tor2.smp", true, 10.2730349434, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_tor_tor` minimize (`my_test_tsurface_tsurface_solve`): the faces' least distance, SMLib's 2.59340048 (the oracle's `bsolve`; its test asserts only the solution count, 1 here).
+#[test]
+fn tsurf_solve_tor_tor_min() {
+    solve("ss_tor_tor.smp", false, 2.59340048332, 1e-5).unwrap();
+}
+
+/// SMLib trimmed surfaces: `ss_tor_tor` maximize (`my_test_tsurface_tsurface_solve`): the faces' greatest distance, SMLib's 23.117665 (the oracle's `bsolve`; its test asserts only the solution count, 1 here).
+#[test]
+fn tsurf_solve_tor_tor_max() {
+    solve("ss_tor_tor.smp", true, 23.1176649736, 1e-5).unwrap();
+}
+
 /// SMLib trimmed surfaces: `CreateConePatch` r 1, h 1, full turn: its area 2π.
 #[test]
 fn tsurf_cone_patch_area() {

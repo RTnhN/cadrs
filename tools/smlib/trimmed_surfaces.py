@@ -289,7 +289,21 @@ def extract(ctx):
             Case("tsurf_25_ellips_point_intersect", "SMLib trimmed surfaces 25 (`ellips_ts2.smb`, `my_test_tsurface_point_intersect`): of the surface points of that grid, %d on the body (the test asserts 389)." % r["found"],
                  "ellips_grid(33, %s, true, %d)" % (dom, r["found"]), [ellips]),
         ]
-    return grid + [
+    solves = []
+    for stem in ("ss_plane_sph2", "ss_plane_sph3", "ss_plane_sph4", "ss_plane_tor1", "ss_plane_tor2", "ss_tor_tor"):
+        fx = Fixture("TestFiles/pt_TestFiles/%s.smp" % stem)
+        assert "%s.smp" % stem in adv, stem
+        for op in ("min", "max"):
+            r = oracle_run(["bsolve", ctx.path(fx.rel), op])
+            if r is None:
+                print("trimmed_surfaces: no oracle: %s %s left out" % (stem, op), file=sys.stderr)
+                continue
+            if not r.get("ok") or not r.get("solutions"):
+                raise SystemExit("trimmed_surfaces: the oracle's bsolve fails on %s (%s): rebuild it from tools/smlib_oracle" % (stem, r.get("status")))
+            solves.append(Case("tsurf_solve_%s_%s" % (stem[3:], op), "SMLib trimmed surfaces: `%s` %simize (`my_test_tsurface_tsurface_solve`): the faces' %s distance, SMLib's %.9g (the oracle's `bsolve`; its test asserts only the solution count, %d here)." % (
+                stem, op, "least" if op == "min" else "greatest", r["best"], r["count"]),
+                'solve("%s.smp", %s, %s, 1e-5)' % (stem, "true" if op == "max" else "false", rust_f64(r["best"])), [fx]))
+    return grid + solves + [
         Case("tsurf_cone_patch_area", "SMLib trimmed surfaces: `CreateConePatch` r 1, h 1, full turn: its area 2π.",
              "cone_patch_area(%s)" % rust_f64(2 * math.pi)),
         Case("tsurf_creation_volume_area", "SMLib trimmed surfaces: `my_test_tsurf_creation`'s face (area 70.5 − 2.25π) extruded by 1: volume and area.",

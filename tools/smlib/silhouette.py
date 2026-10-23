@@ -125,4 +125,15 @@ def extract(ctx):
         c.note = note
         c.slow = c.name in SLOW
         cases.append(c)
+    # `my_test_tsurface_regression` 25 (smAdvancedTest.cpp:2108): `ellips_ts2.smb` seen along
+    # (1, 0, −0.1), SMLib's test asserts 2.
+    adv = strip_comments(src)
+    assert "my_test_tsurf_silhouette(pBrep,0.0001,SmVector3d(1,0,-0.1),FALSE,lCount)" in adv.replace(" ", "")
+    path = "TestFiles/pt_TestFiles/ellips_ts2.smb"
+    r = oracle_run(["silhouette", ctx.path(path), 1.0, 0.0, -0.1])
+    length = r["length"] if r and r.get("ok") else None
+    c = Case("silhouette_tsurf_25_ellips_ts2_par", "SMLib trimmed-surface regression 25: `ellips_ts2.smb` seen along (1, 0, −0.1); SMLib's test asserts 2%s." % (
+        "" if length is None else ", SMLib's length %.6g (%d curves)" % (length, r["count"])),
+        'silhouette("ellips_ts2.smb", [0.0, 0.0, 0.0], [1.0, 0.0, -0.1], false, %s)' % want_literal(True, length, []), [Fixture(path)])
+    cases.append(c)
     return cases
