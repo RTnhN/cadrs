@@ -915,17 +915,34 @@ impl Model<'_> {
                         .all_faces()
                         .filter(|e| self.face_names(*e).iter().any(|n| n.op == op))
                         .collect(),
-                    "EDGE" => self
-                        .all_edges()
-                        .filter(|e| {
-                            let Ent::Edge(p, i) = *e else { return false };
-                            self.parts[p].solid.edges[i]
-                                .name
-                                .faces
-                                .iter()
-                                .any(|n| n.op == op)
-                        })
-                        .collect(),
+                    // An edge named after a face of the operation, or (the operation's faces
+                    // all merged into earlier ones, as a cut's walls flush with them: the edges
+                    // it made keep the merged faces' names) between faces holding one of its
+                    // names among their merged-away ones.
+                    "EDGE" => {
+                        let named: Vec<Ent> = self
+                            .all_edges()
+                            .filter(|e| {
+                                let Ent::Edge(p, i) = *e else { return false };
+                                self.parts[p].solid.edges[i]
+                                    .name
+                                    .faces
+                                    .iter()
+                                    .any(|n| n.op == op)
+                            })
+                            .collect();
+                        if !named.is_empty() {
+                            named
+                        } else {
+                            self.all_edges()
+                                .filter(|e| {
+                                    self.adjacent(*e)
+                                        .iter()
+                                        .any(|f| self.face_names(*f).iter().any(|n| n.op == op))
+                                })
+                                .collect()
+                        }
+                    }
                     _ => Vec::new(),
                 }
             }
