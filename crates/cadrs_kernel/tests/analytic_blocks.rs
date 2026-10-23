@@ -523,6 +523,69 @@ fn a_filleted_cube_shelled_open_at_the_top() {
 }
 
 #[test]
+fn a_cube_with_every_edge_filleted_shelled_outward_open_at_the_top() {
+    // Every edge filleted r makes the cube L = A − 2r grown by a ball r (as above); shelling it
+    // outward t grows that same cube by a ball R = r + t (the rounded cube is convex, so its
+    // offset is exact), cut where the removed top face was: the plane z = A, r above the small
+    // cube's top.
+    //
+    // Above height s over the small cube's top, the grown cube's section is the square L with
+    // corners ρ = √(R² − s²): L² + 4Lρ + πρ². The cap above z = A (s from r to R) is therefore
+    //   L² t + 4L ∫ √(R² − s²) ds + π ∫ (R² − s²) ds,
+    // with ∫ᵣᴿ √(R² − s²) ds = πR²/4 − (r √(R² − r²) + R² asin(r/R)) / 2 and
+    // ∫ᵣᴿ (R² − s²) ds = R² t − (R³ − r³) / 3.
+    //
+    // Area: outside, the grown cube's 6L² + 6πRL + 4πR² less its cap (the top square L², the
+    // four top edges' cylinders above φ = asin(r/R): 4RL(π/2 − asin(r/R)), the four top corners'
+    // spheres above height r: a zone 2πR t); the rim at z = A, the section there less the
+    // opening L²: 4Lρ₀ + πρ₀² with ρ₀ = √(R² − r²); inside, the filleted cube less its top face.
+    // Faces: 25 outside, the rim, 25 inside.
+    let (r, t) = (2.0, 1.0);
+    let (l, big) = (A - 2.0 * r, r + t);
+    let rounded_volume =
+        |q: f64| l * l * l + 6.0 * l * l * q + 3.0 * PI * l * q * q + 4.0 / 3.0 * PI * q * q * q;
+    let rounded_area = |q: f64| 6.0 * l * l + 6.0 * PI * q * l + 4.0 * PI * q * q;
+    let phi = (r / big).asin();
+    let rho0 = (big * big - r * r).sqrt();
+    let root = PI * big * big / 4.0 - (r * rho0 + big * big * phi) / 2.0;
+    let square = big * big * t - (big.powi(3) - r.powi(3)) / 3.0;
+    let cap = l * l * t + 4.0 * l * root + PI * square;
+    let cap_area = l * l + 4.0 * big * l * (PI / 2.0 - phi) + 2.0 * PI * big * t;
+    let mut k = NativeKernel::new();
+    let c = cube(&mut k);
+    let e = edges(&k, c, |_| true);
+    let f = k.fillet(c, &e, r).unwrap().bodies[0];
+    let top = face(&k, f, [A / 2.0, A / 2.0, A]);
+    let b = k
+        .shell_with(
+            f,
+            &ShellSpec {
+                remove: vec![top],
+                thickness: t,
+                outward: true,
+                hollow: false,
+                sharp: false,
+            },
+        )
+        .unwrap()
+        .bodies[0];
+    check(
+        &k,
+        b,
+        Want {
+            volume: rounded_volume(big) - cap - rounded_volume(r),
+            area: rounded_area(big) - cap_area
+                + (4.0 * l * rho0 + PI * rho0 * rho0)
+                + (rounded_area(r) - l * l),
+            faces: 51,
+            min: [-t, -t, -t],
+            max: [A + t, A + t, A],
+            centroid: None,
+        },
+    );
+}
+
+#[test]
 fn a_cube_with_a_corner_cut_away() {
     // A cube of side s overlapping the corner (A, A, A) removed: V = A³ − s³. The three faces
     // at the corner lose s² each and the cut adds three s² faces, so S = 6A².
