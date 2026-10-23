@@ -320,14 +320,11 @@ fn circle_plane() -> Result<(), String> {
         y,
         z: V3::x().cross(&y),
     };
-    // (A crossing at the circle's seam may come at both t = 0 and 2π: one point.)
-    let mut pts: Vec<P3> = Vec::new();
-    for t in ssi::curve_surface(&c, 0.0, 2.0 * PI, &Surface::Plane { f }) {
-        let p = c.point(t);
-        if !pts.iter().any(|q| (q - p).norm() <= 1e-9) {
-            pts.push(p);
-        }
-    }
+    // (Exactly two: a crossing at the circle's seam, (8, 5, 0), counts once.)
+    let mut pts: Vec<P3> = ssi::curve_surface(&c, 0.0, 2.0 * PI, &Surface::Plane { f })
+        .into_iter()
+        .map(|t| c.point(t))
+        .collect();
     pts.sort_by(|a, b| a.x.total_cmp(&b.x));
     let want = [P3::new(2.0, 5.0, 0.0), P3::new(8.0, 5.0, 0.0)];
     if pts.len() != 2 || pts.iter().zip(&want).any(|(p, w)| (p - w).norm() > 1e-9) {
@@ -676,6 +673,135 @@ fn box_round_trips(case: &str) -> Result<(), String> {
         _ => Err(format!("{case} isn't ported")),
     }
 }
+/// `TestSmOffsetBrepFull` (TestSmBrep.cpp:2745; SMLib asserts success): the 10 mm box offset by
+/// 1 with its convex edges extended (`bDoExtendedOffset`): the 12 mm box, 1728.
+fn offset_box() -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let b = bx(&mut k, [0.0; 3], 10.0, 10.0, 10.0)?;
+    let r = one(k
+        .offset(
+            b,
+            &OffsetSpec {
+                distance: 1.0,
+                faces: vec![],
+                sharp: true,
+            },
+        )
+        .map_err(e)?)?;
+    close("volume", volume(&k, r)?, 1728.0, 1e-9)?;
+    let bb = k.bounding_box(r).map_err(e)?;
+    for i in 0..3 {
+        close("box min", bb.min[i], -1.0, 1e-9)?;
+        close("box max", bb.max[i], 11.0, 1e-9)?;
+    }
+    Ok(())
+}
+
+/// `TestSmCreateSurfaceRevolution*` (TestSmSurfaces.cpp:415–548; SMLib asserts success): curves
+/// turned a whole turn into sheets, their areas.
+fn revolved_sheet(case: &str) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let (w, o, d, want) = match case {
+        // A half circle of radius 10 about its diameter (the x axis): a sphere, 400π.
+        "sphere" => (
+            k.mkedge(&k.circle(0.0, 0.0, 0.0, 10.0), 0.0, PI),
+            [-10.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            400.0 * PI,
+        ),
+        // The line x = 5 from z = 0 to 10 about z: a cylinder, 100π.
+        "cylinder" => (
+            k.polyline(&[[5.0, 0.0, 0.0], [5.0, 0.0, 10.0]])
+                .map_err(e)?,
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            100.0 * PI,
+        ),
+        // (5, 0, 0)–(0, 0, 10) about z: a cone, π·5·√125.
+        "cone" => (
+            k.polyline(&[[5.0, 0.0, 0.0], [0.0, 0.0, 10.0]])
+                .map_err(e)?,
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            PI * 5.0 * 125f64.sqrt(),
+        ),
+        // (5, 0, 0)–(3, 0, 10) about z: a truncated cone, π(5 + 3)·√104.
+        "trunc_cone" => (
+            k.polyline(&[[5.0, 0.0, 0.0], [3.0, 0.0, 10.0]])
+                .map_err(e)?,
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            PI * 8.0 * 104f64.sqrt(),
+        ),
+        _ => return Err(format!("{case} isn't ported")),
+    };
+    let b = solid(
+        k.revol(&w, o[0], o[1], o[2], d[0], d[1], d[2], 360.0)
+            .map_err(e)?,
+    )?;
+    let body = k.get(b).map_err(e)?;
+    if let Some(bad) = invalid(body) {
+        return Err(bad);
+    }
+    close(
+        "area",
+        k.mass_properties(b).map_err(e)?.surface_area,
+        want,
+        1e-9 * want,
+    )
+}
+
+/// `TestSmCut` and `TestSmIntersectBrepWithPlane` (TestSmBrep.cpp:1494, TestSmIntersectors.cpp:203;
+/// SMLib asserts success): the 5 × 10 × 15 box with every edge rounded by 0.5 cut by the plane
+/// z = 7: two valid solids, the lower of 346.972 (the rounded box below z = 7, closed form), and
+/// the section a rounded rectangle of area 49 + π/4 (each piece's flat face there).
+fn cut_rounded() -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let b = bx(&mut k, [0.0; 3], 5.0, 10.0, 15.0)?;
+    let edges: Vec<_> = k.edges(b).map_err(e)?.into_iter().map(|ed| ed.id).collect();
+    let r = one(k.fillet(b, &edges, 0.5).map_err(e)?)?;
+    let plane = Plane {
+        origin: nalgebra::Point3::new(0.0, 0.0, 7.0),
+        ..Plane::top()
+    };
+    let cut = one(k
+        .split(r, &cadrs_kernel::SplitTool::Plane(plane), 1)
+        .map_err(e)?)?;
+    let pieces: Vec<BodyId> = k
+        .split_solids(cut)
+        .map_err(e)?
+        .into_iter()
+        .map(one)
+        .collect::<Result<_, _>>()?;
+    if pieces.len() != 2 {
+        return Err(format!("{} pieces", pieces.len()));
+    }
+    // The rounded box: the 4 × 9 × 14 box grown by a ball of radius 0.5; below z = 7, 6.5 of its
+    // full section (36 + 13 + π/4) and the rounded bottom.
+    let (a, bb, r0) = (4.0, 9.0, 0.5);
+    let section = a * bb + 2.0 * r0 * (a + bb) + PI * r0 * r0;
+    let lower = 6.5 * section
+        + a * bb * 0.5
+        + 2.0 * (a + bb) * (PI * r0 * r0 / 4.0)
+        + PI * (r0 * r0 * 0.5 - 0.5f64.powi(3) / 3.0);
+    let mut vols: Vec<f64> = pieces
+        .iter()
+        .map(|&p| volume(&k, p))
+        .collect::<Result<_, _>>()?;
+    vols.sort_by(f64::total_cmp);
+    close("lower piece", vols[0], lower, 1e-7 * lower)?;
+    for &p in &pieces {
+        let cap: f64 = k
+            .faces(p)
+            .map_err(e)?
+            .iter()
+            .filter(|f| (f.center.z - 7.0).abs() < 1e-9 && f.plane.is_some())
+            .map(|f| f.area)
+            .sum();
+        close("section area", cap, section, 1e-7 * section)?;
+    }
+    Ok(())
+}
 
 /// SMLib `TestSmMergeBreps` (TestSmBrep.cpp:1040): the 10 mm box and a 4 × 8 × 6 box at (8, 6, 3), union, volume 1144.0.
 #[test]
@@ -1004,4 +1130,40 @@ fn box_write_read() {
 #[test]
 fn box_boundaries() {
     box_round_trips("boundaries").unwrap();
+}
+
+/// SMLib `TestSmOffsetBrepFull` (TestSmBrep.cpp:2745; SMLib asserts success): the 10 mm box offset by 1, convex edges extended: 1728.
+#[test]
+fn offset_box_extended() {
+    offset_box().unwrap();
+}
+
+/// SMLib `TestSmCreateSurfaceRevolutionSphere` (TestSmSurfaces.cpp:415; SMLib asserts success): a half circle of radius 10 about its diameter: 400π.
+#[test]
+fn revolved_sheet_sphere() {
+    revolved_sheet("sphere").unwrap();
+}
+
+/// SMLib `TestSmCreateSurfaceRevolutionCylinder` (TestSmSurfaces.cpp:470; SMLib asserts success): the line x = 5, z 0 to 10, about z: 100π.
+#[test]
+fn revolved_sheet_cylinder() {
+    revolved_sheet("cylinder").unwrap();
+}
+
+/// SMLib `TestSmCreateSurfaceRevolutionCone` (TestSmSurfaces.cpp:496; SMLib asserts success): (5, 0, 0)–(0, 0, 10) about z: π·5·√125.
+#[test]
+fn revolved_sheet_cone() {
+    revolved_sheet("cone").unwrap();
+}
+
+/// SMLib `TestSmCreateSurfaceRevolutionTruncCone` (TestSmSurfaces.cpp:522; SMLib asserts success): (5, 0, 0)–(3, 0, 10) about z: 8π√104.
+#[test]
+fn revolved_sheet_trunc_cone() {
+    revolved_sheet("trunc_cone").unwrap();
+}
+
+/// SMLib `TestSmCut`, `TestSmIntersectBrepWithPlane` (TestSmBrep.cpp:1495, TestSmIntersectors.cpp:203; SMLib asserts success): the rounded 5 × 10 × 15 box cut at z = 7: the lower piece 346.972, the section 49 + π/4.
+#[test]
+fn cut_rounded_box() {
+    cut_rounded().unwrap();
 }

@@ -482,8 +482,8 @@ which rebuilds the files' faces into valid bodies (p-curves fitted where a file 
 sewn by their edges). `tests/exchange_corpus.rs` reads every STEP and IGES file of the public dataset the generated suites use
 (389 files: samples and bug-report files, many broken on purpose) and checks each part (valid
 topology within the file's own tolerance, each solid's volume positive, equal to its
-tessellation's within 1 % and unchanged by a move, no face dropped): 337 read clean. The other
-52 are listed in the test with the first problem each hits (the commonest: p-curves off their
+tessellation's within 1 % and unchanged by a move, no face dropped): 330 read clean. The other
+59 are listed in the test with the first problem each hits (the commonest: p-curves off their
 edges by more than a ten-thousandth of the model, loops that don't close, files with no geometry
 of their own), and the test fails when a listed file reads clean or an unlisted one doesn't. The
 gate runs it (it needs the dataset, so CI's per-push subset doesn't). FreeCAD reads our STEP and

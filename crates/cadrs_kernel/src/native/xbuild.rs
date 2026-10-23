@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 use super::curve::Curve;
 use super::math::*;
-use super::nurbs::NurbsCurve;
+use super::nurbs::{NurbsCurve, NurbsSurface};
 use super::pcurve;
 use super::surface::Surface;
 use super::topo::*;
@@ -645,6 +645,7 @@ fn fit_span(s: &Surface, per: &Periods, tol: &Tol, c: &Curve, a: f64, b: f64, hi
             P3::new(u, v, 0.0)
         })
         .collect();
+    let pts = settle_pole_samples(s, pts);
     let f = NurbsCurve::interpolate(&pts, &ts, 3, None, None);
     let fc = Curve::Nurbs(Arc::new(f));
     let err = (0..N).map(|i| pc_error(s, per, c, &fc, (ts[i] + ts[i + 1]) / 2.0, tol.off)).fold(0.0, f64::max);
@@ -657,6 +658,56 @@ fn fit_span(s: &Surface, per: &Periods, tol: &Tol, c: &Curve, a: f64, b: f64, hi
     let m = (a + b) / 2.0;
     fit_span(s, per, tol, c, a, m, hint, depth + 1, out);
     fit_span(s, per, tol, c, m, b, hint, depth + 1, out);
+}
+
+/// On an iso line through a pole (a meridian of a spline surface of revolution, from pole to
+/// pole: every sample off the poles at one u, or one v), the samples at the poles (where the
+/// surface collapses: every u, or every v, the same point) take that coordinate too: a
+/// projection there lands anywhere along the pole, and a fit through it would swing the p-curve
+/// off the curve between. Other curves' samples are left as they are.
+fn settle_pole_samples(s: &Surface, mut pts: Vec<P3>) -> Vec<P3> {
+    // (Collapsed: one derivative vanishing against the other, a ten-millionth of it.)
+    let collapsed = |q: &P3| -> (bool, bool) {
+        let (_, su, sv) = s.d1(q.x, q.y);
+        let (a, b) = (su.norm(), sv.norm());
+        (a <= 1e-7 * b, b <= 1e-7 * a)
+    };
+    let flags: Vec<(bool, bool)> = pts.iter().map(collapsed).collect();
+    for dir in 0..2 {
+        let at = |f: &(bool, bool)| if dir == 0 { f.0 } else { f.1 };
+        let Some(first) = flags.iter().position(|f| !at(f)) else {
+            continue;
+        };
+        let last = flags.iter().rposition(|f| !at(f)).unwrap_or(first);
+        let c = |q: &P3| if dir == 0 { q.x } else { q.y };
+        let iso = pts
+            .iter()
+            .zip(&flags)
+            .filter(|(_, f)| !at(f))
+            .all(|(q, _)| (c(q) - c(&pts[first])).abs() <= tol::REL * (1.0 + c(&pts[first]).abs()));
+        if !iso {
+            continue;
+        }
+        for i in 0..pts.len() {
+            if !at(&flags[i]) {
+                continue;
+            }
+            // From the nearer end's sample off the pole (inside a run, the one before).
+            let from = if i < first {
+                first
+            } else if i > last {
+                last
+            } else {
+                (0..i).rev().find(|&j| !at(&flags[j])).unwrap_or(first)
+            };
+            if dir == 0 {
+                pts[i].x = pts[from].x;
+            } else {
+                pts[i].y = pts[from].y;
+            }
+        }
+    }
+    pts
 }
 
 /// How a surface closes on itself: periods in u and v, and for spline surfaces (closed where
@@ -696,6 +747,51 @@ impl Periods {
         };
         (f(u, u0, u1, self.pu), f(v, v0, v1, self.pv))
     }
+}
+
+/// A B-spline surface closed in u (`dir` 0) or v (1) restarted at `at`: every row of poles along
+/// that direction restarted there (`NurbsCurve::restarted`), the surface's range there then
+/// [at, at + period]. None when a row's poles at the seam don't match (weights scaled
+/// differently: no common restart).
+fn restarted(n: &NurbsSurface, dir: usize, at: f64) -> Option<NurbsSurface> {
+    let (nu, nv) = (n.cps.len(), n.cps.first()?.len());
+    let (deg, knots, rows, len) = if dir == 0 {
+        (n.du, &n.ku, nv, nu)
+    } else {
+        (n.dv, &n.kv, nu, nv)
+    };
+    let pole = |r: usize, i: usize| if dir == 0 { n.cps[i][r] } else { n.cps[r][i] };
+    let mut out = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let c = NurbsCurve {
+            degree: deg,
+            knots: knots.clone(),
+            cps: (0..len).map(|i| pole(r, i)).collect(),
+        };
+        // The seam's poles must be the same homogeneous point (the restart joins them as one).
+        let (first, last) = (c.cps.first()?, c.cps.last()?);
+        if (first - last).norm() > tol::REL * (1.0 + first.norm()) {
+            return None;
+        }
+        out.push(c.restarted(at).ok()?);
+    }
+    let k = out[0].knots.clone();
+    if out.iter().any(|c| c.knots != k) {
+        return None;
+    }
+    let m = out[0].cps.len();
+    let (ku, kv, cps) = if dir == 0 {
+        (
+            k,
+            n.kv.clone(),
+            (0..m)
+                .map(|i| out.iter().map(|c| c.cps[i]).collect())
+                .collect(),
+        )
+    } else {
+        (n.ku.clone(), k, out.iter().map(|c| c.cps.clone()).collect())
+    };
+    NurbsSurface::new(n.du, n.dv, ku, kv, cps).ok()
 }
 
 fn periods(s: &Surface) -> Periods {
@@ -1292,6 +1388,70 @@ impl XBuilder {
     }
 
     /// Gives a face whose loops wrap around its surface a seam. Returns false when it can't.
+    /// A face on a B-spline surface closed in u or v (a revolved profile as a spline) whose
+    /// loops, traced across the surface's seam, run past its range (a loop closing round its
+    /// poles, its meridians on both sides of the seam): its p-curves moved by whole periods to
+    /// start in the range and, where they still run past its end, the surface restarted at the
+    /// loops' lowest coordinate (`NurbsCurve::restarted` along every row or column of poles: the
+    /// same surface, its seam moved out of the face), so the p-curves are on the surface as they
+    /// stand. Else the surface as it is.
+    fn fit_closed_range(body: &Body, s: &Surface, loops: &mut [(f64, Vec<Coedge>)]) -> Surface {
+        let Surface::Nurbs(n0) = s else {
+            return s.clone();
+        };
+        let per = periods(s);
+        let mut n: NurbsSurface = (**n0).clone();
+        let mut changed = false;
+        for (dir, p) in [(0usize, per.pu), (1, per.pv)] {
+            let Some(pd) = p else { continue };
+            let ((u0, u1), (v0, v1)) = n.range();
+            let (a0, a1) = if dir == 0 { (u0, u1) } else { (v0, v1) };
+            let coord = |q: P3| if dir == 0 { q.x } else { q.y };
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for c in loops.iter().flat_map(|l| l.1.iter()) {
+                let e = &body.edges[c.edge];
+                for i in 0..=8 {
+                    let x = coord(c.pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0));
+                    lo = lo.min(x);
+                    hi = hi.max(x);
+                }
+            }
+            let eps = tol::REL * pd;
+            if !(lo.is_finite() && hi.is_finite())
+                || (lo >= a0 - eps && hi <= a1 + eps)
+                || hi - lo > pd + eps
+            {
+                continue;
+            }
+            // Whole periods first: the lowest coordinate into [a0, a0 + period).
+            let k = ((lo - a0 + eps) / pd).floor();
+            if k != 0.0 {
+                let d = -k * pd;
+                let m = Affine::translation(if dir == 0 {
+                    V3::new(d, 0.0, 0.0)
+                } else {
+                    V3::new(0.0, d, 0.0)
+                });
+                for c in loops.iter_mut().flat_map(|l| l.1.iter_mut()) {
+                    c.pc = c.pc.transformed(&m);
+                }
+                changed = true;
+            }
+            let (lo, hi) = (lo - k * pd, hi - k * pd);
+            if hi > a1 + eps
+                && let Some(r) = restarted(&n, dir, lo)
+            {
+                n = r;
+                changed = true;
+            }
+        }
+        if changed {
+            Surface::Nurbs(Arc::new(n))
+        } else {
+            s.clone()
+        }
+    }
+
     fn add_seam(&mut self, fi: usize, wrapping: &[(usize, i64)]) -> bool {
         let s = self.faces[fi].surf.clone();
         let hint = self.faces[fi].sense;
@@ -1704,6 +1864,7 @@ impl XBuilder {
             if loops.is_empty() {
                 continue;
             }
+            let surf = Self::fit_closed_range(&self.body, s, &mut loops);
             let outer = (0..loops.len()).max_by(|&a, &b| loops[a].0.abs().total_cmp(&loops[b].0.abs())).unwrap();
             let o = loops.remove(outer);
             let sense = o.0 > 0.0;
@@ -1712,7 +1873,7 @@ impl XBuilder {
             }
             let mut ls = vec![o.1];
             ls.extend(loops.into_iter().map(|l| l.1));
-            self.body.faces.push(Face { surf: s.clone(), sense, loops: ls });
+            self.body.faces.push(Face { surf, sense, loops: ls });
             new_index[fi] = self.body.faces.len() - 1;
         }
         prof.mark("faces");

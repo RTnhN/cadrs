@@ -151,10 +151,6 @@ const KNOWN_BAD: &[(&str, &str)] = &[
         "volume 1536723.001863 vs mesh 1063280.267061",
     ),
     (
-        "step/pr1db.stp",
-        "1 check errors (face 6 loop 0 coedge 2 (edge 13): p-curve off the edge by 3.250e1); volume 710635.837392 vs…",
-    ),
-    (
         "step/trj3_s1-al-214.stp",
         "24 check errors (face 12 loop 0: coedge 0 doesn't meet the next); 3 faces dropped (face 0: a loop doesn't c…",
     ),
@@ -163,16 +159,8 @@ const KNOWN_BAD: &[(&str, &str)] = &[
         "1 check errors (face 9 loop 0 coedge 3 (edge 7): p-curve off the edge by 2.822e-3); 3 faces dropped (face 15: loops wrap around the surface and no seam could be added)",
     ),
     (
-        "step/trj3_s1-id-203.stp",
-        "1 check errors (face 0 loop 0 coedge 2 (edge 0): p-curve off the edge by 1.471e1); volume 743526.183770 vs …",
-    ),
-    (
         "step/trj3_s1-md-214.stp",
         "5 check errors (face 0 loop 0: p-curve gap after coedge 1: (2.115e-4, 1.500e0)); 1 faces dropped (face 0: l…",
-    ),
-    (
-        "step/trj3_t2-db-214.stp",
-        "2 check errors (face 7 loop 0 coedge 2 (edge 20): p-curve off the edge by 3.155e0)",
     ),
     (
         "step/trj4_k1_geo-md-203.stp",
@@ -197,10 +185,6 @@ const KNOWN_BAD: &[(&str, &str)] = &[
     (
         "step/trj4_k1_top-tu-214.stp",
         "2 faces dropped (face 0: a loop doesn't close)",
-    ),
-    (
-        "step/trj4_pm2-ec-214.stp",
-        "9 check errors (face 16 loop 0: p-curve gap after coedge 1: (-1.491e0, 1.307e-1))",
     ),
     ("step/trj4_xr1-db-214.stp", "read: the file holds no shapes"),
     ("step/trj4_xr1-ec-214.stp", "read: the file holds no shapes"),
