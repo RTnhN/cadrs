@@ -554,22 +554,31 @@ fn on_part_menu_action(
         }),
         "part-delete" => commands.queue(move |world: &mut World| {
             let parts = targets(world, part);
-            if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
-                && let Some(element) = doc.active_element().map(|e| e.id)
-            {
-                let _ = doc.execute(&AddFeature::delete_parts(
-                    element,
-                    cadrs_core::FeatureId::new(),
-                    parts.clone(),
-                ));
-            }
-            world
-                .resource_mut::<Selection>()
-                .0
-                .retain(|p| p.part().is_none_or(|id| !parts.contains(&id)));
+            delete_parts(world, parts);
         }),
         _ => {}
     }
+}
+
+/// Delete parts: a Delete part feature of `parts` (one undo step), which leave the selection.
+/// The row menu's Delete… and the Delete key (`crate::sketch`).
+pub fn delete_parts(world: &mut World, parts: Vec<PartId>) {
+    if parts.is_empty() {
+        return;
+    }
+    if let Some(mut doc) = world.get_resource_mut::<ActiveDocument>()
+        && let Some(element) = doc.active_element().map(|e| e.id)
+    {
+        let _ = doc.execute(&AddFeature::delete_parts(
+            element,
+            cadrs_core::FeatureId::new(),
+            parts.clone(),
+        ));
+    }
+    world
+        .resource_mut::<Selection>()
+        .0
+        .retain(|p| p.part().is_none_or(|id| !parts.contains(&id)));
 }
 
 /// The row whose context menu is open gets the light hover band (`ex2-step8.png`), without
