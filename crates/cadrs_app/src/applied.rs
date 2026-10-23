@@ -1062,6 +1062,30 @@ fn toggle_entity(list: &mut Vec<EdgeOrFace>, x: EdgeOrFace) {
     }
 }
 
+/// Whether a pick is the edited feature itself (Plane 1 as an input of Plane 1), or a part of it,
+/// or of a feature after it: none can be its input. (A pattern's own Skip dots can.)
+fn refers_to_self_or_later(world: &World, edited: FeatureId, pick: Pick) -> bool {
+    let picked = match pick {
+        Pick::Feature(f)
+        | Pick::Region(f, _)
+        | Pick::SketchCurve(f, _)
+        | Pick::SketchPoint(f, _) => f,
+        _ => return false,
+    };
+    let Some(el) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element())
+    else {
+        return false;
+    };
+    let at = |id| el.features().iter().position(|f| f.id == id);
+    // A Derived feature's planes and sketches aren't in the list: never later.
+    match (at(edited), at(picked)) {
+        (Some(e), Some(p)) => p >= e,
+        _ => picked == edited,
+    }
+}
+
 fn applied_picks(
     mut picks: MessageReader<PickRequest>,
     session: Option<Res<AppliedSession>>,
@@ -1085,6 +1109,9 @@ fn applied_picks(
         let field = s.field;
         commands.queue(move |world: &mut World| {
             let Some(f) = current(world) else { return };
+            if refers_to_self_or_later(world, f.id, pick) {
+                return;
+            }
             let entity = entity_of(world.resource::<PartCache>(), pick);
             let mut kind = f.kind.clone();
             match (&mut kind, field) {
