@@ -1,0 +1,132 @@
+name: Release
+
+# Pushing a version tag (`git tag v0.1.6 && git push origin v0.1.6`) builds the Linux and Windows
+# archives, as tools/release/build.sh does locally, and publishes them as a GitHub release with
+# SHA256SUMS.txt. The release notes are tools/release/notes/<tag>.md (GitHub's generated notes
+# when there is none); a tag with a `-` in it (v0.1.7-beta.1) is a pre-release. Then the site is
+# redeployed so its download links point at the new release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # On Ubuntu 22.04, so the binary needs only glibc 2.35, and on stable without mold (the repo's
+  # .cargo/config.toml and rust-toolchain.toml are for nightly development builds).
+  linux:
+    name: Build (Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      RUSTFLAGS: ""
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: cc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustc -V
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-linux
+
+      - name: Build
+        run: cargo build --release --locked -p cadrs
+
+      - name: Package
+        run: tools/release/package.sh linux target/release/cadrs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # Cross-built with MinGW (its windres compiles the icon into cadrs.exe), on the nightly pinned
+  # in rust-toolchain.toml, which carries the Windows target.
+  windows:
+    name: Build (Windows)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      # clang and mold link the build scripts (.cargo/config.toml's host settings).
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang mold mingw-w64 zip
+
+      - name: Rust toolchain
+        run: rustup toolchain install && rustc -V
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu -p cadrs
+
+      - name: Package
+        run: tools/release/package.sh windows target/x86_64-pc-windows-gnu/release/cadrs.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Create the release
+        run: |
+          set -euo pipefail
+          args=(--title "cadrs $TAG" --verify-tag)
+          notes="tools/release/notes/$TAG.md"
+          if [[ -f "$notes" ]]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
+          if [[ "$TAG" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/SHA256SUMS.txt "${args[@]}"
+
+      # A release made with the workflow's token doesn't trigger other workflows' `release`
+      # events, but a dispatch does.
+      - name: Redeploy the site
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: gh workflow run pages.yml --ref main

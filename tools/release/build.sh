@@ -11,7 +11,8 @@
 #   like any cargo build).
 #
 # The two builds run one after the other (never two cargo builds at once). Publishing is left to
-# you: the script prints the `gh release create` command.
+# you: the script prints the `gh release create` command. Pushing a version tag does all of this
+# on GitHub instead (.github/workflows/release.yml).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -46,25 +47,11 @@ docker run --rm \
 
 cargo build --release --locked --target x86_64-pc-windows-gnu -p cadrs
 
-package() { # <dir name> <executable> <exe name in archive> <strip>
-    local dir="$dist/$1"
-    rm -rf "$dir"
-    mkdir -p "$dir"
-    cp "$2" "$dir/$3"
-    "$4" "$dir/$3"
-    cp README.md LICENSE-APACHE LICENSE-MIT "$dir/"
-    # The built-in symbols, footprints and 3D models: the app reads them from `libraries/`
-    # beside the executable.
-    cp -r libraries "$dir/"
-}
-
 rm -rf "$dist"
-mkdir -p "$dist"
+tools/release/package.sh linux target/linux-release/release/cadrs
+tools/release/package.sh windows target/x86_64-pc-windows-gnu/release/cadrs.exe
 linux="cadrs-v$version-x86_64-linux"
 windows="cadrs-v$version-x86_64-windows"
-package "$linux" target/linux-release/release/cadrs cadrs strip
-package "$windows" target/x86_64-pc-windows-gnu/release/cadrs.exe cadrs.exe x86_64-w64-mingw32-strip
-(cd "$dist" && tar czf "$linux.tar.gz" "$linux" && zip -qr "$windows.zip" "$windows")
 (cd "$dist" && sha256sum "$linux.tar.gz" "$windows.zip" > SHA256SUMS.txt && cat SHA256SUMS.txt)
 
 echo
