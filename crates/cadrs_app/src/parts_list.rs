@@ -128,6 +128,16 @@ fn rebuild_part_list(
     let Some((container, added)) = q_rows.iter().next().map(|(e, r)| (e, r.is_added())) else {
         return;
     };
+    // The rows only change with what they show: don't build their key every frame.
+    let inputs_changed = cache.is_changed()
+        || over.is_changed()
+        || open.is_changed()
+        || boards_open.is_changed()
+        || theme.is_changed()
+        || doc.as_ref().is_some_and(|d| d.is_changed());
+    if !added && !inputs_changed && last.is_some() {
+        return;
+    }
     // P3H.6 judge: a composite part's row has the composite part icon.
     let composite = |p: PartId| {
         doc.as_deref()

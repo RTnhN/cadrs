@@ -268,8 +268,17 @@ fn sync_pictures(
     mut meshes: ResMut<Assets<Mesh>>,
     q: Query<Entity, With<PictureOverlay>>,
     mut last: Local<Option<u64>>,
+    mut loading: Local<bool>,
     mut commands: Commands,
 ) {
+    // Nothing new while the parts are as they were and no picture is still loading.
+    if !cache.is_changed() && !*loading && last.is_some() {
+        return;
+    }
+    *loading = cache
+        .shown()
+        .flat_map(|p| p.solid.images.iter())
+        .any(|i| !cadrs_core::blobs::contains(&i.blob));
     // A derived board shown as its layout hides its skins. A picture not loaded (yet) is left
     // out, not remembered as unreadable: a board's skin made again has the same name.
     let want: Vec<(&str, &SolidImage)> = cache

@@ -2720,16 +2720,27 @@ fn auto_save(
     user: Res<UserProfile>,
     time: Res<Time>,
     mut quiet_for: Local<f32>,
+    mut checked: Local<bool>,
 ) {
     let Some(mut doc) = doc else {
         return;
     };
     if doc.is_changed() {
         *quiet_for = 0.0;
+        *checked = false;
+        return;
+    }
+    // Once per quiet spell: comparing the document with the saved copy every frame cost a big
+    // document milliseconds.
+    if *checked {
         return;
     }
     *quiet_for += time.delta_secs();
-    if *quiet_for >= AUTO_SAVE_DELAY && doc.is_dirty() {
+    if *quiet_for < AUTO_SAVE_DELAY {
+        return;
+    }
+    *checked = true;
+    if doc.is_dirty() {
         let d = doc.bypass_change_detection();
         if let Err(e) = d.save_if_changed(&store.0, clock.now(), &user.id) {
             error!("cannot save document: {e}");

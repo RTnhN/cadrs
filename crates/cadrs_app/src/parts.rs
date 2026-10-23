@@ -62,6 +62,7 @@ impl Plugin for PartsPlugin {
             .init_resource::<FaceSelection>()
             .init_resource::<RebuildBudget>()
             .init_resource::<HoverParts>()
+            .init_resource::<RetainedEdges>()
             .init_gizmo_group::<PartEdgeGizmos>()
             .init_gizmo_group::<PreviewEdgeGizmos>()
             .init_gizmo_group::<ChangeEdgeGizmos>()
@@ -1283,6 +1284,17 @@ fn update_part_cache(
         crate::assembly::update_assembly_parts(&doc, el, &mut cache, &mut asm, budget.0);
         return;
     }
+    // Nothing to look at while the document and the overrides are as they were and no rebuild
+    // is running (comparing every feature each frame cost a big Part Studio milliseconds, and
+    // touching the cache mutably woke everything that follows it).
+    if !doc.is_changed()
+        && !over.is_changed()
+        && cache.key.is_some()
+        && cache.pending.is_none()
+        && cache.superseded.is_none()
+    {
+        return;
+    }
     let features = el.features();
     // Renames and hidden parts (and a change of element ends an isolation).
     if cache.props.as_slice() != el.part_props() {
@@ -1314,7 +1326,8 @@ fn update_part_cache(
         && !visibility_changed
     {
         // A rebuild still running: take its result when it is done.
-        if let Some(p) = &mut cache.pending
+        if cache.pending.is_some()
+            && let Some(p) = &mut cache.pending
             && let Some(build) = p.rebuild.poll()
         {
             let same_element = p.element == el.id;
@@ -1328,7 +1341,8 @@ fn update_part_cache(
                     over.staged.is_some(),
                 );
             }
-        } else if let Some(p) = &mut cache.superseded
+        } else if cache.superseded.is_some()
+            && let Some(p) = &mut cache.superseded
             && let Some(build) = p.rebuild.poll()
         {
             // An older rebuild finished first: show it while the newer one runs.
@@ -1979,6 +1993,17 @@ fn sync_part_meshes(
     section: Res<crate::section_view::SectionClip>,
     mut commands: Commands,
 ) {
+    // Nothing to do while the parts, their overrides, the render mode and the section are as
+    // they were.
+    if !(cache.is_changed()
+        || over.is_changed()
+        || ghosts.is_changed()
+        || view.is_changed()
+        || section.is_changed())
+        && last.is_some()
+    {
+        return;
+    }
     // P3E.3a: the Translucent render mode draws every part see-through.
     let see_through = view.view.render.translucent();
     let excluded = if section.plane.is_some() {
@@ -2321,7 +2346,6 @@ fn draw_part_edges(
     view: Res<ViewportView>,
     highlight: Res<PlaneHighlight>,
     selection: Res<Selection>,
-    mut edges: Gizmos<PartEdgeGizmos>,
     (mut preview_edges, mut change_edges): (Gizmos<PreviewEdgeGizmos>, Gizmos<ChangeEdgeGizmos>),
     mut hover: Gizmos<FaceHoverGizmos>,
     (mut highlight_edges, mut outline_edges): (
@@ -2331,7 +2355,6 @@ fn draw_part_edges(
     mut reference_edges: Gizmos<ReferenceEdgeGizmos>,
     dialog: Option<Res<crate::extrude::ExtrudeSession>>,
     mut vertices: Gizmos<VertexGizmos>,
-    mut free_edges: Gizmos<FreeEdgeGizmos>,
     (failed, ghosts, analysis): (
         Res<FailedReferences>,
         Res<PartGhosts>,
@@ -2342,7 +2365,13 @@ fn draw_part_edges(
         Res<crate::viewport::ExtraHighlight>,
         Local<LinesCache>,
     ),
-    section: Res<crate::section_view::SectionClip>,
+    (section, mut retained, mut gizmo_assets, gizmo_store, mut commands): (
+        Res<crate::section_view::SectionClip>,
+        ResMut<RetainedEdges>,
+        ResMut<Assets<GizmoAsset>>,
+        Res<GizmoConfigStore>,
+        Commands,
+    ),
 ) {
     // P3E.3a: the tab's render mode, and the section view's plane (the edges are cut by it).
     let mode = view.view.render;
@@ -2386,6 +2415,28 @@ fn draw_part_edges(
         Some(Pick::Feature(f)) => Some(f),
         _ => None,
     };
+    // The parts with a hovered or selected face, edge or vertex: only theirs are looked at face
+    // by face and edge by edge below (every face and edge of every part each frame cost a big
+    // Part Studio milliseconds).
+    let marked: std::collections::HashSet<PartId> = selection
+        .0
+        .iter()
+        .chain(extra.selected.iter())
+        .chain(extra.hovered.iter())
+        .chain(highlight.viewport.iter())
+        .chain(highlight.list.iter())
+        .filter_map(|p| p.part())
+        .collect();
+    // The plain edges (a part neither hovered, selected nor failing) and the free edges go to
+    // retained gizmos, made again only when what they show changes.
+    let mut plain: Vec<(
+        std::sync::Arc<Vec<Vec<Vec3>>>,
+        Option<crate::section_view::Cut>,
+    )> = Vec::new();
+    let mut free: Vec<(
+        std::sync::Arc<cadrs_core::solid::Solid>,
+        Option<crate::section_view::Cut>,
+    )> = Vec::new();
     for part in cache.shown().chain(cache.tool.iter()) {
         // The section's cut, none for the parts it leaves whole.
         let clip = section.clip_for(part.id);
@@ -2476,32 +2527,25 @@ fn draw_part_edges(
                 || part_selected
                 || (failed_parts.contains(&part.id) && failed.2.is_empty());
             if !outlined && mode.edges() {
-                for line in lines_of(part, &v, opaque && !mode.translucent()).iter() {
-                    strip(&mut edges, clip, line.iter().copied(), edge_color);
-                }
+                plain.push((lines_of(part, &v, opaque && !mode.translucent()), clip));
             }
-            for e in part
-                .solid
-                .edges
-                .iter()
-                .filter(|e| e.name.faces[0] == e.name.faces[1] && !e.smooth && mode.edges())
-            {
-                strip(
-                    &mut free_edges,
-                    clip,
-                    e.points.iter().map(|p| v3(*p)),
-                    edge_color,
-                );
+            if mode.edges() {
+                free.push((part.solid.clone(), clip));
             }
         }
         // Base colours only when a face of the part is selected (the per-frame cost).
         let selected = |p: Pick| selection.contains(p) || extra.selected.contains(&p);
         let hovered_pick = |p: Pick| highlight.is_hovered(p) || extra.hovered.contains(&p);
-        let bases = if part
-            .solid
-            .faces
-            .iter()
-            .any(|f| selected(Pick::Face(part.id, f.name)))
+        // Only a part with something hovered or selected on it (or any part while a feature's
+        // row is hovered) is looked at face by face and edge by edge.
+        let touched = marked.contains(&part.id) || list_feature.is_some();
+        let only_touched = if touched { usize::MAX } else { 0 };
+        let bases = if touched
+            && part
+                .solid
+                .faces
+                .iter()
+                .any(|f| selected(Pick::Face(part.id, f.name)))
         {
             cache.bases(part)
         } else {
@@ -2509,7 +2553,7 @@ fn draw_part_edges(
         };
         // Hover and selection on the ghost while a dialog shows one (picks land there).
         let hp = cache.picked_geometry(part);
-        for (fi, face) in hp.solid.faces.iter().enumerate() {
+        for (fi, face) in hp.solid.faces.iter().enumerate().take(only_touched) {
             let pick = Pick::Face(part.id, face.name);
             let hovered = hovered_pick(pick) || list_feature.is_some_and(|f| face.name.op == f.0);
             if !hovered && !selected(pick) {
@@ -2577,7 +2621,7 @@ fn draw_part_edges(
             }
         }
         // Edges: hovered or selected.
-        for e in &hp.solid.edges {
+        for e in hp.solid.edges.iter().take(only_touched) {
             let pick = Pick::Edge(part.id, e.name);
             let color = if hovered_pick(pick) && selected(pick) {
                 // Hovering a selected edge: a click deselects it.
@@ -2606,7 +2650,7 @@ fn draw_part_edges(
         }
         // Vertices: a dot about 9 px across, facing the viewer.
         let rot = Quat::from_rotation_arc(Vec3::Z, v.back());
-        for vx in &hp.solid.vertices {
+        for vx in hp.solid.vertices.iter().take(only_touched) {
             if clip.is_some_and(|c| c.removes(v3(vx.point))) {
                 continue;
             }
@@ -2622,6 +2666,147 @@ fn draw_part_edges(
                 vertices
                     .circle(Isometry3d::new(v3(vx.point), rot), r * v.scale, color)
                     .resolution(20);
+            }
+        }
+    }
+    let plain_key = RetainedKey {
+        items: plain
+            .iter()
+            .map(|(l, c)| (std::sync::Arc::as_ptr(l) as usize, *c))
+            .collect(),
+        color: edge_color,
+    };
+    retain_lines(
+        &mut retained.plain,
+        plain_key,
+        |asset| {
+            for (lines, clip) in &plain {
+                for line in lines.iter() {
+                    strip_asset(asset, *clip, line.iter().copied(), edge_color);
+                }
+            }
+        },
+        gizmo_store.config::<PartEdgeGizmos>().0,
+        &mut gizmo_assets,
+        &mut commands,
+    );
+    let free_key = RetainedKey {
+        items: free
+            .iter()
+            .map(|(s, c)| (std::sync::Arc::as_ptr(s) as usize, *c))
+            .collect(),
+        color: edge_color,
+    };
+    retain_lines(
+        &mut retained.free,
+        free_key,
+        |asset| {
+            for (solid, clip) in &free {
+                for e in solid
+                    .edges
+                    .iter()
+                    .filter(|e| e.name.faces[0] == e.name.faces[1] && !e.smooth)
+                {
+                    strip_asset(asset, *clip, e.points.iter().map(|p| v3(*p)), edge_color);
+                }
+            }
+        },
+        gizmo_store.config::<FreeEdgeGizmos>().0,
+        &mut gizmo_assets,
+        &mut commands,
+    );
+}
+
+/// The plain part edges and the free edges, drawn as retained gizmos: [`draw_part_edges`] makes
+/// their lines again only when the parts, the view direction, the section or the edge colour
+/// change, not every frame (drawing a large Part Studio's edges anew each frame cost it most of
+/// its frame).
+#[derive(Resource, Default)]
+pub struct RetainedEdges {
+    plain: RetainedLines,
+    free: RetainedLines,
+}
+
+#[derive(Default)]
+struct RetainedLines {
+    key: Option<RetainedKey>,
+    handle: Option<Handle<GizmoAsset>>,
+    entity: Option<Entity>,
+    /// The line width, depth bias and on/off the entity was made with (the gizmo group's
+    /// config, which the view's perspective changes).
+    config: Option<(f32, f32, bool)>,
+}
+
+/// What a retained gizmo's lines were made from: each part's lines (or solid) by identity and
+/// its section cut, and the colour.
+#[derive(PartialEq)]
+struct RetainedKey {
+    items: Vec<(usize, Option<crate::section_view::Cut>)>,
+    color: Color,
+}
+
+/// Marks the retained edge gizmos (removed with the parts when a document closes).
+#[derive(Component)]
+struct RetainedEdgeGizmo;
+
+fn retain_lines(
+    slot: &mut RetainedLines,
+    key: RetainedKey,
+    fill: impl FnOnce(&mut GizmoAsset),
+    config: &GizmoConfig,
+    assets: &mut Assets<GizmoAsset>,
+    commands: &mut Commands,
+) {
+    let enabled = config.enabled;
+    if slot.key.as_ref() != Some(&key) || slot.config.is_some_and(|c| c.2 != enabled) {
+        let mut asset = GizmoAsset::default();
+        if enabled {
+            fill(&mut asset);
+        }
+        match &slot.handle {
+            Some(h) => {
+                let _ = assets.insert(h.id(), asset);
+            }
+            None => slot.handle = Some(assets.add(asset)),
+        }
+        slot.key = Some(key);
+    }
+    let want = (config.line.width, config.depth_bias, enabled);
+    if slot.entity.is_none() || slot.config != Some(want) {
+        let Some(handle) = slot.handle.clone() else {
+            return;
+        };
+        let bundle = (
+            bevy::gizmos::retained::Gizmo {
+                handle,
+                line_config: config.line.clone(),
+                depth_bias: config.depth_bias,
+            },
+            config.render_layers.clone(),
+            RetainedEdgeGizmo,
+        );
+        match slot.entity {
+            Some(e) => {
+                commands.entity(e).try_insert(bundle);
+            }
+            None => slot.entity = Some(commands.spawn(bundle).id()),
+        }
+        slot.config = Some(want);
+    }
+}
+
+/// [`strip`] into a retained gizmo.
+fn strip_asset(
+    g: &mut GizmoAsset,
+    clip: Option<crate::section_view::Cut>,
+    pts: impl IntoIterator<Item = Vec3>,
+    color: Color,
+) {
+    match clip {
+        None => g.linestrip(pts, color),
+        Some(plane) => {
+            for piece in crate::section_view::clip_polyline(pts, plane) {
+                g.linestrip(piece, color);
             }
         }
     }
@@ -2733,6 +2918,19 @@ fn tint_selection(
     ),
     mut commands: Commands,
 ) {
+    // Nothing to tint again while nothing it follows changed.
+    let changed = cache.is_changed()
+        || selection.is_changed()
+        || failed.is_changed()
+        || ghosts.is_changed()
+        || over.is_changed()
+        || doc.as_ref().is_some_and(|d| d.is_changed())
+        || highlight.is_changed()
+        || hover_parts.is_changed()
+        || extra.is_changed();
+    if !changed && last.is_some() {
+        return;
+    }
     // The Final preview and a dialog's accent faces are Part Studio things.
     let studio = cache.assembly.is_none();
     // P3.11 (P3.8 judge: one pattern-preview style): an edited feature or face pattern (or
@@ -2975,9 +3173,19 @@ fn tint_sketch_plane(
     ));
 }
 
-fn clear_parts(mut cache: ResMut<PartCache>, mut over: ResMut<PartOverride>) {
+fn clear_parts(
+    mut cache: ResMut<PartCache>,
+    mut over: ResMut<PartOverride>,
+    mut retained: ResMut<RetainedEdges>,
+    q_retained: Query<Entity, With<RetainedEdgeGizmo>>,
+    mut commands: Commands,
+) {
     *cache = PartCache::default();
     *over = PartOverride::default();
+    *retained = RetainedEdges::default();
+    for e in &q_retained {
+        commands.entity(e).try_despawn();
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
