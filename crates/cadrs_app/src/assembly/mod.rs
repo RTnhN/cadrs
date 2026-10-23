@@ -865,7 +865,7 @@ fn prune_selection(
     }
 }
 
-/// Assembly shortcuts, including deletion of the selected instances through undo/redo.
+/// Assembly shortcuts, including deletion of the selected mate or instances through undo/redo.
 #[allow(clippy::too_many_arguments)]
 fn assembly_keys(
     mut keys_in: MessageReader<KeyboardInput>,
@@ -976,6 +976,22 @@ fn assembly_keys(
                 if !k.repeat && insert.is_none() && q_features.is_empty() =>
             {
                 commands.queue(move |world: &mut World| {
+                    // The mate selected in the list or the view, as its menu's Delete does.
+                    let mate = world
+                        .get_resource::<mate_display::MateSelection>()
+                        .and_then(|s| s.0);
+                    if let Some(mate) = mate {
+                        if run(
+                            world,
+                            &cadrs_core::assembly::commands::DeleteMateFeatures {
+                                element,
+                                mates: vec![mate],
+                            },
+                        ) {
+                            world.resource_mut::<mate_display::MateSelection>().0 = None;
+                        }
+                        return;
+                    }
                     let instances = selected_instances(world.resource::<Selection>());
                     delete_instances(world, element, instances);
                 });
@@ -1158,6 +1174,39 @@ mod deletion_tests {
                 1
             );
         }
+    }
+
+    /// Delete removes the mate selected in the list (as its menu's Delete), not the selected
+    /// instances, in one undo step.
+    #[test]
+    fn delete_removes_the_selected_mate() {
+        use cadrs_core::samples::step_stool as ss;
+        let mut active = ActiveDocument::new(ss::document().unwrap());
+        active.active = Some(ss::ASSEMBLY);
+        let model = active.active_element().unwrap().assembly_model().unwrap();
+        let mate = model.mates.iter().find(|f| f.mate().is_some()).unwrap().id;
+        let count = model.mates.len();
+        let instance = model.instances[0].id;
+        let mut app = App::new();
+        app.add_message::<KeyboardInput>()
+            .insert_resource(active)
+            .insert_resource(Selection(vec![Pick::Part(instance.part_id())]))
+            .insert_resource(mate_display::MateSelection(Some(mate)))
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<InputFocus>()
+            .init_resource::<PlaneHighlight>()
+            .add_systems(Update, assembly_keys);
+        press(&mut app, KeyCode::Delete, false);
+        let active = app.world().resource::<ActiveDocument>();
+        let model = active.active_element().unwrap().assembly_model().unwrap();
+        assert_eq!(model.mates.len(), count - 1);
+        assert!(model.mates.iter().all(|f| f.id != mate));
+        assert!(model.instances.iter().any(|i| i.id == instance));
+        assert_eq!(active.history.undo_len(), 1);
+        assert_eq!(
+            app.world().resource::<mate_display::MateSelection>().0,
+            None
+        );
     }
 
     #[test]
