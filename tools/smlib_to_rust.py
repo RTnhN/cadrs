@@ -17,7 +17,7 @@ tests/data/smlib/<suite>/ (with a README carrying the licence), marks known fail
 so one that passes has to be taken off the list; `slow` ones only run with --ignored) and, when
 CADRS_SMLIB_ORACLE names the SMLib oracle (tools/smlib_oracle), runs each case's oracle command
 once and bakes SMLib's volume, area, face and edge counts and solidity into the case (volume and
-area to a relative 1e-4; a result SMLib doesn't call a manifold solid isn't used). Without the oracle a case checks SMLib's asserted counts and the
+area to a relative 1e-4; a result SMLib doesn't call a manifold solid isn't used, except from a sheet input, where it is a sheet whose area is compared). Without the oracle a case checks SMLib's asserted counts and the
 invariants (valid, closed, Euler characteristic, positive volume). Face and edge counts are
 compared only for planar models (see tests/smlib_common/mod.rs).
 
@@ -390,7 +390,8 @@ def generate(root, suite, oracle):
                 if c.expect.get("edges") is not None and r.get("edges") is not None and c.expect["edges"] != r["edges"]:
                     c.note = (c.note + "; " if c.note else "") + "SMLib's test asserts %d edges, the oracle gives %d" % (c.expect["edges"], r["edges"])
                 for k in ("volume", "area", "faces", "edges", "solid"):
-                    if k in r:
+                    # (A sheet encloses no volume: its 0 isn't compared.)
+                    if k in r and not (k == "volume" and r.get("solid") is False):
                         c.expect[k] = r[k]
             else:
                 c.note = "SMLib (the oracle) fails: %s" % r.get("status", "?")

@@ -31,7 +31,6 @@ case_207_test7
 case_208_test8 slow
 case_210_sphere_dif_box
 case_211_cyl_cyl_shell slow
-case_212_sphere_plane
 case_213_bague slow
 case_214_cap1
 case_215_cap1 slow
@@ -47,7 +46,6 @@ case_227_fillet1018 slow
 case_228_crown
 case_229_loft_brick
 case_231_box_extrusion2 slow
-case_233_coons_01_03_29
 case_234_nurb_cone
 case_235_cube_sphere2
 case_237_knife slow

@@ -1326,7 +1326,11 @@ fn local_problem(input: &Body, out: &Body) -> Option<String> {
     use super::topo::CheckLevel;
     // The full check on the faces the blend changed (the others are the input's, as they were),
     // the fast one everywhere; the input checked only when the result fails (its check computes
-    // its volumes too).
+    // its volumes too). (None again for a result the local blend passed by the full check on
+    // all its faces.)
+    if super::fillet::fully_checked(out) {
+        return None;
+    }
     let full = out.check_changed(&changed_faces(input, out)).into_iter().next()?;
     if input.check_with(CheckLevel::Full).is_empty() {
         return Some(full);

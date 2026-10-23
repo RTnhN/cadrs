@@ -344,5 +344,8 @@ def extract(ctx):
             print("fillets: block %d not converted: %s" % (n, e), file=sys.stderr)
             c = None
         if c is not None:
+            # A sheet's fillet is a sheet: SMLib's (and ours) can't be a solid.
+            if any(ctx.points(f).get("solid") is False for f in c.fixtures):
+                c.expect["solid"] = False
             cases.append(c)
     return cases

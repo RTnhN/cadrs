@@ -42,9 +42,11 @@ Differences without errors, still to check:
 - [ ] Fillets and blends:
   - occt_blend: 96 known failures (most "area differs" ones pick another edge than OCCT's
     explode order, and five expect OCCT's own failure);
-  - SMLib fillets: 36/100 pass;
-  - no occt_blend case needs the tool-and-boolean fallback any more; four SMLib cases still do
-    (case_407, 416, 417, 419).
+  - SMLib fillets: 42/100 pass (the sheet inputs' results compared as sheets, on their area);
+    the tangent-chain cases whose face pair changes at a vertex (group A: 116, 226, 231, 234,
+    237, 401, 410, 411, 412, 421) each stop on another limit past the junction (a fillet larger
+    than the round it runs over, a rail running off a face, a crease of 1° taken as tangent);
+  - no passing occt_blend or SMLib case needs the tool-and-boolean fallback any more.
 - [ ] Booleans: 166 occt_boolean known failures (section lengths, sub-shape counts, open shells, areas).
 - [ ] Offsets: 193 occt_offset known failures (101 of them B-spline wire offsets); smlib_offset 23/29.
 - [ ] A merged face's new seam can run through one of its holes. The boolean merges the
@@ -68,8 +70,9 @@ Differences without errors, still to check:
   - loose edges and vertices next to faces;
   - wire-only files.
 - [ ] STEP/IGES: 128 of OCCT's 389 dataset files don't read clean (`tests/exchange_corpus.rs`).
-- [ ] Fillet speed: 1.55× OCCT on occt_blend and 1.94× on smlib_fillet (PERF.md); the goal is at or
-  below OCCT.
+- [ ] Fillet speed: 1.11× OCCT on occt_blend and 1.17× on smlib_fillet (CPU times, each case run
+  by both in turn: the shared machine's load moves either side alone by tens of percent); the
+  goal is at or below OCCT. The result's check is about 40% of a local fillet's time.
 
 ### Release mechanics
 

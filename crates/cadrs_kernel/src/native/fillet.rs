@@ -1248,21 +1248,51 @@ fn mitre(b: &Body, efs: &[EdgeFillet], a: (usize, usize), bb: (usize, usize), v:
         last = Some((u, p, u2, bl, t1));
     }
     let (Some(mut t_bad), Some(l)) = (end_t, last) else { return Err(failed("corner", "the fillets' mitre doesn't end")) };
-    // Where the mitre leaves the strips: bisection between the last good step and the first bad.
+    // Where the mitre leaves the strips, between the last good step and the first bad: where
+    // the farther of its parameters on the two sections reaches 1 (regula falsi, the Illinois
+    // way, on that less 1 where the bad side has it, else bisection), to the spine parameter's
+    // resolution.
+    let over = |x: &Option<(f64, P3, f64, Ball)>| x.as_ref().filter(|x| x.0 > 0.0).map(|x| x.0.max(x.2) - 1.0);
     let mut good_end = l;
     let mut t_good = l.4;
+    let mut f_good = l.0.max(l.2) - 1.0;
+    let mut f_bad: Option<f64> = None;
+    let mut side = 0i32;
     for _ in 0..60 {
-        let tm = 0.5 * (t_good + t_bad);
+        if (t_bad - t_good).abs() <= 1e-15 * (1.0 + t_good.abs() + (t1e - t1s).abs()) {
+            break;
+        }
+        let tm = match f_bad {
+            Some(fb) if fb > 0.0 && f_good < 0.0 => {
+                let w = (f_good / (f_good - fb)).clamp(0.01, 0.99);
+                t_good + (t_bad - t_good) * w
+            }
+            _ => 0.5 * (t_good + t_bad),
+        };
         let from = (good_end.4, good_end.3);
         let mut st = st2;
         let x = root(tm, &from, good_end.0, &mut st)?;
         if good(&x) {
+            let fx = over(&x);
             let (u, p, u2, bl) = x.ok_or_else(lost)?;
             good_end = (u, p, u2, bl, tm);
             t_good = tm;
+            f_good = fx.unwrap_or(f_good);
             st2 = st;
+            if side == 1 {
+                f_bad = f_bad.map(|f| 0.5 * f);
+            }
+            side = 1;
         } else {
             t_bad = tm;
+            f_bad = over(&x);
+            if side == -1 {
+                f_good *= 0.5;
+            }
+            side = -1;
+        }
+        if good_end.0.max(good_end.2) - 1.0 > -1e-14 {
+            break;
         }
     }
     let (u1, end_p, u2, bl1, t1q) = good_end;
@@ -3040,16 +3070,28 @@ fn face_pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64, near: Option<P2>) -> Cu
 /// parameters as the curve interpolates its points. Kept where it stays within a millionth of
 /// the model's size of the curve, beyond how far the curve itself lies off the surface (the
 /// general fit's sixteen samples a span and refinement to 1e-9 cost several times more on these
-/// many-span curves); `None` otherwise or for other curves.
+/// many-span curves); a circle on a B-spline surface the same, as eight spans. `None`
+/// otherwise or for other curves.
 fn quick_pcurve(s: &Surface, c: &Curve, t0: f64, t1: f64) -> Option<Curve> {
-    let Curve::Nurbs(_) = c else { return None };
-    let pieces = c.pieces(t0, t1);
+    let pieces = match c {
+        Curve::Nurbs(_) => c.pieces(t0, t1),
+        // A circle on a B-spline surface (its p-curve a fitted one anyway): as eight spans.
+        Curve::Circle { .. } if matches!(s, Surface::Nurbs(_)) => (0..=8).map(|i| t0 + (t1 - t0) * i as f64 / 8.0).collect(),
+        _ => return None,
+    };
     if pieces.len() < 3 {
         return None;
     }
-    let mut ts: Vec<f64> = Vec::with_capacity(2 * pieces.len());
+    // Two samples a span, else (the interpolation off near an end, where a cubic's end
+    // conditions bend it) four.
+    [2, 4].into_iter().find_map(|k| quick_fit(s, c, t0, t1, &pieces, k))
+}
+
+/// [`quick_pcurve`] with k samples a span of the curve's (`pieces`).
+fn quick_fit(s: &Surface, c: &Curve, t0: f64, t1: f64, pieces: &[f64], k: usize) -> Option<Curve> {
+    let mut ts: Vec<f64> = Vec::with_capacity(k * pieces.len());
     for w in pieces.windows(2) {
-        ts.extend([w[0], 0.5 * (w[0] + w[1])]);
+        ts.extend((0..k).map(|i| w[0] + (w[1] - w[0]) * i as f64 / k as f64));
     }
     ts.push(t1);
     let periods = super::pcurve::closed_periods(s);
@@ -5447,8 +5489,18 @@ fn open_seam_hole(b: &Body, fi: usize, d: usize, p: f64) -> Option<Body> {
     None
 }
 
+thread_local!(static FULLY_CHECKED: std::cell::RefCell<Option<Body>> = const { std::cell::RefCell::new(None) });
+
+/// Whether `b` is the result the last local blend on this thread passed by the full check
+/// on all its faces (which only a result trimmed again without cliffs gets): every lighter
+/// check then passes it too, and needn't run again.
+pub(crate) fn fully_checked(b: &Body) -> bool {
+    FULLY_CHECKED.with(|c| c.borrow().as_ref().is_some_and(|x| x == b))
+}
+
 /// [`fillet_edges_laws`] with each edge's [`EdgeFillet::ratio`].
 fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], flat: bool) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
+    FULLY_CHECKED.with(|c| *c.borrow_mut() = None);
     if edges.iter().any(|(e, law)| *e >= b.edges.len() || law.is_empty()) {
         return Err(KernelError::InvalidParameter("unknown edge or empty radius law".into()));
     }
@@ -5481,7 +5533,10 @@ fn local_blend(b: &Body, input: BodyId, edges: &[RadiusLaw], ratios: &[f64], fla
             let problem = match out.check_with(CheckLevel::Full).into_iter().next() {
                 Some(x) if b.check_with(CheckLevel::Full).is_empty() => Some(x),
                 Some(_) => out.check_with(CheckLevel::Fast).into_iter().next(),
-                None => None,
+                None => {
+                    FULLY_CHECKED.with(|c| *c.borrow_mut() = Some(out.clone()));
+                    None
+                }
             };
             match problem {
                 Some(x) => {

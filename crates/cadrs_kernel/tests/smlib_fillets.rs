@@ -234,7 +234,6 @@ fn case_007_cyl_on_box() {
 }
 
 /// SMLib fillet test 8: `case_int.smb`, radius 1.0, edges [(0, 0)].
-/// SMLib's own result isn't a manifold solid (volume 0, 4 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_008_case_int() {
@@ -245,7 +244,10 @@ fn case_008_case_int() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(379.26173053),
+                faces: Some(4),
                 edges: Some(8),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -255,7 +257,6 @@ fn case_008_case_int() {
 }
 
 /// SMLib fillet test 9: `case_ext.smb`, radius 1.0, edges [(0, 0)].
-/// SMLib's own result isn't a manifold solid (volume 0, 4 faces): not compared.
 #[test]
 fn case_009_case_ext() {
     known_failure(
@@ -265,7 +266,10 @@ fn case_009_case_ext() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(771.537884337),
+                faces: Some(4),
                 edges: Some(12),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -656,6 +660,7 @@ fn case_120_shell_fillet() {
             Op::Fillet(1.0),
             &Expect {
                 edges: Some(18),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -834,6 +839,7 @@ fn case_128_shell_fillet2() {
             Op::Fillet(0.5),
             &Expect {
                 edges: Some(22),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -938,7 +944,6 @@ fn case_204_test4() {
 }
 
 /// SMLib fillet test 205: `test5.smb`, radius 1.0, edges [(2, 3), (5, 5), (9, 9)].
-/// SMLib's own result isn't a manifold solid (volume 0, 9 faces): not compared.
 #[test]
 fn case_205_test5() {
     known_failure(
@@ -948,7 +953,10 @@ fn case_205_test5() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(114.734255867),
+                faces: Some(9),
                 edges: Some(20),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -981,7 +989,6 @@ fn case_206_test6() {
 }
 
 /// SMLib fillet test 207: `test7.smb`, radius 1.0, edges [(0, 0), (13, 14)].
-/// SMLib's own result isn't a manifold solid (volume 0, 10 faces): not compared.
 #[test]
 fn case_207_test7() {
     known_failure(
@@ -991,7 +998,10 @@ fn case_207_test7() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(159.574150332),
+                faces: Some(10),
                 edges: Some(26),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1001,7 +1011,6 @@ fn case_207_test7() {
 }
 
 /// SMLib fillet test 208: `test8.smb`, radius 1.0, edges [(3, 3)].
-/// SMLib's own result isn't a manifold solid (volume 0, 3 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_208_test8() {
@@ -1012,7 +1021,10 @@ fn case_208_test8() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(590.457219386),
+                faces: Some(3),
                 edges: Some(9),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1053,6 +1065,7 @@ fn case_210_sphere_dif_box() {
             Op::Fillet(1.0),
             &Expect {
                 edges: Some(55),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1062,7 +1075,6 @@ fn case_210_sphere_dif_box() {
 }
 
 /// SMLib fillet test 211: `cyl_cyl_shell.smb`, radius 1.0, edges [(2, 2), (5, 5)].
-/// SMLib's own result isn't a manifold solid (volume 0, 4 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_211_cyl_cyl_shell() {
@@ -1073,7 +1085,10 @@ fn case_211_cyl_cyl_shell() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(1236.80365753),
+                faces: Some(4),
                 edges: Some(13),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1083,23 +1098,22 @@ fn case_211_cyl_cyl_shell() {
 }
 
 /// SMLib fillet test 212: `sphere_plane.smb`, radius 1.0, edges [(3, 3)].
-/// SMLib's own result isn't a manifold solid (volume 0, 3 faces): not compared.
 #[test]
 fn case_212_sphere_plane() {
-    known_failure(
-        blend(
-            "sphere_plane.smb",
-            &[(3, 3)],
-            true,
-            Op::Fillet(1.0),
-            &Expect {
-                edges: Some(6),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_212_sphere_plane",
-    );
+    blend(
+        "sphere_plane.smb",
+        &[(3, 3)],
+        true,
+        Op::Fillet(1.0),
+        &Expect {
+            area: Some(309.258666783),
+            faces: Some(3),
+            edges: Some(6),
+            solid: Some(false),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 213: `bague.smb`, radius 0.1, edges [(7, 7)].
@@ -1124,7 +1138,6 @@ fn case_213_bague() {
 }
 
 /// SMLib fillet test 214: `cap1.smb`, radius 1.0, edges [(3, 3)].
-/// SMLib's own result isn't a manifold solid (volume 0, 4 faces): not compared.
 #[test]
 fn case_214_cap1() {
     known_failure(
@@ -1134,7 +1147,10 @@ fn case_214_cap1() {
             true,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(434.909108663),
+                faces: Some(4),
                 edges: Some(10),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1144,7 +1160,6 @@ fn case_214_cap1() {
 }
 
 /// SMLib fillet test 215: `cap1.smb`, radius 0.2, edges [(3, 3)].
-/// SMLib's own result isn't a manifold solid (volume 0, 4 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_215_cap1() {
@@ -1155,7 +1170,10 @@ fn case_215_cap1() {
             true,
             Op::Fillet(0.2),
             &Expect {
+                area: Some(444.600682877),
+                faces: Some(4),
                 edges: Some(10),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1165,7 +1183,6 @@ fn case_215_cap1() {
 }
 
 /// SMLib fillet test 216: `caps_coons.smb`, radius 1.0, edges all but [(0, 1)].
-/// SMLib's own result isn't a manifold solid (volume 0, 6 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_216_caps_coons() {
@@ -1176,7 +1193,10 @@ fn case_216_caps_coons() {
             false,
             Op::Fillet(1.0),
             &Expect {
+                area: Some(442.315536263),
+                faces: Some(6),
                 edges: Some(14),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1186,7 +1206,6 @@ fn case_216_caps_coons() {
 }
 
 /// SMLib fillet test 217: `caps_nside.smb`, radius 0.5, edges [(2, 5), (8, 9), (11, 12), (14, 15)].
-/// SMLib's own result isn't a manifold solid (volume 0, 16 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_217_caps_nside() {
@@ -1197,7 +1216,10 @@ fn case_217_caps_nside() {
             true,
             Op::Fillet(0.5),
             &Expect {
+                area: Some(460.053773102),
+                faces: Some(16),
                 edges: Some(37),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1396,7 +1418,6 @@ fn case_225_box_diff_cyl() {
 }
 
 /// SMLib fillet test 226: `blade_hub.smb`, radius 0.1, edges [(5, 5), (7, 8), (10, 12), (14, 17)].
-/// SMLib's own result isn't a manifold solid (volume 0, 24 faces): not compared.
 #[test]
 #[ignore = "known failure, slow (tools/smlib_known_failures/fillets.txt)"]
 fn case_226_blade_hub() {
@@ -1407,7 +1428,10 @@ fn case_226_blade_hub() {
             true,
             Op::Fillet(0.1),
             &Expect {
+                area: Some(30.8927625067),
+                faces: Some(24),
                 edges: Some(64),
+                solid: Some(false),
                 ..Expect::default()
             },
         ),
@@ -1554,23 +1578,22 @@ fn case_232_box_w_slot() {
 }
 
 /// SMLib fillet test 233: `coons_01_03_29.smb`, radius 2.0, edges [(1, 1), (4, 4), (7, 7)].
-/// SMLib's own result isn't a manifold solid (volume 0, 7 faces): not compared.
 #[test]
 fn case_233_coons_01_03_29() {
-    known_failure(
-        blend(
-            "coons_01_03_29.smb",
-            &[(1, 1), (4, 4), (7, 7)],
-            true,
-            Op::Fillet(2.0),
-            &Expect {
-                edges: Some(15),
-                ..Expect::default()
-            },
-        ),
-        "fillets",
-        "case_233_coons_01_03_29",
-    );
+    blend(
+        "coons_01_03_29.smb",
+        &[(1, 1), (4, 4), (7, 7)],
+        true,
+        Op::Fillet(2.0),
+        &Expect {
+            area: Some(948.313770588),
+            faces: Some(7),
+            edges: Some(15),
+            solid: Some(false),
+            ..Expect::default()
+        },
+    )
+    .unwrap();
 }
 
 /// SMLib fillet test 234: `nurb_cone.smb`, radius 0.25, edges [(2, 2), (6, 6), (9, 9), (12, 12), (15, 15), (18, 18), (21, 21), (23, 23)].

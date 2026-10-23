@@ -68,6 +68,18 @@ fn parity_orientation(shell: &Body) -> Option<bool> {
             continue;
         }
         let (mu, mv) = f.surf.metric();
+        // The loops' segments in the metric-scaled (u, v), once for all the grid's points.
+        let segs: Vec<(P2, V2, f64)> = ps
+            .iter()
+            .flat_map(|l| {
+                (0..l.len()).map(move |k| {
+                    let (a, b) = (l[k], l[(k + 1) % l.len()]);
+                    let (a, b) = (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv));
+                    let ab = b - a;
+                    (a, ab, ab.norm_squared().max(1e-300))
+                })
+            })
+            .collect();
         let n = 9;
         let mut best: Option<(f64, P2)> = None;
         for i in 1..n {
@@ -77,17 +89,13 @@ fn parity_orientation(shell: &Body) -> Option<bool> {
                 // far (the same choice as the full minimum); whether it lies inside only asked
                 // of a point that would be the best.
                 let floor = best.map_or(f64::NEG_INFINITY, |b| b.0);
+                let x = P2::new(uv.x * mu, uv.y * mv);
                 let mut d = f64::INFINITY;
-                'segs: for l in ps {
-                    for k in 0..l.len() {
-                        let (a, b) = (l[k], l[(k + 1) % l.len()]);
-                        let (a, b, x) = (P2::new(a.x * mu, a.y * mv), P2::new(b.x * mu, b.y * mv), P2::new(uv.x * mu, uv.y * mv));
-                        let ab = b - a;
-                        let s = ((x - a).dot(&ab) / ab.norm_squared().max(1e-300)).clamp(0.0, 1.0);
-                        d = d.min((a + ab * s - x).norm());
-                        if d <= floor {
-                            break 'segs;
-                        }
+                for &(a, ab, n2) in &segs {
+                    let s = ((x - a).dot(&ab) / n2).clamp(0.0, 1.0);
+                    d = d.min((a + ab * s - x).norm());
+                    if d <= floor {
+                        break;
                     }
                 }
                 if best.is_none_or(|b| d > b.0) {
