@@ -1,6 +1,7 @@
 //! cadrs: an Onshape-style CAD app.
 //!
-//! `cadrs [--headless] [--scenario <name>] [--window-size WxH] [--out <dir>] [--data-dir <dir>]`
+//! `cadrs [--headless] [--scenario <name>] [--window-size WxH] [--out <dir>] [--data-dir <dir>]
+//! [[--open] <file.cadrs>]`
 //!
 //! `cadrs --list-documents [--data-dir <dir>] [--trash]` lists the stored documents with their ids.
 //!
@@ -20,7 +21,7 @@
 //! reproducible.
 
 use bevy::prelude::*;
-use cadrs_app::{AppClock, CadrsAppPlugin, DocumentStore, StartState, UserProfile};
+use cadrs_app::{AppClock, CadrsAppPlugin, DocumentStore, OpenAtStart, StartState, UserProfile};
 use cadrs_core::Store;
 use cadrs_harness::{HarnessOptions, HarnessPlugin};
 use cadrs_ui::CadrsUiPlugin;
@@ -39,6 +40,9 @@ cadrs: an Onshape-style CAD app.
 Usage:
   cadrs [--headless] [--scenario <name>] [--window-size WxH] [--out <dir>] [--data-dir <dir>] [--no-cursor]
       Runs the app (with --scenario, a scripted scenario; --headless needs one).
+  cadrs [--data-dir <dir>] [--open] <file.cadrs>
+      Runs the app with a native document (an export, or a document.ron) imported into the
+      library and open.
   cadrs --list-documents [--data-dir <dir>] [--trash]
       Lists the stored documents, newest first: id, last modified (UTC), name.
   cadrs --document <name or id> --check [--data-dir <dir>] [--part-studio <name>] [--sketch <name>]
@@ -139,6 +143,13 @@ fn main() -> AppExit {
             ..default()
         }),
     );
+    if let Some(path) = &opts.open {
+        if !path.is_file() {
+            eprintln!("cannot open {}: no such file", path.display());
+            return AppExit::from_code(2);
+        }
+        app.insert_resource(OpenAtStart(path.clone()));
+    }
     if let Some(start) = scenario.as_ref().and_then(|s| s.start.clone()) {
         app.insert_resource(StartState(start));
     }
