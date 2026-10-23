@@ -721,8 +721,25 @@ pub fn transform_mass(
 pub fn instance_parts(
     doc: &Document,
     asm: &Assembly,
-    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+    build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
 ) -> (Vec<Part>, Vec<PartProps>) {
+    instance_parts_placed(doc, asm, build_of, &mut PlacedSolids::default())
+}
+
+/// The solids [`instance_parts_placed`] moved into place, by occurrence: one whose source solid
+/// and pose are the same again is the same `Arc` (a drag moves a few instances of many; the view
+/// keeps the others' meshes and edges, which it knows by their solid).
+#[derive(Debug, Default)]
+pub struct PlacedSolids(std::collections::HashMap<PartId, (Arc<Solid>, Pose, Arc<Solid>)>);
+
+/// [`instance_parts`], reusing the solids `placed` holds from the last call.
+pub fn instance_parts_placed(
+    doc: &Document,
+    asm: &Assembly,
+    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+    placed: &mut PlacedSolids,
+) -> (Vec<Part>, Vec<PartProps>) {
+    let mut last = std::mem::take(&mut placed.0);
     let mut parts = Vec::new();
     let mut props = Vec::new();
     for o in structure::occurrences(doc, asm) {
@@ -761,7 +778,16 @@ pub fn instance_parts(
             name,
             kind: src.kind,
             palette: src.palette,
-            solid: Arc::new(transform_solid(&src.solid, &o.pose)),
+            solid: {
+                let solid = match last.remove(&id) {
+                    Some((from, pose, s)) if Arc::ptr_eq(&from, &src.solid) && pose == o.pose => s,
+                    _ => Arc::new(transform_solid(&src.solid, &o.pose)),
+                };
+                placed
+                    .0
+                    .insert(id, (src.solid.clone(), o.pose, solid.clone()));
+                solid
+            },
             mass: src.mass.as_ref().map(|m| transform_mass(m, &o.pose)),
             features: src.features.clone(),
             // The instance's props already carry the source part's appearance and material.

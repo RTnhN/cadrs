@@ -1939,6 +1939,31 @@ pub fn part_lines_culled(part: &Part, view: &ViewState, cull: bool) -> Vec<Vec<V
 pub(crate) struct PartMesh {
     pub(crate) id: PartId,
     preview: bool,
+    /// What the mesh was made from: it is made again only when that changes (an assembly drag
+    /// changes the cache every frame, but only the moved parts' solids).
+    built: Option<MeshSource>,
+    /// Counts the times the mesh was made, so [`shade_parts`] colours a new one.
+    version: u64,
+}
+
+/// A [`part_base_mesh`]'s inputs (the solid kept, so its address isn't reused meanwhile).
+struct MeshSource(std::sync::Arc<cadrs_core::Solid>, bool, bool, Vec<FaceBase>);
+
+impl MeshSource {
+    fn of(part: &Part, preview: bool, bases: &[FaceBase]) -> Self {
+        Self(
+            part.solid.clone(),
+            preview,
+            two_sided(part, preview),
+            bases.to_vec(),
+        )
+    }
+}
+
+impl PartialEq for MeshSource {
+    fn eq(&self, o: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &o.0) && (self.1, self.2, &self.3) == (o.1, o.2, &o.3)
+    }
 }
 
 #[derive(Resource, Default)]
@@ -2074,8 +2099,13 @@ fn sync_part_meshes(
             || cache.tool.iter().any(|t| t.id == part.id)
             || crate::assembly::standard::is_ghost(part.id);
         let bases = ghosted_bases(&cache, &over, &ghosts, part);
-        if let Some(mut m) = meshes.get_mut(&mesh.0) {
+        let source = MeshSource::of(part, preview, &bases);
+        if pm.built.as_ref() != Some(&source)
+            && let Some(mut m) = meshes.get_mut(&mesh.0)
+        {
             *m = part_base_mesh(part, preview, &bases);
+            pm.built = Some(source);
+            pm.version += 1;
         }
         pm.preview = preview;
         let want = material_for(part, preview, &bases);
@@ -2108,6 +2138,8 @@ fn sync_part_meshes(
             PartMesh {
                 id: part.id,
                 preview,
+                built: Some(MeshSource::of(part, preview, &bases)),
+                version: 0,
             },
             Mesh3d(mesh),
             MeshMaterial3d(material_for(part, preview, &bases)),
@@ -2224,9 +2256,10 @@ fn shade_parts(
     ghosts: Res<PartGhosts>,
     selection: Res<Selection>,
     faces: Res<FaceSelection>,
-    q: Query<(&PartMesh, &Mesh3d)>,
+    q: Query<(Entity, &PartMesh, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut last: Local<Option<(u64, Option<FeatureId>, Vec<PartId>, GhostKey, Vec<Pick>)>>,
+    mut shaded: Local<HashMap<Entity, ShadeKey>>,
 ) {
     let selected: Vec<PartId> = if cache.assembly.is_some() && selection.contains(Pick::Assembly) {
         // The assembly's root row: every instance (P3B.1).
@@ -2268,27 +2301,40 @@ fn shade_parts(
         return;
     }
     *last = Some(key);
-    for (pm, mesh) in &q {
+    shaded.retain(|e, _| q.contains(*e));
+    for (e, pm, mesh) in &q {
         let Some(part) = cache.drawn(pm.id) else {
             continue;
         };
+        let sel = selected.contains(&part.id);
+        let bases = ghosted_bases(&cache, &over, &ghosts, part);
+        let picked: Vec<usize> = part
+            .solid
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| faces.0.contains(&Pick::Face(part.id, f.name)))
+            .map(|(i, _)| i)
+            .collect();
+        // Unchanged (an assembly drag changes the cache every frame, but only the moved parts):
+        // touching the mesh would upload it again.
+        let key = ShadeKey(pm.version, pm.preview, sel, bases, picked);
+        if shaded.get(&e) == Some(&key) {
+            continue;
+        }
         if let Some(mut m) = meshes.get_mut(&mesh.0) {
-            let sel = selected.contains(&part.id);
-            let bases = ghosted_bases(&cache, &over, &ghosts, part);
-            let picked: Vec<usize> = part
-                .solid
-                .faces
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| faces.0.contains(&Pick::Face(part.id, f.name)))
-                .map(|(i, _)| i)
-                .collect();
-            let (colors, flags) = base_colors(part, pm.preview, sel, &bases, &picked);
+            let (colors, flags) = base_colors(part, pm.preview, sel, &key.3, &key.4);
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
             m.insert_attribute(Mesh::ATTRIBUTE_UV_0, flags);
+            shaded.insert(e, key);
         }
     }
 }
+
+/// What [`shade_parts`] last coloured a part's mesh for: its version, preview, selection, base
+/// colours and picked faces.
+#[derive(PartialEq)]
+struct ShadeKey(u64, bool, bool, Vec<FaceBase>, Vec<usize>);
 
 /// Part edges, hover and selection outlines.
 #[allow(clippy::too_many_arguments)]

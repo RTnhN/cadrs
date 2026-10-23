@@ -1160,3 +1160,35 @@ fn the_p3b8_fixtures_are_current() {
     fixture_current("flange_standin", fl::document().unwrap());
     fixture_current("step_stool_hinged", ss::hinged_document().unwrap());
 }
+
+/// A drag moves a few instances of many: placed again, the others keep their solids (the view
+/// keeps their meshes and edges), and the moved one is where its new pose puts it.
+#[test]
+fn placing_again_reuses_the_solids_of_unmoved_instances() {
+    let doc = ss::document().unwrap();
+    let b = builds(&doc);
+    let mut asm = doc
+        .element(ss::ASSEMBLY)
+        .unwrap()
+        .assembly_model()
+        .unwrap()
+        .clone();
+    assert!(asm.instances.len() > 1);
+    let mut placed = assembly::PlacedSolids::default();
+    let (first, _) =
+        assembly::instance_parts_placed(&doc, &asm, |e| b.get(&e).cloned(), &mut placed);
+    let moved = asm.instances[0].id;
+    asm.instances[0].pose = asm.instances[0]
+        .pose
+        .then(&Pose::translation([10.0, 0.0, 0.0]));
+    let (second, _) =
+        assembly::instance_parts_placed(&doc, &asm, |e| b.get(&e).cloned(), &mut placed);
+    let (fresh, _) = assembly::instance_parts(&doc, &asm, |e| b.get(&e).cloned());
+    assert_eq!(first.len(), second.len());
+    for ((a, b), c) in first.iter().zip(&second).zip(&fresh) {
+        assert_eq!(a.id, b.id);
+        assert_eq!(b.solid.positions, c.solid.positions, "{}", b.name);
+        let of_moved = InstanceId::of_part(b.id) == moved;
+        assert_eq!(Arc::ptr_eq(&a.solid, &b.solid), !of_moved, "{}", b.name);
+    }
+}
