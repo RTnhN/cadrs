@@ -750,7 +750,7 @@ fn repeat_sketch(repeat: Option<Res<RepeatSketch>>, mut commands: Commands) {
 }
 
 /// Modeling mode: Shift+S starts a sketch; Esc clears the selection; Delete / Backspace delete
-/// the selected features (sketches), as one undo step.
+/// the selected features (sketches), as one undo step, or else the selected parts.
 #[allow(clippy::too_many_arguments)]
 fn modeling_keys(
     mut keys_in: MessageReader<KeyboardInput>,
@@ -794,6 +794,22 @@ fn modeling_keys(
                 if !features.is_empty() {
                     selection.0.retain(|p| !matches!(p, Pick::Feature(_)));
                     commands.queue(move |world: &mut World| delete_features(world, &features));
+                } else {
+                    // Selected parts (the Parts list, or the view): a Delete part feature, as
+                    // their menu's Delete… makes.
+                    let parts: Vec<_> = selection
+                        .0
+                        .iter()
+                        .filter_map(|p| match p {
+                            Pick::Part(id) => Some(*id),
+                            _ => None,
+                        })
+                        .collect();
+                    if !parts.is_empty() {
+                        commands.queue(move |world: &mut World| {
+                            crate::parts_list::delete_parts(world, parts)
+                        });
+                    }
                 }
             }
             _ => {}
@@ -2617,6 +2633,39 @@ mod tests {
         assert_eq!(d.history.undo_label(), Some("Delete 2 features"));
         w.resource_mut::<ActiveDocument>().undo();
         assert_eq!(w.resource::<ActiveDocument>().doc, before);
+    }
+
+    /// Delete with a part selected (and no feature) adds a Delete part feature, as the Parts
+    /// list's Delete… does, in one undo step.
+    #[test]
+    fn delete_key_deletes_the_selected_parts() {
+        use bevy::input::keyboard::{Key, KeyboardInput};
+        use cadrs_core::samples::step_stool as ss;
+        let mut active = ActiveDocument::new(ss::document().unwrap());
+        active.active = Some(ss::LARGE_STUDIO);
+        let count = active.active_element().unwrap().features().len();
+        let mut app = App::new();
+        app.add_message::<KeyboardInput>()
+            .insert_resource(active)
+            .insert_resource(Selection(vec![Pick::Part(ss::LARGE_FRAME_BAR)]))
+            .insert_resource(crate::viewport::ActiveKind::PartStudio)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<InputFocus>()
+            .add_systems(Update, modeling_keys);
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Delete,
+            logical_key: Key::Delete,
+            state: ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        let d = app.world().resource::<ActiveDocument>();
+        let features = d.active_element().unwrap().features();
+        assert_eq!(features.len(), count + 1);
+        assert_eq!(d.history.undo_len(), 1);
+        assert!(app.world().resource::<Selection>().0.is_empty());
     }
 }
 
