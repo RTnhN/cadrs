@@ -309,6 +309,9 @@ fn run(world: &mut World, call: &Call) -> Result<Value, String> {
             let what = d.undo().ok_or("nothing to undo")?;
             Ok(json!({ "undone": what }))
         }
+        Call::CreateVersion(p) => create_version(world, p),
+        Call::ListVersions => list_versions(world),
+        Call::RestoreVersion(p) => restore_version(world, p),
         Call::ImportStep(p) => import_step(world, &p.path),
         Call::ExportStep(p) => export_step(world, p),
         Call::CreateDrawing(p) => create_drawing(world, p),
@@ -1592,6 +1595,61 @@ fn delete_feature(world: &mut World, p: &tools::FeatureName) -> Result<Value, St
         label: format!("Delete {}", f.name),
     })
     .map_err(|e| e.to_string())?;
+    describe(world)
+}
+
+/// Makes a named version of the document as it is (committed changes only).
+fn create_version(world: &mut World, p: &tools::CreateVersion) -> Result<Value, String> {
+    doc(world)?;
+    if world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .is_none()
+    {
+        return Err("the open document keeps no history".into());
+    }
+    let before = versions(world).len();
+    crate::history_panel::create_version(world, &p.name, p.description.as_deref().unwrap_or(""));
+    if versions(world).len() == before {
+        return Err("no version was made: finish the open dialog or edit first".into());
+    }
+    list_versions(world)
+}
+
+fn versions(world: &World) -> Vec<cadrs_core::history_log::Version> {
+    world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .map(|l| l.versions().to_vec())
+        .unwrap_or_default()
+}
+
+fn list_versions(world: &mut World) -> Result<Value, String> {
+    doc(world)?;
+    let entries = world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .map_or(0, |l| l.len());
+    let list: Vec<Value> = versions(world)
+        .iter()
+        .map(|v| {
+            json!({ "name": v.name(), "description": v.description(), "entry": v.entry(),
+                    "time": v.time() })
+        })
+        .collect();
+    Ok(json!({ "versions": list, "history_entries": entries }))
+}
+
+/// Restores the whole document to a version's entry (one undoable step), then answers like
+/// get_document once the active Part Studio has rebuilt.
+fn restore_version(world: &mut World, p: &tools::VersionName) -> Result<Value, String> {
+    doc(world)?;
+    let v = versions(world)
+        .into_iter()
+        .rev()
+        .find(|v| v.name() == p.name)
+        .ok_or_else(|| format!("no version named {:?}", p.name))?;
+    crate::history_panel::restore(world, v.entry());
     describe(world)
 }
 

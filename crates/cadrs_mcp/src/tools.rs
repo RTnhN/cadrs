@@ -660,3 +660,20 @@ pub struct BoardFit {
     #[serde(default)]
     pub copy: Option<usize>,
 }
+
+/// Makes a named version of the open document as it is now (P3D.3).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateVersion {
+    /// The version's name ("Before the stairs").
+    pub name: String,
+    /// What it holds; omitted: none.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Names a version of the open document.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VersionName {
+    /// The version's name, as list_versions shows it (the newest of that name).
+    pub name: String,
+}
