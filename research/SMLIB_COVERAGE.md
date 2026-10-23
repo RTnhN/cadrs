@@ -83,8 +83,10 @@ The tables further down are as audited. These conversions came after them and ta
 | smTessTest `my_test_decimation_regression` (8 tests, their meshing; 5 and 6 the same) | smlib_tessellation: `tess_decimation_*` (7) | mesh watertight (a sheet's open only on its border), within chord, SMLib's mesh volume |
 | smAdvancedTest `my_test_tsurface_regression` 25 (`ellips_ts2.smb`): benchmark point solve, point classify, point intersect | smlib_trimmed_surfaces: `tsurf_25_*` (3) | distance 2870.476090 as SMLib's run prints; 389 grid points inside / on the face (new oracle `tgrid`) |
 | SM_API_test: `TestSmMergeBreps` (5), `TestSmShellBrepFull` (4), `TestSmMassProperties` (2), `TestSmPrecisePropertySelection` (4), `TestSmBrepDistance` (4), `TestSmGetClosestPoint`/`FindEdge`/`FindFaces`/`GetFaces`/`GetEdges` (1), `TestSmIntersectCurveSurface`/`CurveFace`/`CurveBrep` (5), `TestSmBooleanBoundsExample`, `TestSmBooleanWithOptions`, `TestSmNonManifoldBoolean`, `TestSmPiecewiseMerge`/`BooleanLists` (4), `TestSmSweepAlongPlanarPath` (3), `TestSmCurveSweep`, `TestSmCreateLinearSweep*`/`RotationalSweep` (4), `TestSmCircularFillet`, `TestSmCreateOffsetSurface` (2), `TestSmHealBrep`, `TestSmImportExport`, `TestSmTessellateBoundaries` | smlib_sm_api (43) | SMLib's asserted values (merge, shell, mass, areas, distances, points) or, where it asserts only success, the closed form |
+| test_omni_solid.py: `TestBooleans` planar booleans (16 squares, 4 discs), `TestOffsetShell` (4 box shells, 2 cylinder shells), `TestSkinPrimitiveGeometry`, `TestSweeps` (4), `TestQueries` relationships (5) and values (7), `TestTransforms` reflections (4) | smlib_python (48, [3]) | the test's literal tables and closed forms; its merges and distances are SM_API_test's (smlib_sm_api) |
 
-Feature gaps found on the way: no parabola or hyperbola curves (`my_test_analytic_curves`,
+Feature gaps found on the way: no degree-1 (piecewise ruled) skin through many sections; no
+non-uniform scale; no parabola or hyperbola curves (`my_test_analytic_curves`,
 `my_test_analytic_surfaces`); no "every foot of the normal" point solve (SM_SO_NORMALIZE counts of
 `my_test_sp_nurb`).
 

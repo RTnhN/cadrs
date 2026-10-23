@@ -1,0 +1,15 @@
+# SMLib Python cases (tests/smlib_python.rs, from tools/smlib/python.py) that fail: `name`, or `name slow`.
+
+# A capped skin through 181 sections: the kernel's loft is smooth through them (no degree-1,
+# piecewise-ruled skin), giving the exact turning solid's 3000 and a box 8e-5 wider, not SMLib's
+# linear 1000 (2 + cos(π/360)).
+skin_turning_squares
+
+# A unit circle swept round a closed square path with mitred corners: 12 faces (each straight
+# tube in three), SMLib 4.
+sweep_closed_square
+
+# The exclusive or of disjoint squares, (A ∪ B) − (A ∩ B): the common part is empty, and a
+# difference by an empty shape is Unsupported ("booleans of shapes other than solids") instead
+# of the union itself.
+boolean_2d_squares_disjoint_exclusive_or

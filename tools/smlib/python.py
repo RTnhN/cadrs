@@ -1,0 +1,531 @@
+"""SMLib's Python binding tests (NVIDIA usd-brep source/SmPyLib/tests/test_omni_solid.py) that
+assert geometric values, on the kernel's own API. The file is unittest code over the bindings:
+most of its 400 tests check the binding itself (handles, ownership, error strings, enums), 31
+need USD, and many only check that a call returns something (research/SMLIB_COVERAGE.md lists
+them all). What converts, read from the file with Python's `ast` (each case names its test and
+line; the regular tables are taken from the source):
+- `TestBooleans`: the planar booleans of two 10 × 10 squares (four placements, union,
+  intersection, difference, exclusive or: area and box from the test's `cases` tables) and of
+  two discs of radius 10 8 apart (areas from the lens formula);
+- `TestOffsetShell`: the shells of the 10 mm box (the `expected_results` table: counts, volume,
+  box; inward and outward, opened at the top face or closed) and of a cylinder opened at its top
+  (closed forms);
+- `TestSkinPrimitiveGeometry`: a skin through 181 square sections turning 90° and narrowing:
+  1000 (2 + cos(π/360)) within 5e-3, and its box;
+- `TestSweeps`: planar-path sweeps of circles (nested profiles' parity: 60π; a line–arc–line
+  path: 9π(33 + 2π); a closed square path: 40π; a straight curve sweep's caps);
+- `TestQueries`: volumes, areas (box, sphere, torus, disc), the five relationships of two boxes
+  (from distances, overlaps and containment), mass properties (box, an L-shaped union's
+  centroid (25/3, 5, 25/3), the parallel-axis moments of a 2 × 4 × 6 box at density 3);
+- `TestTransforms`: a uniform scale (8000) and the reflections of a box (volume 192, its
+  intersection with a centred cube 8).
+`TestBooleans`' merges and `TestQueries`' distances are SM_API_test's cases, converted in the
+smlib_sm_api suite.
+"""
+import ast
+import math
+
+from smlib_to_rust import Case, rust_f64
+
+SOURCE = "test_omni_solid.py"
+SOURCE_DIR = "source/SmPyLib/tests"
+TITLE = "Python binding (test_omni_solid.py)"
+
+NOT_CONVERTED = [
+    ("binding plumbing (handles, ownership, error strings, enums, repr) and USD tests", "not geometric outcomes; USD isn't part of the kernel"),
+    ("BooleanOp2D.MERGE cases", "a non-manifold merge of sheets"),
+    ("test_reflected_brep_preserves_material_orientation, scale (−2, 3, 4)", "the kernel has no non-uniform scale"),
+    ("create_helix, remove_curve_knots, convert_to_lines_and_arcs, evaluate_continuity, material_census, PolyBrep, closest-point seam aliases, sweep repetitions, remove_fillet, surface fillets", "feature gaps (research/SMLIB_COVERAGE.md)"),
+    ("test_planar_path_sweep_open_profile_stays_sheet_with_both_caps", "an open profile swept with caps: the kernel sweeps closed profiles into solids, open ones into sheets without caps"),
+]
+
+PRELUDE = r'''
+use std::f64::consts::PI;
+
+use cadrs_kernel::native::draw::{Ax3, Shape};
+use cadrs_kernel::native::math::{P3, V3};
+use cadrs_kernel::native::NativeKernel;
+use cadrs_kernel::{BodyId, BodyKind, BoolOp, Curve2, DistanceTarget, Kernel, LoftEnd, LoftSection, LoftSpec, Loop, Motion, OpResult, PathCurve, Plane, Profile, Region, ShellSpec, SweepControl, SweepSpec};
+use nalgebra::{Matrix3, Point2, Point3, Vector3};
+
+fn e<E: std::fmt::Debug>(x: E) -> String {
+    format!("{x:?}")
+}
+
+fn close(what: &str, got: f64, want: f64, tol: f64) -> Result<(), String> {
+    if (got - want).abs() > tol {
+        return Err(format!("{what} {got:.9}, SMLib's test wants {want:.9} (within {tol:.1e})"));
+    }
+    Ok(())
+}
+
+fn solid(s: Shape) -> Result<BodyId, String> {
+    match s {
+        Shape::Body(b) => Ok(b),
+        _ => Err("not a body".into()),
+    }
+}
+
+fn one(r: OpResult) -> Result<BodyId, String> {
+    match r.bodies.as_slice() {
+        [b] => Ok(*b),
+        v => Err(format!("{} bodies", v.len())),
+    }
+}
+
+/// `sm.create_box(origin, l, w, h)`: the min corner at `origin`.
+fn bx(k: &mut NativeKernel, o: [f64; 3], l: f64, w: f64, h: f64) -> Result<BodyId, String> {
+    let ax = Ax3 { origin: P3::new(o[0], o[1], o[2]), z: V3::z(), x: V3::x() };
+    solid(k.box_on(&ax, l, w, h).map_err(e)?)
+}
+
+/// A valid manifold solid's volume.
+fn volume(k: &NativeKernel, b: BodyId) -> Result<f64, String> {
+    if let Some(bad) = invalid(k.get(b).map_err(e)?) {
+        return Err(bad);
+    }
+    if k.solid_count(b).map_err(e)? != 1 {
+        return Err(format!("{} solids", k.solid_count(b).map_err(e)?));
+    }
+    Ok(k.mass_properties(b).map_err(e)?.volume)
+}
+
+/// The box of a shape's bodies.
+fn shape_box(k: &NativeKernel, s: &Shape) -> Result<Option<(P3, P3)>, String> {
+    Ok(match s {
+        Shape::Body(b) => {
+            let bb = k.bounding_box(*b).map_err(e)?;
+            Some((bb.min, bb.max))
+        }
+        Shape::Compound(v) => {
+            let mut out: Option<(P3, P3)> = None;
+            for x in v {
+                if let Some((lo, hi)) = shape_box(k, x)? {
+                    out = Some(match out {
+                        Some((a, b)) => (a.inf(&lo), b.sup(&hi)),
+                        None => (lo, hi),
+                    });
+                }
+            }
+            out
+        }
+        _ => return Err("not a body or compound".into()),
+    })
+}
+
+/// A planar square or disc in z = 0 (`_planar_rectangle`: centred, 10 × 10 unless given;
+/// `create_planar_circle`).
+fn planar(k: &NativeKernel, centre: [f64; 2], size: [f64; 2], disc: bool) -> Result<Shape, String> {
+    let w = if disc {
+        k.wire(&[&k.mkedge_full(&k.circle(centre[0], centre[1], 0.0, size[0]))]).map_err(e)?
+    } else {
+        let (x0, x1, y0, y1) = (centre[0] - size[0] / 2.0, centre[0] + size[0] / 2.0, centre[1] - size[1] / 2.0, centre[1] + size[1] / 2.0);
+        k.polyline(&[[x0, y0, 0.0], [x1, y0, 0.0], [x1, y1, 0.0], [x0, y1, 0.0], [x0, y0, 0.0]]).map_err(e)?
+    };
+    k.mkplane(&w).map_err(e)
+}
+
+/// `TestBooleans`' `boolean_2d` of two planar shapes (`op`: 0 union, 1 intersection, 2
+/// difference, 3 exclusive or): the area (relative 2e-4 as `_assert_planar_area`) and the box
+/// (1e-6), or nothing (`bounds` None: no face).
+fn boolean_2d(a: ([f64; 2], [f64; 2]), b: ([f64; 2], [f64; 2]), disc: bool, op: u8, area: f64, bounds: Option<([f64; 2], [f64; 2])>) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let (sa, sb) = (planar(&k, a.0, a.1, disc)?, planar(&k, b.0, b.1, disc)?);
+    let r = match op {
+        0 => k.bfuse(&sa, &sb),
+        1 => k.bcommon(&sa, &sb),
+        2 => k.bcut(&sa, &sb),
+        _ => {
+            // (A ∪ B) − (A ∩ B).
+            let (u, i) = (k.bfuse(&sa, &sb).map_err(e)?, k.bcommon(&sa, &sb).map_err(e)?);
+            k.bcut(&u, &i)
+        }
+    };
+    let Some(want) = bounds else {
+        // Nothing: an empty result (an error saying so) or no area.
+        return match r {
+            Err(_) => Ok(()),
+            Ok(s) => close("area", k.sprops(&s).map_err(e)?, 0.0, 1e-9),
+        };
+    };
+    let s = r.map_err(e)?;
+    close("area", k.sprops(&s).map_err(e)?, area, 2e-4 * area.max(1.0))?;
+    let (lo, hi) = shape_box(&k, &s)?.ok_or("no box")?;
+    for i in 0..2 {
+        close("box min", lo[i], want.0[i], 1e-6)?;
+        close("box max", hi[i], want.1[i], 1e-6)?;
+    }
+    close("box z", hi.z - lo.z, 0.0, 1e-6)
+}
+
+/// `test_shell_brep_preserves_source_across_modes`: the 10 mm box shelled by `d`, opened at its
+/// top face or closed, sharp corners: counts, volume (2e-3) and box (1e-9).
+fn shell_box(d: f64, open: bool, counts: [usize; 3], want: f64, lo: [f64; 3], hi: [f64; 3]) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let b = bx(&mut k, [0.0; 3], 10.0, 10.0, 10.0)?;
+    let top = k.faces(b).map_err(e)?.into_iter().find(|f| (f.center.z - 10.0).abs() < 1e-9).ok_or("no top face")?.id;
+    let spec = ShellSpec { remove: if open { vec![top] } else { vec![] }, thickness: d.abs(), outward: d > 0.0, hollow: !open, sharp: true };
+    let r = one(k.shell_with(b, &spec).map_err(e)?)?;
+    close("volume", volume(&k, r)?, want, 2e-3)?;
+    let body = k.get(r).map_err(e)?;
+    let got = [body.faces.len(), edge_count(body), body.verts.len()];
+    if got != counts {
+        return Err(format!("faces, edges, vertices {got:?}, SMLib's {counts:?}"));
+    }
+    let bb = k.bounding_box(r).map_err(e)?;
+    for i in 0..3 {
+        close("box min", bb.min[i], lo[i], 1e-9)?;
+        close("box max", bb.max[i], hi[i], 1e-9)?;
+    }
+    Ok(())
+}
+
+/// `test_shell_brep_cylinder_volume_honors_requested_accuracy`: a cylinder (radius 31, height 86)
+/// opened at its top face, walls `d` (outward when positive), sharp corners: relative 1e-5.
+fn shell_cylinder(d: f64, want: f64) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let c = solid(k.pcylinder_on(&Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() }, 31.0, 86.0).map_err(e)?)?;
+    let top = k.faces(c).map_err(e)?.into_iter().find(|f| (f.center.z - 86.0).abs() < 1e-9).ok_or("no top face")?.id;
+    let r = one(k.shell_with(c, &ShellSpec { remove: vec![top], thickness: d.abs(), outward: d > 0.0, hollow: false, sharp: true }).map_err(e)?)?;
+    close("volume", volume(&k, r)?, want, 1e-5 * want)
+}
+
+/// `test_capped_nonuniform_multisection_skin`: 181 sections of the square (10..30) × (−10..10)
+/// turned 90° · f and narrowed to 1 − f/2 along x at z = 10 f, skinned linearly (degree 1, as
+/// SMLib's `create_skin_primitive(degree=1)`): 1000 (2 + cos(π/360)) within 5e-3, and the
+/// sections' box.
+fn skin() -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let n = 180;
+    let pts = [(10.0, -10.0), (30.0, -10.0), (30.0, 10.0), (10.0, 10.0)];
+    let mut sections = Vec::new();
+    let (mut lo, mut hi) = (P3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), P3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for i in 0..=n {
+        let f = i as f64 / n as f64;
+        let (s, c) = (PI / 2.0 * f).sin_cos();
+        let sx = 1.0 - 0.5 * f;
+        let q: Vec<Point2<f64>> = pts.iter().map(|&(x, y)| Point2::new(sx * x * c - y * s, sx * x * s + y * c)).collect();
+        for p in &q {
+            lo = lo.inf(&P3::new(p.x, p.y, 10.0 * f));
+            hi = hi.sup(&P3::new(p.x, p.y, 10.0 * f));
+        }
+        let curves = (0..4).map(|j| Curve2::Line { a: q[j], b: q[(j + 1) % 4], source: None }).collect();
+        let plane = Plane { origin: Point3::new(0.0, 0.0, 10.0 * f), ..Plane::top() };
+        sections.push(LoftSection::Profile(Profile::new(plane, vec![Region { outer: Loop { curves }, holes: vec![], source: None }])));
+    }
+    let spec = LoftSpec { body: BodyKind::Solid, sections, start: LoftEnd::default(), end: LoftEnd::default(), source: 1 };
+    let b = one(k.loft_with(&spec).map_err(e)?)?;
+    close("volume", volume(&k, b)?, 1000.0 * (2.0 + (PI / 360.0).cos()), 5e-3)?;
+    let bb = k.bounding_box(b).map_err(e)?;
+    for i in 0..3 {
+        close("box min", bb.min[i], lo[i], 1e-5)?;
+        close("box max", bb.max[i], hi[i], 1e-5)?;
+    }
+    Ok(())
+}
+
+/// The planar-path sweeps of `TestSweeps`: circles of the radii `radii` about the origin of
+/// `profile_plane` (nested: material by parity) swept along `path` (2D curves on `path_plane`),
+/// capped: the volume within `rel`, and `faces` faces when given.
+fn sweep(profile_plane: Plane, radii: &[f64], path_plane: Plane, path: Vec<Curve2>, want: f64, rel: f64, faces: Option<usize>) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let mut r: Vec<f64> = radii.to_vec();
+    r.sort_by(|a, b| b.total_cmp(a));
+    let circle = |radius: f64| Loop { curves: vec![Curve2::Circle { center: Point2::origin(), radius, source: None }] };
+    // Largest first: outer, hole, outer, hole, ...
+    let mut regions = Vec::new();
+    let mut i = 0;
+    while i < r.len() {
+        let holes = if i + 1 < r.len() { vec![circle(r[i + 1])] } else { vec![] };
+        regions.push(Region { outer: circle(r[i]), holes, source: None });
+        i += 2;
+    }
+    let profile = Profile::new(profile_plane, regions);
+    let path = path.into_iter().map(|curve| PathCurve::Sketch { plane: path_plane, curve }).collect();
+    let spec = SweepSpec { body: BodyKind::Solid, path, control: SweepControl::None, faces: vec![] };
+    let b = one(k.sweep_with(&profile, &spec).map_err(e)?)?;
+    // (Nested profiles give separate solids: the disc and the annulus.)
+    if let Some(bad) = invalid(k.get(b).map_err(e)?) {
+        return Err(bad);
+    }
+    close("volume", k.mass_properties(b).map_err(e)?.volume, want, rel * want)?;
+    if let Some(n) = faces {
+        let got = k.faces(b).map_err(e)?.len();
+        if got != n {
+            return Err(format!("{got} faces, SMLib's {n}"));
+        }
+    }
+    Ok(())
+}
+
+/// The xz plane: sketch (u, v) is (u, 0, v).
+fn xz() -> Plane {
+    Plane { origin: Point3::origin(), x_dir: Vector3::x_axis(), normal: -Vector3::y_axis() }
+}
+
+fn line(a: [f64; 2], b: [f64; 2]) -> Curve2 {
+    Curve2::Line { a: Point2::new(a[0], a[1]), b: Point2::new(b[0], b[1]), source: None }
+}
+
+/// `TestSweeps` case `case`.
+fn sweep_case(case: &str) -> Result<(), String> {
+    match case {
+        // Circles of radius 1, 3 and 2 along 10 up z: the disc and the annulus 2..3, 60π.
+        "nested_parity" => sweep(Plane::top(), &[1.0, 3.0, 2.0], xz(), vec![line([0.0, 0.0], [0.0, 10.0])], 60.0 * PI, 0.02, None),
+        // A circle of radius 3 along a line, a quarter circle of radius 4 and a line in x = −16.3:
+        // 9π(33 + 2π), 5 faces.
+        "line_arc_line" => {
+            let start = Plane { origin: Point3::new(-16.3, 3.0, 62.5), x_dir: Vector3::x_axis(), normal: Vector3::y_axis() };
+            let yz = Plane { origin: Point3::new(-16.3, 0.0, 0.0), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+            let arc = Curve2::Arc { center: Point2::new(33.0, 66.5), radius: 4.0, start_angle: -PI / 2.0, sweep: PI / 2.0, source: None };
+            sweep(start, &[3.0], yz, vec![line([3.0, 62.5], [33.0, 62.5]), arc, line([37.0, 66.5], [37.0, 69.5])], 9.0 * PI * (33.0 + 2.0 * PI), 0.01, Some(5))
+        }
+        // A unit circle round the closed square (0, 0)–(10, 0)–(10, 10)–(0, 10), mitred: 40π
+        // (SMLib: within 0.8π), 4 faces.
+        "closed_square" => {
+            let start = Plane { origin: Point3::origin(), x_dir: Vector3::y_axis(), normal: Vector3::x_axis() };
+            let sq = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]];
+            let path = sq.windows(2).map(|w| line(w[0], w[1])).collect();
+            sweep(start, &[1.0], Plane::top(), path, 40.0 * PI, 0.02, Some(4))
+        }
+        // `test_curve_sweep_cap_ends`: a circle of radius 2 along a straight curve 15 up z: two
+        // caps of area 4π, 3 faces.
+        "curve_caps" => {
+            let mut k = NativeKernel::new();
+            let profile = Profile::new(Plane::top(), vec![Region { outer: Loop { curves: vec![Curve2::Circle { center: Point2::origin(), radius: 2.0, source: None }] }, holes: vec![], source: None }]);
+            let spec = SweepSpec { body: BodyKind::Solid, path: vec![PathCurve::Sketch { plane: xz(), curve: line([0.0, 0.0], [0.0, 15.0]) }], control: SweepControl::None, faces: vec![] };
+            let b = one(k.sweep_with(&profile, &spec).map_err(e)?)?;
+            close("volume", volume(&k, b)?, 60.0 * PI, 1e-9)?;
+            let faces = k.faces(b).map_err(e)?;
+            let caps = faces.iter().filter(|f| (f.area - 4.0 * PI).abs() < 4.0 * PI * 0.02).count();
+            if faces.len() != 3 || caps != 2 {
+                return Err(format!("{} faces, {caps} caps of area 4π; SMLib: 3 and 2", faces.len()));
+            }
+            Ok(())
+        }
+        _ => Err(format!("{case} isn't ported")),
+    }
+}
+
+/// `TestQueries`' relationship of boxes `a` and `b` (min corner, size): from the distance
+/// between their boundaries, whether they overlap with volume, and containment.
+fn relationship(a: [f64; 4], b: [f64; 4], want: &str, distance: Option<f64>) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let (ia, ib) = (bx(&mut k, [a[0], a[1], a[2]], a[3], a[3], a[3])?, bx(&mut k, [b[0], b[1], b[2]], b[3], b[3], b[3])?);
+    let d = k.min_distance(&DistanceTarget::Body(ia), &DistanceTarget::Body(ib)).map_err(e)?.distance;
+    let (va, vb) = (volume(&k, ia)?, volume(&k, ib)?);
+    let common = match k.boolean(BoolOp::Intersect, ia, &[ib]) {
+        Ok(r) => k.mass_properties(one(r)?).map_err(e)?.volume,
+        Err(_) => 0.0,
+    };
+    let got = if common <= 1e-9 {
+        if d > 1e-9 { "separate" } else { "touching" }
+    } else if (common - vb).abs() <= 1e-9 * vb && d > 1e-9 {
+        "a_contains_b"
+    } else if (common - va).abs() <= 1e-9 * va && d > 1e-9 {
+        "b_contains_a"
+    } else {
+        "interpenetrating"
+    };
+    if got != want {
+        return Err(format!("{got} (distance {d}, common volume {common}), SMLib's {want}"));
+    }
+    if let Some(w) = distance {
+        close("distance", d, w, 1e-9)?;
+    }
+    Ok(())
+}
+
+/// `TestQueries`' and `TestTopologyAccessors`' values on primitives.
+fn query(case: &str) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let at0 = Ax3 { origin: P3::origin(), z: V3::z(), x: V3::x() };
+    match case {
+        "box" => {
+            // test_compute_volume, test_brep_area_box, test_mass_properties_box (density 1 and 3).
+            let b = bx(&mut k, [0.0; 3], 10.0, 10.0, 10.0)?;
+            let m = k.mass_properties(b).map_err(e)?;
+            close("volume", m.volume, 1000.0, 1e-9)?;
+            close("area", m.surface_area, 600.0, 1e-9)?;
+            for i in 0..3 {
+                close("centroid", m.center_of_mass[i], 5.0, 1e-9)?;
+                close("moment", m.inertia[(i, i)], 1000.0 * 200.0 / 12.0, 1e-6)?;
+                close("product", m.inertia[(i, (i + 1) % 3)], 0.0, 1e-6)?;
+            }
+            Ok(())
+        }
+        "sphere" => {
+            let b = solid(k.psphere_on(&at0, 5.0).map_err(e)?)?;
+            close("volume", volume(&k, b)?, 4.0 / 3.0 * PI * 125.0, 1e-9)?;
+            close("area", k.mass_properties(b).map_err(e)?.surface_area, 100.0 * PI, 1e-9)
+        }
+        "torus" => {
+            let b = solid(k.ptorus_on(&at0, 5.0, 1.0).map_err(e)?)?;
+            let a = k.mass_properties(b).map_err(e)?.surface_area;
+            let sum: f64 = k.faces(b).map_err(e)?.iter().map(|f| f.area).sum();
+            close("area", a, 20.0 * PI * PI, 1e-9)?;
+            close("the faces' areas' sum", sum, a, 1e-9)
+        }
+        "disc" => {
+            let s = planar(&k, [0.0, 0.0], [5.0, 5.0], true)?;
+            close("area", k.sprops(&s).map_err(e)?, 25.0 * PI, 1e-9)
+        }
+        "l_shape" => {
+            // test_mass_properties_centroid_offset_from_bbox_midpoint.
+            let (a, b) = (bx(&mut k, [0.0; 3], 20.0, 10.0, 10.0)?, bx(&mut k, [0.0, 0.0, 5.0], 10.0, 10.0, 15.0)?);
+            let u = one(k.boolean(BoolOp::Union, a, &[b]).map_err(e)?)?;
+            close("volume", volume(&k, u)?, 3000.0, 1e-9)?;
+            let c = k.mass_properties(u).map_err(e)?.center_of_mass;
+            for (i, w) in [25.0 / 3.0, 5.0, 25.0 / 3.0].iter().enumerate() {
+                close("centroid", c[i], *w, 1e-9)?;
+            }
+            Ok(())
+        }
+        "parallel_axis" => {
+            // test_mass_properties_origin_parallel_axis: a 2 × 4 × 6 box at density 3 about the origin.
+            let b = bx(&mut k, [0.0; 3], 2.0, 4.0, 6.0)?;
+            let m = k.mass_properties(b).map_err(e)?;
+            let rho = 3.0;
+            let mass = rho * 48.0;
+            let (cx, cy, cz) = (1.0, 2.0, 3.0);
+            let t = m.inertia_about(Point3::origin()) * rho;
+            let want = [mass * (16.0 + 36.0) / 12.0 + mass * (cy * cy + cz * cz), mass * (4.0 + 36.0) / 12.0 + mass * (cx * cx + cz * cz), mass * (4.0 + 16.0) / 12.0 + mass * (cx * cx + cy * cy)];
+            for i in 0..3 {
+                close("moment", t[(i, i)], want[i], 1e-6 * want[i])?;
+            }
+            // Products (SMLib's +∫xy dm; the tensor holds −∫xy dV).
+            for (i, j, w) in [(1, 2, mass * cy * cz), (2, 0, mass * cz * cx), (0, 1, mass * cx * cy)] {
+                close("product", -t[(i, j)], w, 1e-6 * w)?;
+            }
+            Ok(())
+        }
+        "scale" => {
+            let b = bx(&mut k, [0.0; 3], 10.0, 10.0, 10.0)?;
+            let s = one(k.scale(b, Point3::origin(), 2.0).map_err(e)?)?;
+            close("volume", volume(&k, s)?, 8000.0, 1e-9)
+        }
+        _ => Err(format!("{case} isn't ported")),
+    }
+}
+
+/// `test_reflected_brep_preserves_material_orientation`: the box (−4, −3, −2) 8 × 6 × 4
+/// reflected by the diagonal `m`: a valid solid of volume 192 whose intersection with the
+/// centred 2 mm cube is 8.
+fn reflected(m: [f64; 3]) -> Result<(), String> {
+    let mut k = NativeKernel::new();
+    let b = bx(&mut k, [-4.0, -3.0, -2.0], 8.0, 6.0, 4.0)?;
+    let r = one(k.transform_motion(b, &Motion { linear: Matrix3::from_diagonal(&Vector3::new(m[0], m[1], m[2])), translation: Vector3::zeros() }).map_err(e)?)?;
+    close("volume", volume(&k, r)?, 192.0, 1e-9)?;
+    let inner = bx(&mut k, [-1.0, -1.0, -1.0], 2.0, 2.0, 2.0)?;
+    let c = one(k.boolean(BoolOp::Intersect, r, &[inner]).map_err(e)?)?;
+    close("intersection", volume(&k, c)?, 8.0, 1e-9)
+}
+'''
+
+
+def _methods(tree):
+    out = {}
+    for cls in [n for n in tree.body if isinstance(n, ast.ClassDef)]:
+        for f in cls.body:
+            if isinstance(f, ast.FunctionDef):
+                out[f.name] = f
+    return out
+
+
+def _lit(node):
+    """A literal of the source (tuples, numbers, None, `sm.BooleanOp2D.X` as its name)."""
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Tuple):
+        return tuple(_lit(x) for x in node.elts)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return -_lit(node.operand)
+    return ast.literal_eval(node)
+
+
+def _assign(fn, name):
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in n.targets):
+            return n.value
+    raise KeyError(name)
+
+
+def _v(x):
+    return "[%s]" % ", ".join(rust_f64(c) for c in x)
+
+
+def extract(ctx):
+    src = open(ctx.path("source/SmPyLib/tests/test_omni_solid.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    fns = _methods(tree)
+    cases = []
+    ops = {"UNION": 0, "INTERSECTION": 1, "DIFFERENCE": 2, "EXCLUSIVE_OR": 3}
+    # The squares' tables.
+    for name in ("test_boolean_2d_partially_overlapping_rectangle_operation_areas", "test_boolean_2d_disjoint_rectangle_operation_areas",
+                 "test_boolean_2d_first_rectangle_is_proper_subset_operation_areas", "test_boolean_2d_second_rectangle_is_proper_subset_operation_areas"):
+        fn = fns[name]
+        table = _lit(_assign(fn, "cases"))
+        call = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "_assert_rectangle_boolean_2d_cases"][0]
+        specs = [_lit(a) for a in call.args[:2]]
+        sq = lambda sp: "([%s, %s], [%s, %s])" % (rust_f64(sp[0][0]), rust_f64(sp[0][1]), rust_f64(sp[1] if len(sp) > 1 else 10), rust_f64(sp[2] if len(sp) > 2 else 10))
+        stem = name[len("test_boolean_2d_"):-len("_operation_areas")].replace("_rectangle", "").replace("rectangle_", "")
+        for op, area, bounds in table:
+            if op not in ops:
+                continue
+            b = "None" if bounds is None else "Some(([%s, %s], [%s, %s]))" % tuple(rust_f64(x) for x in (bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1]))
+            cases.append(Case("boolean_2d_squares_%s_%s" % (stem, op.lower()), "SMLib Python `%s` (test_omni_solid.py:%d): %s of two squares, area %g." % (name, fn.lineno, op.lower().replace("_", " "), area),
+                              "boolean_2d(%s, %s, false, %d, %s, %s)" % (sq(specs[0]), sq(specs[1]), ops[op], rust_f64(area), b)))
+    # The discs: the lens of two discs of radius 10 whose centres are 8 apart.
+    lens = 200 * math.acos(0.4) - 4 * math.sqrt(336)
+    for op, area, box in [("union", 200 * math.pi - lens, ((-10, -10), (18, 10))), ("intersection", lens, ((-2, -math.sqrt(84)), (10, math.sqrt(84)))),
+                          ("difference", 100 * math.pi - lens, ((-10, -10), (4, 10))), ("exclusive_or", 200 * math.pi - 2 * lens, ((-10, -10), (18, 10)))]:
+        fn = fns["test_boolean_2d_" + op]
+        assert "200 * math.acos(0.4) - 4 * math.sqrt(336)" in ast.get_source_segment(src, fn)
+        cases.append(Case("boolean_2d_discs_%s" % op, "SMLib Python `test_boolean_2d_%s` (test_omni_solid.py:%d): discs of radius 10 at 0 and (8, 0), area %.6g." % (op, fn.lineno, area),
+                          "boolean_2d(([0.0, 0.0], [10.0, 10.0]), ([8.0, 0.0], [10.0, 10.0]), true, %d, %s, Some(([%s, %s], [%s, %s])))" % (
+                              ops[op.upper()], rust_f64(area), rust_f64(box[0][0]), rust_f64(box[0][1]), rust_f64(box[1][0]), rust_f64(box[1][1]))))
+    # The shell table (create_solid makes no difference to the result: each (d, opened) once).
+    fn = fns["test_shell_brep_preserves_source_across_modes"]
+    table = _lit(_assign(fn, "expected_results"))
+    seen = set()
+    for (d, _solid, opened), (counts, vol, (lo, hi)) in table.items():
+        if (d, opened) in seen:
+            continue
+        seen.add((d, opened))
+        cases.append(Case("shell_box_%s_%s" % ("out" if d > 0 else "in", "opened" if opened else "closed"),
+                          "SMLib Python `%s` (test_omni_solid.py:%d): the 10 mm box shelled by %g, %s: %s faces/edges/vertices, volume %g." % (fn.name, fn.lineno, d, "opened at its top" if opened else "closed", counts, vol),
+                          "shell_box(%s, %s, [%d, %d, %d], %s, %s, %s)" % (rust_f64(d), "true" if opened else "false", counts[0], counts[1], counts[2], rust_f64(vol), _v(lo), _v(hi))))
+    fn = fns["test_shell_brep_cylinder_volume_honors_requested_accuracy"]
+    r, h, w = 31.0, 86.0, 3.0
+    assert "radius = 31.0" in ast.get_source_segment(src, fn)
+    for d, vol in [(w, math.pi * ((r + w) ** 2 * (h + w) - r ** 2 * h)), (-w, math.pi * (r ** 2 * h - (r - w) ** 2 * (h - w)))]:
+        cases.append(Case("shell_cylinder_%s" % ("out" if d > 0 else "in"), "SMLib Python `%s` (test_omni_solid.py:%d): a cylinder (31, 86) opened at its top, walls %g: %.6g." % (fn.name, fn.lineno, d, vol),
+                          "shell_cylinder(%s, %s)" % (rust_f64(d), rust_f64(vol))))
+    fn = fns["test_capped_nonuniform_multisection_skin"]
+    assert "divisions = 180" in ast.get_source_segment(src, fn)
+    cases.append(Case("skin_turning_squares", "SMLib Python `%s` (test_omni_solid.py:%d): a capped skin through 181 turning, narrowing squares: 1000 (2 + cos(π/360)) and its box." % (fn.name, fn.lineno), "skin()"))
+    for case, name in [("nested_parity", "test_planar_path_sweep_uses_nested_profile_parity_for_material"), ("line_arc_line", "test_planar_path_sweep_tangent_line_arc_line_is_material"),
+                       ("closed_square", "test_closed_planar_path_uses_mitered_transitions_and_ignores_caps"), ("curve_caps", "test_curve_sweep_cap_ends")]:
+        fn = fns[name]
+        cases.append(Case("sweep_" + case, "SMLib Python `%s` (test_omni_solid.py:%d)." % (name, fn.lineno), 'sweep_case("%s")' % case))
+    for name in ("test_brep_relationship_separate", "test_brep_relationship_touching", "test_brep_relationship_interpenetrating", "test_brep_relationship_a_contains_b", "test_brep_relationship_b_contains_a"):
+        fn = fns[name]
+        boxes = [n for n in ast.walk(fn) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "create_box"]
+        a, b = [(_lit(c.args[0]), _lit(c.args[1])) for c in boxes[:2]]
+        want = name[len("test_brep_relationship_"):]
+        seg = ast.get_source_segment(src, fn)
+        dist = 3.0 if 'r["distance"], 3.0' in seg else 0.0 if 'r["distance"], 0.0' in seg else None
+        cases.append(Case("relationship_" + want, "SMLib Python `%s` (test_omni_solid.py:%d): boxes %s and %s are %s%s." % (name, fn.lineno, a, b, want.replace("_", " "), "" if dist is None else ", %g apart" % dist),
+                          'relationship([%s, %s, %s, %s], [%s, %s, %s, %s], "%s", %s)' % (rust_f64(a[0][0]), rust_f64(a[0][1]), rust_f64(a[0][2]), rust_f64(a[1]), rust_f64(b[0][0]), rust_f64(b[0][1]), rust_f64(b[0][2]), rust_f64(b[1]), want,
+                                                                                         "None" if dist is None else "Some(%s)" % rust_f64(dist))))
+    for case, names in [("box", ("test_compute_volume", "test_brep_area_box", "test_mass_properties_box")), ("sphere", ("test_compute_volume_sphere", "test_brep_area_curved_matches_faces_and_mass_properties")),
+                        ("torus", ("test_brep_area_curved_matches_faces_and_mass_properties",)), ("disc", ("test_brep_area_sheet_body",)),
+                        ("l_shape", ("test_mass_properties_centroid_offset_from_bbox_midpoint",)), ("parallel_axis", ("test_mass_properties_origin_parallel_axis",)), ("scale", ("test_scale",))]:
+        cases.append(Case("query_" + case, "SMLib Python %s." % ", ".join("`%s` (test_omni_solid.py:%d)" % (n, fns[n].lineno) for n in names), 'query("%s")' % case))
+    fn = fns["test_reflected_brep_preserves_material_orientation"]
+    for m in _lit([n for n in ast.walk(fn) if isinstance(n, ast.For)][0].iter):
+        if any(abs(x) != 1 for x in m):
+            continue
+        cases.append(Case("reflected_%s" % "_".join("m" if x < 0 else "p" for x in m), "SMLib Python `%s` (test_omni_solid.py:%d): the box reflected by %s." % (fn.name, fn.lineno, m),
+                          "reflected(%s)" % _v(m)))
+    return cases
