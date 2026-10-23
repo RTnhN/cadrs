@@ -24,6 +24,7 @@ pub mod color_editor;
 pub mod color_legend;
 pub mod color_picker;
 pub mod command_palette;
+pub mod copy_text;
 pub mod cursor;
 pub mod dialog;
 pub mod dialog_fields;
@@ -94,6 +95,7 @@ pub use color_picker::{
 pub use command_palette::{
     CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row,
 };
+pub use copy_text::{CopyOnClick, copy_on_click};
 pub use cursor::{CursorKind, CursorRequest, CursorState};
 pub use dialog::{Dialog, DialogClose, DialogRoot};
 pub use dialog_fields::{
@@ -292,6 +294,7 @@ impl Plugin for CadrsUiPlugin {
                 splitter::SplitterPlugin,
                 selection_box::SelectionBoxPlugin,
                 color_editor::ColorEditorPlugin,
+                copy_text::CopyTextPlugin,
             ))
             .add_message::<ScriptCommand>();
     }

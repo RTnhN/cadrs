@@ -22,6 +22,7 @@
 //!   it (parallel axes). The inertia is about the centre of mass with axes parallel to the Part
 //!   Studio's (Onshape's convention without a reference mate connector; see
 //!   `cadrs_core::parts::mass_report`).
+//! - A click on a value copies it ("Copied 368749.705 mm³").
 //! - ✕ (or Esc) closes it; ✓ stays greyed, as in Onshape (there is nothing to accept).
 //! - While it shows a mass, the **centre of mass** is marked in the view with the quartered
 //!   circle (P3.6, `ex4-step18.png`, `ex3-step10.png`).
@@ -622,8 +623,10 @@ fn value_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v
             BorderColor::all(Color::srgb_u8(0xd8, 0xd8, 0xd8)),
         ))
         .with_children(|c| {
-            let mut text =
-                c.spawn(t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground));
+            let mut text = c.spawn((
+                t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground),
+                cadrs_ui::copy_on_click(),
+            ));
             if let Some(v) = v {
                 text.insert((
                     v,
@@ -664,6 +667,7 @@ fn face_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v:
         ))
         .with_child((
             t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground),
+            cadrs_ui::copy_on_click(),
             v,
             Name::new(format!("mass-face-{}", format!("{v:?}").to_lowercase())),
         ));
@@ -712,6 +716,7 @@ fn axis_row(
         .with_children(|c| {
             c.spawn((
                 t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground),
+                cadrs_ui::copy_on_click(),
                 v,
                 Name::new(format!("mass-{}", label.to_lowercase())),
             ));
@@ -905,6 +910,7 @@ fn mass_dialog(
                         ))
                         .with_child((
                             t.text(String::new(), 12.0, FontWeight::MEDIUM, t.tool_foreground),
+                            cadrs_ui::copy_on_click(),
                             Value::Mass,
                             Name::new("mass-mass"),
                         ));
@@ -987,6 +993,7 @@ fn mass_dialog(
                                             FontWeight::MEDIUM,
                                             t.tool_foreground,
                                         ),
+                                        cadrs_ui::copy_on_click(),
                                         Value::Inertia(i, j),
                                         Name::new(format!("mass-{}", l.to_lowercase())),
                                     ));
