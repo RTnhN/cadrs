@@ -1637,3 +1637,409 @@ fn doc_racingrigrumble_chamfer1() {
         Vec::<String>::new()
     );
 }
+
+/// A chamfer at the foot of a bore's wall wider than the step it stands on (Breville espresso
+/// parts, Chamfer 1): the chamfer adds material all round, its rail on the step past the step's
+/// inner (convex) rim into the narrower bore below. The step's plane grows inward to the rail
+/// (a lip over the bore), the step itself under the chamfer. A tube (radius 80, 15 high) bored
+/// 71.5 above z = 3.1 and 68.5 through, the 71.5 rim chamfered 5: the triangle (5 by 5, its
+/// centroid at radius 69.8333) turned round the axis added.
+#[test]
+fn chamfer_at_a_bore_foot_grows_the_step_over_the_bore() {
+    let mut k = NativeKernel::new();
+    let tube = k.pcylinder(80.0, 15.0).unwrap();
+    let wide = k.pcylinder(71.5, 20.0).unwrap();
+    let wide = k.ttranslate(&wide, 0.0, 0.0, 3.1).unwrap();
+    let narrow = k.pcylinder(68.5, 30.0).unwrap();
+    let narrow = k.ttranslate(&narrow, 0.0, 0.0, -5.0).unwrap();
+    let a = k.bcut(&tube, &wide).unwrap();
+    let draw::Shape::Body(b) = k.bcut(&a, &narrow).unwrap() else {
+        panic!("not a body")
+    };
+    let before = mass::body_mass(k.get(b).unwrap()).volume;
+    let es = k.edges(b).unwrap();
+    let rim = foot_circle(&es, 71.5, 3.1);
+    let out = blend::chamfer_local(&mut k, b, &rim, 5.0).unwrap().bodies[0];
+    let o = k.get(out).unwrap();
+    assert_eq!(o.check_with(topo::CheckLevel::Full), Vec::<String>::new());
+    let added = 2.0 * std::f64::consts::PI * (71.5 * 2.0 + 66.5) / 3.0 * 12.5;
+    let v = mass::body_mass(o).volume;
+    assert!(
+        (v - before - added).abs() < 1e-6 * v,
+        "added {}, want {added}",
+        v - before
+    );
+}
+
+/// Breville espresso parts, Chamfer 1 (its input outside the repo).
+#[test]
+fn doc_breville_chamfer1() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b = bodyio::read(&std::fs::read(format!("{dir}/breville_chamfer1.body")).unwrap()).unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let out = blend::chamfer_local(&mut k, id, &[EdgeId(5)], 5.0)
+        .unwrap()
+        .bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}
+
+/// Breville espresso parts, Chamfer 2 (its input outside the repo): the same growth outward,
+/// the rail the grown face's outer loop.
+#[test]
+fn doc_breville_chamfer2() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b = bodyio::read(&std::fs::read(format!("{dir}/breville_chamfer2.body")).unwrap()).unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let out = blend::chamfer_local(&mut k, id, &[EdgeId(7), EdgeId(8)], 5.0)
+        .unwrap()
+        .bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}
+
+/// A wall standing on a floor through which a slot runs to the floor's far side, its inner end
+/// a half circle tangent to its sides (the cable organizer's comb, below): the inside edge
+/// rounded R10, its rail on the floor running over the slot. Over the slot the fillet is cut by
+/// the slot's sides and round end run on up (SMLib's cliff), the cut going from flat side to
+/// round end where the faces are tangent (no sign change to stop at), on the way it came. Its
+/// exact volume: the round's section along the wall, less the part over the slot.
+#[test]
+fn fillet_over_a_slot_with_a_round_end() {
+    let mut k = NativeKernel::new();
+    let floor = k.box_at(0.0, 0.0, 0.0, 40.0, 30.0, 8.0).unwrap();
+    let wall = k.box_at(0.0, 0.0, 0.0, 2.0, 30.0, 20.0).unwrap();
+    let block = k.bfuse(&floor, &wall).unwrap();
+    let slot = k.box_at(6.5, 10.0, -1.0, 40.0, 7.0, 10.0).unwrap();
+    let end = k.pcylinder(3.5, 10.0).unwrap();
+    let end = k.ttranslate(&end, 6.5, 13.5, -1.0).unwrap();
+    let block = k.bcut(&block, &slot).unwrap();
+    let draw::Shape::Body(b) = k.bcut(&block, &end).unwrap() else {
+        panic!("not a body")
+    };
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let e = edge_at(&k, b, [2.0, 15.0, 8.0]);
+    let out = local_fillet(&mut k, b, e, 10.0);
+    let v = k.mass_properties(out).unwrap().volume;
+    // The round's height over the floor at x (its centre at x = 12, z = 18), and where the
+    // slot starts at y.
+    let h = |x: f64| 10.0 - (100.0 - (12.0 - x).powi(2)).sqrt();
+    let start = |y: f64| 6.5 - (3.5f64.powi(2) - (y - 13.5).powi(2)).max(0.0).sqrt();
+    let section = 100.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    let over = integral(&|y| integral(&h, start(y), 12.0, 2000), 10.0, 17.0, 2000);
+    let added = 30.0 * section - over;
+    assert!(
+        (v - v0 - added).abs() < 1e-5 * v0,
+        "added {} (exact {added})",
+        v - v0
+    );
+}
+
+/// A wall 3 thick, its end's four edges rounded R1.5 (half its thickness; the cable
+/// organizer's teeth, below): the rounds of the two side edges have their rails on one line
+/// down the end face, which goes, and the top and bottom rounds' rails on it have no length,
+/// their mitres' vertices at one point. Exact volume: the end a half cylinder with its top
+/// and bottom rounded by quarter cylinders, mitred.
+#[test]
+fn fillet_a_walls_end_from_both_sides() {
+    use std::f64::consts::PI;
+    let mut k = NativeKernel::new();
+    let draw::Shape::Body(b) = k.box_at(0.0, 0.0, 0.0, 10.0, 3.0, 11.0).unwrap() else {
+        panic!("not a body")
+    };
+    let edges = edges_near(
+        &k,
+        b,
+        &[
+            [10.0, 0.0, 5.5],
+            [10.0, 3.0, 5.5],
+            [10.0, 1.5, 0.0],
+            [10.0, 1.5, 11.0],
+        ],
+    );
+    let laws: Vec<FilletLaw> = edges
+        .iter()
+        .map(|&edge| FilletLaw {
+            edge,
+            radii: vec![(0.0, 1.5), (1.0, 1.5)],
+        })
+        .collect();
+    let out = blend::fillet_laws_local(&mut k, b, &laws).unwrap().bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+    // Past x = 8.5 the section at u = x - 8.5 is 2s wide and 8 + 2s high, s = √(r² - u²).
+    let r: f64 = 1.5;
+    let volume = 8.5 * 3.0 * 11.0 + 4.0 * PI * r * r + 8.0 / 3.0 * r.powi(3);
+    let v = k.mass_properties(out).unwrap().volume;
+    assert!(
+        (v - volume).abs() < 1e-6 * volume,
+        "volume {v} (exact {volume})"
+    );
+}
+
+/// cable organizer (copy 2), Fillet 2 (its input outside the repo): the teeth's ends rounded
+/// R1.5 all round, each tooth 3 thick (see `fillet_a_walls_end_from_both_sides`).
+#[test]
+fn doc_cable_organizer_copy2_fillet2() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b =
+        bodyio::read(&std::fs::read(format!("{dir}/cable_organizer_copy2_fillet2.body")).unwrap())
+            .unwrap();
+    let edges: Vec<EdgeId> = [
+        149, 157, 270, 313, 249, 250, 260, 259, 269, 268, 267, 266, 265, 264, 262, 280, 279, 278,
+        277, 276, 275, 274, 273, 272, 271, 215, 205, 199, 191, 185, 177, 171, 163, 143, 135, 129,
+        121, 115, 107, 101, 93, 87, 79, 73, 65, 59, 51, 45, 37, 31, 21, 337, 339, 341, 343, 221,
+        345, 231, 237, 311, 247, 335, 5, 333, 15, 331, 329, 327, 325, 323, 321, 319, 317, 315, 150,
+        156, 214, 206, 198, 192, 184, 178, 170, 164, 142, 136, 128, 122, 114, 108, 100, 94, 86, 80,
+        72, 66, 58, 52, 44, 38, 30, 22, 222, 230, 238, 246, 6, 14,
+    ]
+    .map(EdgeId)
+    .to_vec();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let laws: Vec<FilletLaw> = edges
+        .iter()
+        .map(|&edge| FilletLaw {
+            edge,
+            radii: vec![(0.0, 1.5), (1.0, 1.5)],
+        })
+        .collect();
+    let out = blend::fillet_laws_local(&mut k, id, &laws).unwrap().bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}
+
+/// cable organizer, Fillet 1, in three part studios (their inputs outside the repo): a wall's
+/// foot rounded R10 along a floor that is a comb, its rail running over the slots between the
+/// teeth (see `fillet_over_a_slot_with_a_round_end`).
+#[test]
+fn doc_cable_organizer_fillet1() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    for (name, e) in [
+        ("cable_organizer_fillet1", 210),
+        ("cable_organizer_copy2_fillet1", 290),
+        ("cable_organizer_copy1_fillet1", 148),
+    ] {
+        let b = bodyio::read(&std::fs::read(format!("{dir}/{name}.body")).unwrap()).unwrap();
+        let mut k = NativeKernel::new();
+        let id = k.insert(b);
+        let out = local_fillet(&mut k, id, EdgeId(e), 10.0);
+        assert_eq!(
+            k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+            Vec::<String>::new(),
+            "{name}"
+        );
+    }
+}
+
+/// The vertices of body `b` (by id) nearest the points `at`, and how far each is from it.
+fn vertex_gaps(k: &NativeKernel, b: BodyId, at: &[[f64; 3]]) -> Vec<f64> {
+    let o = k.get(b).unwrap();
+    at.iter()
+        .map(|p| {
+            let p = nalgebra::Point3::new(p[0], p[1], p[2]);
+            o.verts
+                .iter()
+                .map(|v| (v.p - p).norm())
+                .fold(f64::INFINITY, f64::min)
+        })
+        .collect()
+}
+
+/// Edges of body `b` chamfered `d` by local trimming alone: the result fully checked; its
+/// volume and area.
+fn local_chamfer(k: &mut NativeKernel, b: BodyId, edges: &[EdgeId], d: f64) -> (BodyId, f64, f64) {
+    let out = blend::chamfer_local(k, b, edges, d).unwrap().bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+    let m = k.mass_properties(out).unwrap();
+    (out, m.volume, m.surface_area)
+}
+
+/// A plate whose outline turns 135° inwards at the origin (a wall along +y meeting one along
+/// (−1, −1)), chamfered 1 up that concave corner and along the slanted wall's foot (remote
+/// sentry, Chamfer 1): the cutting chamfer's plane runs on over the filling one's end and ends
+/// flush with the other wall, which grows down over the cut past the concave edge. The volume
+/// is the plate and the fill's prism less what lies under the cutting plane short of the wall
+/// (integrated over z by clipping the sections; the tool-and-boolean blend's too).
+#[test]
+fn chamfer_mixed_corner_at_135_degrees() {
+    let mut k = NativeKernel::new();
+    let outline = [
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [-10.0, -10.0, 0.0],
+        [-5.0, -15.0, 0.0],
+        [15.0, -15.0, 0.0],
+        [15.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+    ];
+    let w = k.polyline(&outline).unwrap();
+    let f = k.mkplane(&w).unwrap();
+    let draw::Shape::Body(b) = k.prism(&f, 0.0, 0.0, 5.0).unwrap() else {
+        panic!("not a body")
+    };
+    let edges = edges_near(&k, b, &[[0.0, 0.0, 2.5], [-5.0, -5.0, 0.0]]);
+    let (out, v, _) = local_chamfer(&mut k, b, &edges, 1.0);
+    // The rails' crossing, where the cutting plane crosses the fill's rail on the wall, and
+    // where the cutting chamfer's floor rail meets the wall's plane.
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let corner = [[-h, -h, 1.0], [0.0, 1.0, 1.0 + h], [0.0, -2.0 * h, 0.0]];
+    for g in vertex_gaps(&k, out, &corner) {
+        assert!(g < 1e-7, "a corner point off by {g}");
+    }
+    assert_eq!(
+        k.faces(out).unwrap().len(),
+        8 + 2,
+        "the plate's faces and the chamfers'"
+    );
+    let want = 2306.9264790838406;
+    assert!((v - want).abs() < 1e-8 * want, "volume {v}, want {want}");
+}
+
+/// A box with a cylinder standing half out of one side, chamfered 1 along the box's top edge
+/// there, the cylinder's top rim beside it and the concave edge where the cylinder leaves the
+/// box: a mixed chamfer corner closed by a triangle, its side across the rim's chamfer (a cone)
+/// the curve the triangle's plane cuts that in (remote sentry, Chamfer 1). The volume is this
+/// construction's (no reference chamfers this corner).
+#[test]
+fn chamfer_mixed_corner_on_a_cone() {
+    use nalgebra::Point2;
+    let mut k = NativeKernel::new();
+    let line = |a: (f64, f64), b: (f64, f64)| Curve2::Line {
+        a: Point2::new(a.0, a.1),
+        b: Point2::new(b.0, b.1),
+        source: None,
+    };
+    let half = std::f64::consts::FRAC_PI_2;
+    let outer = Loop {
+        curves: vec![
+            line((0.0, 0.0), (20.0, 0.0)),
+            line((20.0, 0.0), (20.0, 5.0)),
+            Curve2::Arc {
+                center: Point2::new(20.0, 10.0),
+                radius: 5.0,
+                start_angle: -half,
+                sweep: 2.0 * half,
+                source: None,
+            },
+            line((20.0, 15.0), (20.0, 20.0)),
+            line((20.0, 20.0), (0.0, 20.0)),
+            line((0.0, 20.0), (0.0, 0.0)),
+        ],
+    };
+    let region = Region {
+        outer,
+        holes: vec![],
+        source: None,
+    };
+    let b = k
+        .extrude(
+            &Profile::new(Plane::top(), vec![region]),
+            Extent::Blind(10.0),
+        )
+        .unwrap()
+        .bodies[0];
+    let edges = edges_near(
+        &k,
+        b,
+        &[[20.0, 2.5, 10.0], [25.0, 10.0, 10.0], [20.0, 5.0, 5.0]],
+    );
+    let (out, v, a) = local_chamfer(&mut k, b, &edges, 1.0);
+    // The corner's triangle: a plane bounded by two lines and the curve on the cone.
+    let o = k.get(out).unwrap();
+    let cap = o.faces.iter().any(|f| {
+        matches!(f.surf, surface::Surface::Plane { .. })
+            && f.loops.len() == 1
+            && f.loops[0].len() == 3
+            && f.loops[0]
+                .iter()
+                .any(|c| !matches!(o.edges[c.edge].curve, curve::Curve::Line { .. }))
+    });
+    assert!(cap, "no corner triangle with a curved side");
+    let (want_v, want_a) = (4385.981425680911, 1719.6502524262403);
+    assert!(
+        (v - want_v).abs() < 1e-6 * want_v,
+        "volume {v}, want {want_v}"
+    );
+    assert!(
+        (a - want_a).abs() < 1e-6 * want_a,
+        "area {a}, want {want_a}"
+    );
+}
+
+/// A cylinder with a slice off its side (a D-shaped prism), chamfered 1 round its top and up the
+/// two edges where the cut meets the cylinder: at each top corner two flat chamfers and the
+/// rim's cone meet in a point, where the line the flat ones meet in crosses the cone; the
+/// cone's ends there the conics the flat ones cut it in (gridfinity, Chamfer 2). The volume is
+/// that of the prism cut by every chamfer's plane and the rim's cone (integrated over z by
+/// clipping the sections; the chamfers up the sides through the contacts of the ball of radius
+/// d·tan(θ/2) the local chamfer rolls, θ the faces' angle).
+#[test]
+fn chamfer_corner_of_two_planes_and_a_cone() {
+    let mut k = NativeKernel::new();
+    let c = k.pcylinder(10.0, 10.0).unwrap();
+    let bx = k.box_at(-20.0, -20.0, -1.0, 14.0, 40.0, 12.0).unwrap();
+    let draw::Shape::Body(b) = k.bcut(&c, &bx).unwrap() else {
+        panic!("not a body")
+    };
+    // The top's edges (the rim in pieces at the cylinder's seam) and the cut's two sides.
+    let edges: Vec<EdgeId> = k
+        .edges(b)
+        .unwrap()
+        .iter()
+        .filter(|e| e.mid.z > 10.0 - 1e-9 || (e.mid.x + 6.0).abs() < 1e-9 && e.mid.y.abs() > 7.0)
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(edges.len(), 5, "{edges:?}");
+    let (_, v, _) = local_chamfer(&mut k, b, &edges, 1.0);
+    let want = 2655.1457202931565;
+    assert!((v - want).abs() < 1e-8 * want, "volume {v}, want {want}");
+}
+
+/// remote sentry, Chamfer 1 (its input outside the repo): 0.5 mm chamfers round a plate's
+/// outline and pockets, with mixed corners at 135° and corner triangles across cones.
+#[test]
+fn doc_remote_sentry_chamfer1() {
+    let Ok(dir) = std::env::var("CADRS_DOC_FIXTURES") else {
+        return;
+    };
+    let b = bodyio::read(&std::fs::read(format!("{dir}/remote_sentry_chamfer1.body")).unwrap())
+        .unwrap();
+    let mut k = NativeKernel::new();
+    let id = k.insert(b);
+    let edges: Vec<EdgeId> = [
+        30u64, 66, 67, 68, 33, 37, 38, 39, 141, 140, 5, 6, 13, 69, 70, 71, 9, 17, 26, 20, 23, 34,
+        35, 36, 19, 14, 142, 8, 10, 143, 27, 44, 45, 73, 72, 22, 24, 2, 3, 1, 16, 12,
+    ]
+    .iter()
+    .map(|&e| EdgeId(e))
+    .collect();
+    let out = blend::chamfer_local(&mut k, id, &edges, 0.5)
+        .unwrap()
+        .bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+}
