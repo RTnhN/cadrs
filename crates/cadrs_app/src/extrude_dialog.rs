@@ -1131,7 +1131,18 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Role>, mut commands: Commands) {
                     s.op_auto = false;
                 }
             });
-            change(&mut commands, op.label(), move |e| e.op = op);
+            commands.queue(move |world: &mut World| {
+                let Some(mut e) = params(world) else { return };
+                // Adding grows out of the sketch, removing cuts into it: switching between the
+                // two can flip the direction (#72).
+                if crate::extrude::op_flips(world, &e, op) {
+                    e.flip = !e.flip;
+                }
+                if e.op != op {
+                    e.op = op;
+                    set_params(world, e, op.label());
+                }
+            });
         }
         _ => {}
     }
