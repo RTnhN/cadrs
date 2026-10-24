@@ -2121,6 +2121,7 @@ version = "0.1.7"
 dependencies = [
  "bincode",
  "blake3",
+ "cadrs_cam",
  "cadrs_drawing",
  "cadrs_eda",
  "cadrs_fea",
