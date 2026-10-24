@@ -598,12 +598,11 @@ fn mass_keys(
     }
 }
 
+/// The panel's values, Part and Face tabs.
+type ValueText<'w, 's> = Query<'w, 's, &'static Text, Or<(With<Value>, With<FaceValue>)>>;
+
 /// A click on a value copies its text ("0.337 kg") to the clipboard (#67).
-fn on_value_click(
-    click: On<Pointer<Click>>,
-    q: Query<&Text, Or<(With<Value>, With<FaceValue>)>>,
-    mut commands: Commands,
-) {
+fn on_value_click(click: On<Pointer<Click>>, q: ValueText, mut commands: Commands) {
     let Ok(text) = q.get(click.entity) else {
         return;
     };
