@@ -2245,6 +2245,106 @@ fn chamfer_plane_to_cylinder_measures_round_the_cylinder() {
     assert!((v - want).abs() < 1e-9 * want, "volume {v}, want {want}");
 }
 
+/// Equal-distance chamfers `d` measured along the faces' tangent planes (ChamferMeasure::Tangent)
+/// on `edges` by local trimming alone (no fallback to the blend tool): the result checked, its
+/// volume.
+fn local_tangent_chamfer(
+    k: &mut NativeKernel,
+    b: BodyId,
+    edges: &[EdgeId],
+    d: f64,
+) -> (BodyId, f64) {
+    let body = (**k.get(b).unwrap()).clone();
+    let dists: Vec<(usize, [f64; 2])> = edges.iter().map(|e| (e.0 as usize, [d, d])).collect();
+    let (out, _) = fillet::chamfer_edges_measured(&body, b, &dists, true).unwrap();
+    assert_eq!(out.check_with(topo::CheckLevel::Full), Vec::<String>::new());
+    let out = k.insert(out);
+    (out, k.mass_properties(out).unwrap().volume)
+}
+
+/// The D-shaped prism ([`d_prism`]) chamfered 2 up one edge measured along the faces' tangent
+/// planes by the blend tool alone: the same tool as the chamfer of 2 along the flat face and the
+/// arc R·atan(2/R) round the cylinder (to where the tangent distance's chord ends), as the local
+/// chamfer's ([`chamfer_plane_to_cylinder_tangent_measure`]); not the chord taken as an arc.
+#[test]
+fn tool_chamfer_plane_to_cylinder_tangent_measure() {
+    let mut k = NativeKernel::new();
+    let (b, edges) = d_prism(&mut k);
+    let edge = &edges[..1];
+    let mut volume = |spec: ChamferSpec, measurement: ChamferMeasure| {
+        let opts = ChamferOpts {
+            measurement,
+            ..ChamferOpts::new(spec)
+        };
+        let out = blend::chamfer_tool(&mut k, b, edge, &opts).unwrap().bodies[0];
+        assert_eq!(
+            k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+            Vec::<String>::new()
+        );
+        k.mass_properties(out).unwrap().volume
+    };
+    let tangent = volume(ChamferSpec::EqualDistance(2.0), ChamferMeasure::Tangent);
+    let arc = 10.0 * (0.2_f64).atan();
+    let chord = 20.0 * ((0.2_f64).atan() / 2.0).sin();
+    // (Which side the cylinder is on in the edge's order: one of the two.)
+    let near = |x: f64| (x - tangent).abs() < 1e-9 * tangent;
+    let mut two = |a: f64, c: f64| volume(ChamferSpec::TwoDistances(a, c), ChamferMeasure::Offset);
+    let by_arc = [two(2.0, arc), two(arc, 2.0)];
+    let by_chord = [two(2.0, chord), two(chord, 2.0)];
+    assert!(
+        by_arc.iter().any(|&v| near(v)) && !by_chord.iter().any(|&v| near(v)),
+        "tangent {tangent}, by arc {by_arc:?}, by chord {by_chord:?}"
+    );
+}
+
+/// A cylinder of radius 10 under a hemisphere of the same radius, cut at x = −6, chamfered 1 up
+/// each side and over the top (Tangent measure): each straight plane-to-cylinder edge runs on
+/// smoothly into the plane-to-sphere arc, which isn't measured round its sphere, so the whole
+/// chain takes the ball rule with the tangent distance itself, the ball whose offsets put its
+/// contacts on the faces' tangent planes 1 from the edge: of radius tan(θ/2) = 2 (θ ≈ 126.9°),
+/// centre 2 from the cut and 8 from the axis, so the cut's contact lies 8 − 4√3 from each
+/// straight edge (measured round the cylinder, 1; with the chord of 1 taken as a tangent
+/// distance, nearer).
+#[test]
+fn chamfer_tangent_chain_round_a_cylinder_onto_a_sphere() {
+    use nalgebra::{Point3, Vector3};
+    let mut k = NativeKernel::new();
+    let ax = draw::Ax3 {
+        origin: Point3::new(0.0, 0.0, -10.0),
+        z: Vector3::z(),
+        x: Vector3::x(),
+    };
+    let c = k.pcylinder_on(&ax, 10.0, 10.0).unwrap();
+    let s = k.psphere(10.0).unwrap();
+    let cap = k.bfuse(&c, &s).unwrap();
+    let bx = k.box_at(-20.0, -20.0, -21.0, 14.0, 40.0, 42.0).unwrap();
+    let draw::Shape::Body(b) = k.bcut(&cap, &bx).unwrap() else {
+        panic!("not a body")
+    };
+    let edges: Vec<EdgeId> = k
+        .edges(b)
+        .unwrap()
+        .iter()
+        .filter(|e| (e.mid.x + 6.0).abs() < 1e-9 && e.mid.z > -10.0 + 1e-9)
+        .map(|e| e.id)
+        .collect();
+    assert!(edges.len() >= 3, "{edges:?}");
+    let (out, _) = local_tangent_chamfer(&mut k, b, &edges, 1.0);
+    // The cut's straight boundaries up the sides, halfway up.
+    let ys: Vec<f64> = k
+        .edges(out)
+        .unwrap()
+        .iter()
+        .filter(|e| (e.mid.x + 6.0).abs() < 1e-9 && (e.mid.z + 5.0).abs() < 1e-6)
+        .map(|e| e.mid.y.abs())
+        .collect();
+    let want = 4.0 * 3.0_f64.sqrt();
+    assert!(
+        ys.len() == 2 && ys.iter().all(|y| (y - want).abs() < 1e-9),
+        "{ys:?}, want ±{want}"
+    );
+}
+
 /// The D-shaped prism ([`d_prism`]) chamfered 2 up its two edges measured along the faces'
 /// tangent planes: 2 down the flat face, and round the cylinder to the chord's end of the
 /// tangent distance, the angle atan(2/R).
@@ -2253,16 +2353,7 @@ fn chamfer_plane_to_cylinder_tangent_measure() {
     let mut k = NativeKernel::new();
     let (b, edges) = d_prism(&mut k);
     let before = k.mass_properties(b).unwrap().volume;
-    let opts = ChamferOpts {
-        measurement: ChamferMeasure::Tangent,
-        ..ChamferOpts::new(ChamferSpec::EqualDistance(2.0))
-    };
-    let out = blend::chamfer(&mut k, b, &edges, &opts).unwrap().bodies[0];
-    assert_eq!(
-        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
-        Vec::<String>::new()
-    );
-    let v = k.mass_properties(out).unwrap().volume;
+    let v = local_tangent_chamfer(&mut k, b, &edges, 2.0).1;
     let want = before - 2.0 * 10.0 * d_prism_section(10.0, 2.0, (0.2_f64).atan());
     assert!((v - want).abs() < 1e-9 * want, "volume {v}, want {want}");
 }

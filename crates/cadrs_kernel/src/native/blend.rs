@@ -2843,6 +2843,21 @@ pub fn chamfer(
             }
         }
     }
+    chamfer_tool(k, body, edges, opts)
+}
+
+/// The chamfer by a tool and boolean alone (the sections solved on the exact faces, their
+/// contacts the distances along the faces), as [`chamfer`] makes it where local trimming
+/// doesn't.
+pub fn chamfer_tool(
+    k: &mut NativeKernel,
+    body: BodyId,
+    edges: &[EdgeId],
+    opts: &ChamferOpts,
+) -> Result<OpResult> {
+    let spec = opts.spec;
+    let b = (**k.get(body)?).clone();
+    let edges = &real_edges(&b, edges)?[..];
     let mut list: Vec<EdgeBlend> = Vec::new();
     for &e in edges {
         let flip = opts.flip != opts.flipped.contains(&e);
