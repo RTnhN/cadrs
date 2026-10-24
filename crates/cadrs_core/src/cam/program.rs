@@ -582,6 +582,33 @@ pub fn stock_before(
     let shape = stock_shape(cam, job, parts)?;
     let target = job.setups.iter().position(|s| s.id == setup)?;
     let rapid = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
+    // Setups turned against one another (not just flipped), or tilted toolpaths: the stock is
+    // carried as voxels instead.
+    let frames: Vec<Frame> = job
+        .setups
+        .iter()
+        .take(target + 1)
+        .filter(|s| !s.suppressed)
+        .map(|s| setup_frame(cam, job, s, parts))
+        .collect();
+    let turned = frames
+        .windows(2)
+        .any(|w| (dot(w[0].z, w[1].z).abs() - 1.0).abs() > 1e-6)
+        || frames
+            .last()
+            .is_some_and(|f| (dot(f.z, frame.z).abs() - 1.0).abs() > 1e-6);
+    let tilted = job.setups.iter().take(target + 1).any(|st| {
+        st.operations.iter().any(|o| {
+            o.toolpath()
+                .is_some_and(|t| t.params.axis != cadrs_cam::strategy::ToolAxis::WorkPlane)
+                || matches!(&o.kind, OpKind::WorkPlane(w) if w.kind == WorkPlaneType::Dynamic)
+        })
+    });
+    if turned || tilted {
+        return stock_before_voxels(
+            cam, job, &shape, target, upto, parts, paths, frame, cell, rapid,
+        );
+    }
     let mut state: Option<(cadrs_cam::heightmap::HeightMap, Frame, f64)> = None;
     for (si, st) in job.setups.iter().enumerate().take(target + 1) {
         if st.suppressed && si < target {
@@ -619,6 +646,62 @@ pub fn stock_before(
         return Some(map);
     }
     map.reframed(&f, bottom, frame, &stock_in(&shape, frame).bounds, cell)
+}
+
+/// [`stock_before`] through voxels: each toolpath (in its own frame, tilted or not) cut on a
+/// height map of the voxels and carved back into them.
+#[allow(clippy::too_many_arguments)]
+fn stock_before_voxels(
+    cam: &CamStudio,
+    job: &Job,
+    shape: &StockShape,
+    target: usize,
+    upto: Option<CamId>,
+    parts: &[Part],
+    paths: &HashMap<CamId, Toolpath>,
+    frame: &Frame,
+    cell: f64,
+    rapid: f64,
+) -> Option<cadrs_cam::heightmap::HeightMap> {
+    let tris = shape.triangles();
+    let b = Aabb::of(tris.iter().flatten().copied());
+    let s = b.size();
+    // A voxel a 200th of the stock's longest side, no finer than the maps.
+    let vcell = (s[0].max(s[1]).max(s[2]) / 200.0).max(cell);
+    let mut vox = cadrs_cam::voxels::Voxels::of_solid(&tris, vcell);
+    for (si, st) in job.setups.iter().enumerate().take(target + 1) {
+        if st.suppressed && si < target {
+            continue;
+        }
+        let ids: Vec<CamId> = st
+            .operations
+            .iter()
+            .take_while(|o| si < target || Some(o.id) != upto)
+            .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
+            .map(|o| o.id)
+            .collect();
+        if ids.is_empty() || (si == target && upto.is_none()) {
+            continue;
+        }
+        let run = setup_run(cam, job, st, parts, paths, Some(&ids)).ok()?;
+        for o in &run.ops {
+            // In its own frame: the setup's, or its tilted plane's.
+            let (of, tp) = match (&o.plane, o.tilted) {
+                (Some((wf, _, _)), true) => (*wf, o.local),
+                _ => (run.frame, &o.toolpath),
+            };
+            let area = stock_in(shape, &of).bounds;
+            let mut map = vox.height_map(&of, &area, vcell);
+            let start = tp.start().unwrap_or([0.0; 3]);
+            for seg in tp.motion(start, rapid) {
+                if !seg.is_rapid() {
+                    map.cut(o.tool, seg.from, seg.to);
+                }
+            }
+            vox.carve(&of, &map);
+        }
+    }
+    Some(vox.height_map(frame, &stock_in(shape, frame).bounds, cell))
 }
 
 /// What Verify found.

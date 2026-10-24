@@ -32,6 +32,7 @@ pub mod sim;
 pub mod strategy;
 pub mod tool;
 pub mod toolpath;
+pub mod voxels;
 
 pub use geom::{Aabb, Frame, P2, P3};
 pub use machine::{Indexing, Machine, MachineKind};

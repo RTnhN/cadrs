@@ -745,3 +745,48 @@ fn batch_delete_and_copy_across_jobs() {
     assert!(f.cam().find(a).is_some() && f.cam().find(b).is_some());
     assert!(f.cam().find(copied.id).is_some());
 }
+
+/// A side setup (looking down +X) after the profile round the plate: the band the profile cut
+/// is gone, so the plate's side is the top it sees, 2 under the stock's side (the stock's 2 mm
+/// margin), carried as voxels.
+#[test]
+fn a_side_setup_starts_from_the_first_ones_stock() {
+    let mut f = Fixture::new();
+    let (job, setup) = f.job(MachineKind::Mill);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let mut p = Params::new(Pattern::Profile2D, &em, MachineKind::Mill);
+    p.step_down = 4.0;
+    let profile = f.add_toolpath(setup, p);
+    let side = Setup {
+        id: CamId::new(),
+        name: "Side".into(),
+        program_number: 1002,
+        mating: Mating::Automatic,
+        wcs: WorkPlane {
+            z: [1.0, 0.0, 0.0],
+            x: [0.0, 1.0, 0.0],
+            ..WorkPlane::default()
+        },
+        operations: vec![],
+        suppressed: false,
+    };
+    let second = side.id;
+    f.run(Edit::AddSetup {
+        job,
+        setup: Box::new(side),
+    })
+    .unwrap();
+    let mut paths = HashMap::new();
+    paths.insert(profile, f.compute(profile).unwrap());
+    let parts = f.parts();
+    let cam = f.cam();
+    let j = cam.job(job).unwrap();
+    let frame = program::setup_frame(cam, j, &j.setups[1], &parts);
+    let map = program::stock_before(cam, j, second, None, &parts, &paths, &frame, 0.25)
+        .expect("carried to the side");
+    // The side's middle (model y 20, z 5): the plate's +X face at x = 60, the stock's at 62.
+    let q = frame.to_local([62.0, 20.0, 5.0]);
+    let v = map.sample([q[0], q[1]]);
+    assert!((v as f64 + 2.0).abs() < 0.7, "{v}");
+}
