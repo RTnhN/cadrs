@@ -7,6 +7,8 @@
 //!
 //! The wheel zooms in every preset.
 //!
+//! The **color scheme** ([`ColorScheme`]): light, dark, or whatever the system uses.
+//!
 //! And the **MCP server** ([`McpPreferences`]): whether AI assistants may drive the app over
 //! the Model Context Protocol, and on which loopback port.
 
@@ -273,6 +275,16 @@ impl Default for McpPreferences {
     }
 }
 
+/// The interface's color scheme (the top bar's light / dark / system toggle).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum ColorScheme {
+    /// Light or dark as the system is.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 /// The local preferences.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Preferences {
@@ -289,6 +301,8 @@ pub struct Preferences {
     /// How large the interface is drawn, in percent of the display's own scale (issue #12).
     #[serde(default = "default_ui_scale")]
     pub ui_scale: u16,
+    #[serde(default)]
+    pub color_scheme: ColorScheme,
 }
 
 fn default_rotation_snap_degrees() -> f64 {
@@ -306,6 +320,7 @@ impl Default for Preferences {
             rotation_snap_degrees: default_rotation_snap_degrees(),
             rotation_snap_tolerance_degrees: default_rotation_snap_tolerance_degrees(),
             ui_scale: 100,
+            color_scheme: ColorScheme::default(),
         }
     }
 }
@@ -487,6 +502,7 @@ mod tests {
             rotation_snap_degrees: 22.5,
             rotation_snap_tolerance_degrees: 15.0,
             ui_scale: 125,
+            color_scheme: ColorScheme::Dark,
         };
         p.save(&dir).unwrap();
         assert_eq!(Preferences::load(&dir), p);
@@ -510,6 +526,7 @@ mod tests {
         let p: Preferences = ron::from_str("(mcp: (enabled: true, port: 7690))").unwrap();
         assert_eq!(p.ui_scale, 100);
         assert_eq!(p.ui_scale_factor(), 1.0);
+        assert_eq!(p.color_scheme, ColorScheme::System);
         assert_eq!(Preferences { ui_scale: 150, ..p }.ui_scale_factor(), 1.5);
         // Out of range: the nearest size offered.
         assert_eq!(

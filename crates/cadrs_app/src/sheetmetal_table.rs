@@ -3457,7 +3457,7 @@ fn draw_cube_arcs(
 ) {
     use crate::view_cube::CubeColors;
     if is_open(&open, &kind) && t.key.is_some() {
-        crate::view_cube::draw_cube_arcs(&mut arcs, &t.view, theme.view_cube_arrow());
+        crate::view_cube::draw_cube_arcs(&mut arcs, &t.view, theme.view_cube_arc());
     }
 }
 

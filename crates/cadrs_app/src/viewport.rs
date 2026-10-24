@@ -693,7 +693,7 @@ fn no_light_clusters(add: On<Add, Camera3d>, mut commands: Commands) {
         .insert(bevy::light::cluster::ClusterConfig::None);
 }
 
-fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme: Res<Theme>) {
+fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>) {
     let view = ViewState::default();
     let projection = || ortho_projection(view.scale);
     let transform =
@@ -703,8 +703,9 @@ fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme:
         MainCamera,
         Camera3d::default(),
         surface.target.clone(),
+        // The `ClearColor` resource: the scheme's viewport background (`cadrs_ui::color_scheme`).
         Camera {
-            clear_color: ClearColorConfig::Custom(theme.viewport_background),
+            clear_color: ClearColorConfig::Default,
             ..default()
         },
         projection(),

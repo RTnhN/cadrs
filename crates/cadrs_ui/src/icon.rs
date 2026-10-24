@@ -57,9 +57,9 @@ pub struct IconAtlas {
     images: HashMap<&'static str, Vec<(u32, Handle<Image>)>>,
     accents: HashMap<&'static str, Vec<(u32, Handle<Image>)>>,
     full_colour: HashSet<&'static str>,
-    /// Rasters rendered at runtime, by (name, physical px, accent layer); `None` where
-    /// rendering failed (the built-in raster is used).
-    rendered: HashMap<(String, u32, bool), Option<Handle<Image>>>,
+    /// Rasters rendered at runtime, by (name, physical px, accent layer, dark artwork); `None`
+    /// where rendering failed (the built-in raster is used).
+    rendered: HashMap<(String, u32, bool, bool), Option<Handle<Image>>>,
 }
 
 impl IconAtlas {
@@ -80,15 +80,18 @@ impl IconAtlas {
 
     /// The icon's base (or `accent`) layer for `size` logical px drawn at `scale` physical px
     /// each: the built-in raster 100 % would use, or that raster's size times `scale` rendered
-    /// (once) so the icon looks the same at every scale, only sharper.
+    /// (once) so the icon looks the same at every scale, only sharper. With `dark`, a
+    /// full-colour icon is drawn from icon-rs's artwork for dark backgrounds.
     fn scaled(
         &mut self,
         name: &str,
         size: f32,
         scale: f32,
         accent: bool,
+        dark: bool,
         images: &mut Assets<Image>,
     ) -> Option<Handle<Image>> {
+        let dark = dark && self.is_full_colour(name);
         let table = if accent { &self.accents } else { &self.images };
         let sizes = table.get(name)?;
         let base = pick(sizes, size)?;
@@ -97,12 +100,12 @@ impl IconAtlas {
             .find(|(_, h)| *h == base)
             .map_or(0, |(s, _)| *s);
         let px = (built as f32 * scale).round().clamp(1.0, 512.0) as u32;
-        if px == built {
+        if px == built && !dark {
             return Some(base);
         }
-        let key = (name.to_owned(), px, accent);
+        let key = (name.to_owned(), px, accent, dark);
         let made = self.rendered.entry(key).or_insert_with(|| {
-            render(name, built, px, accent).map(|rgba| images.add(rgba_image(px, rgba)))
+            render(name, built, px, accent, dark).map(|rgba| images.add(rgba_image(px, rgba)))
         });
         Some(made.clone().unwrap_or(base))
     }
@@ -124,9 +127,13 @@ fn pick(sizes: &[(u32, Handle<Image>)], size: f32) -> Option<Handle<Image>> {
         .map(|(_, h)| h.clone())
 }
 
-/// The icon `name` (built in at `size` px) rendered at `px` px: its base or accent layer.
-fn render(name: &str, size: u32, px: u32, accent: bool) -> Option<Vec<u8>> {
-    let (icon, weight) = crate::icon_raster::source(name)?;
+/// The icon `name` (built in at `size` px) rendered at `px` px: its base or accent layer, from
+/// the artwork for dark backgrounds with `dark`.
+fn render(name: &str, size: u32, px: u32, accent: bool, dark: bool) -> Option<Vec<u8>> {
+    let (mut icon, weight) = crate::icon_raster::source(name)?;
+    if dark {
+        icon.svg = icon.svg_dark;
+    }
     let (base, accent_svg) = crate::icon_raster::layers(&icon, weight, size);
     let svg = if accent { accent_svg? } else { base };
     crate::icon_raster::rasterize(&svg, px)
@@ -243,8 +250,8 @@ pub fn icon_in(
     )
 }
 
-/// Fills in the image of new or changed [`Icon`]s (all of them when the UI's scale changes),
-/// marks full-colour ones and (re)builds the accent layer.
+/// Fills in the image of new or changed [`Icon`]s (all of them when the UI's scale or the color
+/// scheme changes), marks full-colour ones and (re)builds the accent layer.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn resolve_icons(
     mut commands: Commands,
@@ -252,7 +259,8 @@ pub fn resolve_icons(
     mut images: ResMut<Assets<Image>>,
     window: Query<&Window, With<PrimaryWindow>>,
     ui_scale: Res<UiScale>,
-    mut last_scale: Local<f32>,
+    appearance: Option<Res<crate::color_scheme::Appearance>>,
+    mut last: Local<(f32, bool)>,
     mut q: Query<(
         Entity,
         Ref<Icon>,
@@ -265,13 +273,14 @@ pub fn resolve_icons(
 ) {
     // Physical pixels per logical pixel.
     let scale = window.single().map_or(1.0, |w| w.scale_factor()) * ui_scale.0;
-    let rescaled = scale != *last_scale;
-    *last_scale = scale;
+    let dark = appearance.is_some_and(|a| a.is_dark());
+    let rescaled = (scale, dark) != *last;
+    *last = (scale, dark);
     for (entity, icon, mut image, mut node, children, solid) in &mut q {
         if !icon.is_changed() && !rescaled {
             continue;
         }
-        match atlas.scaled(&icon.name, icon.size, scale, false, &mut images) {
+        match atlas.scaled(&icon.name, icon.size, scale, false, dark, &mut images) {
             Some(handle) => image.image = handle,
             None => warn!("unknown icon {:?}", icon.name),
         }
@@ -290,7 +299,7 @@ pub fn resolve_icons(
                 commands.entity(*child).try_despawn();
             }
         }
-        if let Some(accent) = atlas.scaled(&icon.name, icon.size, scale, true, &mut images) {
+        if let Some(accent) = atlas.scaled(&icon.name, icon.size, scale, true, dark, &mut images) {
             let layer = (
                 IconAccent,
                 ImageNode {
@@ -340,7 +349,7 @@ fn accent_layer_color(tint: Color) -> Color {
 /// widgets have set their state colours; and re-greys (or restores) an icon when its button is
 /// disabled or enabled, even when that doesn't change the icon's tint (P3H.4 judge).
 #[allow(clippy::type_complexity)]
-fn sync_icon_layers(
+pub(crate) fn sync_icon_layers(
     mut q_icons: Query<
         (
             Mut<ImageNode>,
@@ -405,12 +414,14 @@ mod tests {
         let mut images = Assets::<Image>::default();
         let mut atlas = IconAtlas::built_in(&mut images);
         // 100 %: the built-in raster.
-        let at_100 = atlas.scaled("plus", 16.0, 1.0, false, &mut images).unwrap();
+        let at_100 = atlas
+            .scaled("plus", 16.0, 1.0, false, false, &mut images)
+            .unwrap();
         assert_eq!(Some(&at_100), atlas.get("plus", 16.0).as_ref());
         // 150 % and 200 %: rendered at 24 and 32 px (not the 16 px raster stretched), once each.
         for (scale, px) in [(1.5, 24), (2.0, 32)] {
             let h = atlas
-                .scaled("plus", 16.0, scale, false, &mut images)
+                .scaled("plus", 16.0, scale, false, false, &mut images)
                 .unwrap();
             let image = images.get(&h).unwrap();
             assert_eq!((image.width(), image.height()), (px, px));
@@ -419,18 +430,18 @@ mod tests {
                 "drawn"
             );
             assert_eq!(
-                atlas.scaled("plus", 16.0, scale, false, &mut images),
+                atlas.scaled("plus", 16.0, scale, false, false, &mut images),
                 Some(h)
             );
         }
         // Weight variants and accent layers too.
         let bold = atlas
-            .scaled("check-bold", 16.0, 2.0, false, &mut images)
+            .scaled("check-bold", 16.0, 2.0, false, false, &mut images)
             .unwrap();
         assert_eq!(images.get(&bold).unwrap().width(), 32);
         let with_accent = data::ACCENT_DATA[0].0;
         let accent = atlas
-            .scaled(with_accent, 16.0, 2.0, true, &mut images)
+            .scaled(with_accent, 16.0, 2.0, true, false, &mut images)
             .unwrap();
         assert_eq!(images.get(&accent).unwrap().width(), 32);
     }

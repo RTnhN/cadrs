@@ -17,7 +17,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
-use cadrs_ui::Theme;
+use cadrs_ui::{Theme, by_scheme};
 
 use crate::AppState;
 use crate::camera::{StandardView, ViewState, ray_square};
@@ -44,6 +44,10 @@ impl Plugin for ViewCubePlugin {
                 place_cube_labels
                     .before(bevy::ui::UiSystems::Layout)
                     .run_if(in_state(AppState::Document)),
+            )
+            .add_systems(
+                Update,
+                recolor_cube.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
             )
             .add_systems(OnEnter(AppState::Document), activate_cube_camera::<true>)
             .add_systems(OnExit(AppState::Document), activate_cube_camera::<false>)
@@ -205,6 +209,7 @@ pub fn corner_view(corner: IVec3) -> (f32, f32) {
 struct CubeMaterials {
     normal: Handle<StandardMaterial>,
     hover: Handle<StandardMaterial>,
+    frame: Handle<StandardMaterial>,
 }
 
 /// A face's label quad.
@@ -379,6 +384,7 @@ fn setup_cube(
     commands.insert_resource(CubeMaterials {
         normal: normal.clone(),
         hover,
+        frame: frame.clone(),
     });
     // Each side: a light grey-blue frame with a white rounded-looking face inset in it.
     let body = meshes.add(Rectangle::new(2.0, 2.0));
@@ -488,29 +494,63 @@ fn activate_cube_camera<const ON: bool>(
     }
 }
 
+/// The cube's colors in the scheme in force, except [`CubeColors::view_cube_arrow`]: the
+/// arrows are UI icons, which the scheme maps itself.
 pub(crate) trait CubeColors {
     fn view_cube_frame(&self) -> Color;
     fn view_cube_face(&self) -> Color;
     fn view_cube_hover(&self) -> Color;
     fn view_cube_edge(&self) -> Color;
     fn view_cube_arrow(&self) -> Color;
+    /// The rotation arcs over the cube (gizmos, so not mapped).
+    fn view_cube_arc(&self) -> Color;
 }
 
 impl CubeColors for Theme {
     fn view_cube_frame(&self) -> Color {
-        Color::srgb_u8(0xe6, 0xeb, 0xef)
+        by_scheme(
+            Color::srgb_u8(0xe6, 0xeb, 0xef),
+            Color::srgb_u8(0x3a, 0x3e, 0x45),
+        )
     }
     fn view_cube_face(&self) -> Color {
-        Color::WHITE
+        by_scheme(Color::WHITE, Color::srgb_u8(0x4c, 0x51, 0x59))
     }
     fn view_cube_hover(&self) -> Color {
-        Color::srgb_u8(0xcf, 0xe3, 0xf7)
+        by_scheme(
+            Color::srgb_u8(0xcf, 0xe3, 0xf7),
+            Color::srgb_u8(0x3e, 0x62, 0x8a),
+        )
     }
     fn view_cube_edge(&self) -> Color {
-        Color::srgb_u8(0xd0, 0xd6, 0xdb)
+        by_scheme(
+            Color::srgb_u8(0xd0, 0xd6, 0xdb),
+            Color::srgb_u8(0x62, 0x68, 0x71),
+        )
     }
     fn view_cube_arrow(&self) -> Color {
         Color::srgb_u8(0xe1, 0xe9, 0xef)
+    }
+    fn view_cube_arc(&self) -> Color {
+        by_scheme(self.view_cube_arrow(), Color::srgb_u8(0x8a, 0x90, 0x98))
+    }
+}
+
+/// Gives the cube the scheme's colors.
+fn recolor_cube(
+    theme: Res<Theme>,
+    cube: Option<Res<CubeMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(cube) = cube else { return };
+    for (h, c) in [
+        (&cube.normal, theme.view_cube_face()),
+        (&cube.hover, theme.view_cube_hover()),
+        (&cube.frame, theme.view_cube_frame()),
+    ] {
+        if let Some(mut m) = materials.get_mut(h) {
+            m.base_color = c;
+        }
     }
 }
 
@@ -991,7 +1031,7 @@ fn draw_cube(
     view: Res<ViewportView>,
     theme: Res<Theme>,
 ) {
-    draw_cube_arcs(&mut arcs, &view.view, theme.view_cube_arrow());
+    draw_cube_arcs(&mut arcs, &view.view, theme.view_cube_arc());
     let edge = theme.view_cube_edge();
     let c = |x: f32, y: f32, z: f32| Vec3::new(x, y, z) * 0.97;
     let corners = [

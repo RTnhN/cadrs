@@ -599,6 +599,10 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             ..default()
         })
         .with_children(|r| {
+            // Light, dark or the system's scheme.
+            r.spawn(cadrs_ui::scheme_toggle(t))
+                .entry::<Node>()
+                .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
             // (Explore, notifications, apps and Share are left out until they do something:
             // issue #13.)
             r.spawn((
@@ -1552,13 +1556,25 @@ struct EnabledColor(Color);
 
 /// While the sketch dialog waits for a plane, the search box is greyed out with the sketch
 /// tools (`screens/07`: text about #cecece on an almost white box).
+#[allow(clippy::type_complexity)]
 fn sync_search_tools(
     session: Option<Res<SketchSession>>,
     theme: Res<Theme>,
     mut q_root: Query<(Entity, &mut BackgroundColor), With<SearchTools>>,
     q_children: Query<&Children>,
-    mut q_text: Query<(&mut TextColor, Option<&EnabledColor>)>,
-    mut q_border: Query<(&mut BorderColor, Option<&EnabledColor>), Without<TextColor>>,
+    mut q_text: Query<(
+        &mut TextColor,
+        Option<&EnabledColor>,
+        Option<&cadrs_ui::Mapped<TextColor>>,
+    )>,
+    mut q_border: Query<
+        (
+            &mut BorderColor,
+            Option<&EnabledColor>,
+            Option<&cadrs_ui::Mapped<BorderColor>>,
+        ),
+        Without<TextColor>,
+    >,
     mut commands: Commands,
 ) {
     let disabled = session.as_ref().is_some_and(|s| s.waiting_for_plane);
@@ -1571,14 +1587,15 @@ fn sync_search_tools(
         };
         bg.set_if_neq(BackgroundColor(want));
         for e in q_children.iter_descendants(root) {
-            if let Ok((mut c, orig)) = q_text.get_mut(e) {
-                let base = orig.map_or(c.0, |o| o.0);
+            // As built: in light, even while the dark scheme shows it mapped.
+            if let Ok((mut c, orig, mapped)) = q_text.get_mut(e) {
+                let base = orig.map_or_else(|| cadrs_ui::authored(&*c, mapped), |o| o.0);
                 if orig.is_none() {
                     commands.entity(e).try_insert(EnabledColor(base));
                 }
                 c.set_if_neq(TextColor(if disabled { grey } else { base }));
-            } else if let Ok((mut b, orig)) = q_border.get_mut(e) {
-                let base = orig.map_or(b.top, |o| o.0);
+            } else if let Ok((mut b, orig, mapped)) = q_border.get_mut(e) {
+                let base = orig.map_or_else(|| cadrs_ui::authored(&*b, mapped)[0], |o| o.0);
                 if orig.is_none() {
                     commands.entity(e).try_insert(EnabledColor(base));
                 }

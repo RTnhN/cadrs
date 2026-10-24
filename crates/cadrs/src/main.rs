@@ -167,6 +167,8 @@ fn main() -> AppExit {
             .unwrap_or_else(|| opts.resolved_out_dir().join("libraries"))
     });
     if scripted || opts.headless {
+        // The same light (or `CADRS_COLOR_SCHEME`) look on every machine.
+        app.insert_resource(cadrs_ui::Appearance::without_system());
         app.insert_resource(cadrs_app::ExportDirOverride(Some(
             opts.resolved_out_dir().join("exports"),
         )));

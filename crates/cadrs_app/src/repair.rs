@@ -129,7 +129,7 @@ fn draw_repair_cube_arcs(
 ) {
     use crate::view_cube::CubeColors;
     if repair.open {
-        crate::view_cube::draw_cube_arcs(&mut arcs, &repair.view, theme.view_cube_arrow());
+        crate::view_cube::draw_cube_arcs(&mut arcs, &repair.view, theme.view_cube_arc());
     }
 }
 
