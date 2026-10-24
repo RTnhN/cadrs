@@ -53,4 +53,7 @@ RUSTFLAGS= proa dev --open
 ```
 
 `export.sh` builds the release binary and renders it with `proa export`. The download links
-point at the latest GitHub release (set `CADRS_RELEASE=v0.1.5` to choose one).
+point at the latest GitHub release at export time (set `CADRS_RELEASE=v0.1.5` to choose one);
+when the page loads, `RELEASE_SCRIPT` (`src/pages/home.rs`) points them at whatever release is
+latest now, so publishing, replacing or deleting a release needs no redeploy. `index.md` keeps
+the links from the export.

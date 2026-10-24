@@ -52,6 +52,7 @@ where
                         <meta name="theme-color" content="#1d4fb8" />
                         {StaticRaw(crate::theme::THEME_SCRIPT)}
                         {StaticRaw(crate::github::STARS_SCRIPT)}
+                        {StaticRaw(crate::pages::home::RELEASE_SCRIPT)}
                         <title>{raw_text_ok(title)}</title>
                         <link rel="icon" type="image/png" href={icon} />
                         {fonts}
