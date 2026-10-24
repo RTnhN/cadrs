@@ -516,6 +516,9 @@ pub struct PartCache {
     pub sketch_curves: Vec<SketchCurves>,
     /// Bumped whenever the parts change (or which are shown).
     pub generation: u64,
+    /// Bumped by every rebuild taken (its errors are the current ones once `rebuilding` is
+    /// false).
+    pub builds: u64,
     /// The parts' settings (names, hidden, appearances, materials), from the Part Studio.
     pub props: Vec<cadrs_core::PartProps>,
     /// The features' and sketches' appearances (PS9.4, PS9.5), from the Part Studio.
@@ -1142,6 +1145,7 @@ impl PartCache {
             .collect();
         self.uses = build.uses.clone();
         self.names = build.names.clone();
+        self.builds += 1;
         self.rebuilding = false;
     }
 }
@@ -3290,6 +3294,8 @@ pub struct PickFilter {
     /// Faces, edges and vertices this operation made are not picked (the open Extrude
     /// dialog's own preview: a click goes through it).
     pub skip_op: Option<cadrs_sketch::OpId>,
+    /// A face picks its whole part ([`Pick::Part`]; a merge scope).
+    pub whole_parts: bool,
 }
 
 impl PickFilter {
@@ -3308,6 +3314,7 @@ impl PickFilter {
             connectors: false,
             dots: None,
             skip_op: None,
+            whole_parts: false,
         }
     }
 
@@ -3328,6 +3335,7 @@ impl PickFilter {
             connectors: true,
             dots: None,
             skip_op: None,
+            whole_parts: false,
         }
     }
 }
@@ -3785,6 +3793,7 @@ pub fn pick_scene(
         (Some((_, _, tf)), Some((s, i, tr))) if tr <= tf + 1e-2 => {
             return Some(Pick::Region(s, i as u32));
         }
+        (Some((f, _, _)), _) if filter.whole_parts => return Some(Pick::Part(f)),
         (Some((f, tag, _)), _) => return Some(Pick::Face(f, tag)),
         (None, Some((s, i, _))) => return Some(Pick::Region(s, i as u32)),
         (None, None) => {}
