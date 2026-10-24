@@ -516,7 +516,8 @@ fn profile_paths(input: &Input, dist: f64) -> Vec<Contour> {
         };
         let mut cs = region_contours(&off);
         if p.side != Side::On {
-            cs = orient(cs, p.direction, true);
+            // The holes' rings (Inside) have the material round them, outside them.
+            cs = orient(cs, p.direction, p.side != Side::Inside);
         }
         return cs;
     }

@@ -210,13 +210,18 @@ fn go_down_near(
         && (at[2] - z).abs() < 1e-6
         && region::segment_inside(face, [at[0], at[1]], e)
     {
-        let fd = b.input.params.links.feed_distance;
+        let p = b.input.params;
+        let fd = p.links.feed_distance;
         let hop = above + fd;
         b.rapid([at[0], at[1], hop]);
         b.rapid([e[0], e[1], hop]);
-        // Its whole footprint was cut at this depth when its centre passed there: quickly
-        // down to just over it.
-        b.rapid([e[0], e[1], z + fd]);
+        // At a deep level its whole footprint was cut at this depth when its centre passed
+        // there: quickly down to just over it. A fine level's terraces (a fine step thick) can
+        // stand right beside the cleared ground: fed down through the fine step instead.
+        let fine_level = above - z <= p.fine_step_down + 1e-9;
+        if !fine_level {
+            b.rapid([e[0], e[1], z + fd]);
+        }
         b.feed([e[0], e[1], z], FeedKind::Plunge);
         b.feed([to[0], to[1], z], FeedKind::Cut);
         return;
@@ -400,5 +405,56 @@ mod tests {
             worst < step * 1.5,
             "a cut {worst} mm wide (step over {step})"
         );
+    }
+
+    /// A walled pocket roughed adaptively, from a fresh block, at the defaults: Verify finds
+    /// no rapid into the stock (the fine levels' hops feed down beside their terraces) and no
+    /// gouge.
+    #[test]
+    fn a_default_adaptive_rapids_clear_of_the_stock() {
+        use crate::geom::Aabb;
+        use crate::model::{Model, box_triangles};
+        use crate::sim::{SimOp, simulate_mill_on};
+        use crate::strategy::{Input, Stock};
+        let mut tris = box_triangles(&Aabb::new([0.0, 0.0, 0.0], [100.0, 60.0, 10.0]));
+        for (lo, hi) in [
+            ([0.0, 0.0], [10.0, 60.0]),
+            ([40.0, 0.0], [50.0, 60.0]),
+            ([10.0, 0.0], [40.0, 10.0]),
+            ([10.0, 50.0], [40.0, 60.0]),
+        ] {
+            tris.extend(box_triangles(&Aabb::new(
+                [lo[0], lo[1], 10.0],
+                [hi[0], hi[1], 25.0],
+            )));
+        }
+        let m = Model::from_triangles("walled", tris);
+        let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [105.0, 65.0, 28.0]));
+        let mut em = Tool::new(ToolKind::EndMill, 6.0);
+        em.cutting_length = 30.0;
+        em.overall_length = 60.0;
+        let p = Params::new(Pattern::Adaptive, &em, MachineKind::Mill);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &em,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        let tp = generate(&input).unwrap();
+        let segs = tp.motion([0.0, 0.0, 60.0], 5_000.0);
+        let r = simulate_mill_on(
+            stock.height_map(0.25),
+            &m,
+            &[],
+            &[SimOp {
+                tool: &em,
+                segments: &segs,
+            }],
+        );
+        assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
+        assert_eq!(r.gouge_cells, 0, "{}", r.gouge_depth);
     }
 }

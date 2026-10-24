@@ -50,6 +50,8 @@ fn heights(input: &Input) -> Z {
 }
 
 /// The contours a cut follows, kerf compensated, each with whether it's a hole (scrap inside).
+/// Every one has the part on its left (a hole's ring runs clockwise, its scrap on the right),
+/// as [`cut`] expects.
 fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
     let p = input.params;
     let k = input.tool.radius() + p.wall_stock;
@@ -69,8 +71,11 @@ fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
                 continue;
             }
             if !c.closed {
-                // The kerf off the edge, away from the part.
-                let (pts, _) = input.offset_open_chain(&c, z, k, p.side);
+                // The kerf off the edge, away from the part (the part on its left).
+                let (mut pts, free_left) = input.offset_open_chain(&c, z, k, p.side);
+                if free_left {
+                    pts.reverse();
+                }
                 out.push((Contour::open(pts), false));
                 continue;
             }
@@ -86,8 +91,13 @@ fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
             };
             let off = region::offset(&[ring], if outside { k } else { -k });
             for cc in region_contours(&off) {
-                // Part inside an outside cut; scrap inside an inside cut.
-                out.push((cc, !outside));
+                // Part inside an outside cut; scrap inside an inside cut (its ring, round the
+                // scrap counter-clockwise, turned to have the part on its left).
+                if outside {
+                    out.push((cc, false));
+                } else {
+                    out.push((cc.reversed(), true));
+                }
             }
         }
         if out.is_empty() {
@@ -106,8 +116,13 @@ fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
         _ => region::offset(&sil, k),
     };
     for c in region_contours(&off) {
-        let hole = !c.ccw();
-        out.push((c, hole));
+        if p.side == Side::Inside {
+            // Round a hole's scrap: turned to have the part on its left.
+            out.push((c.reversed(), true));
+        } else {
+            let hole = !c.ccw();
+            out.push((c, hole));
+        }
     }
     Ok(out)
 }
@@ -120,11 +135,8 @@ struct Room {
     pierce: Region,
 }
 
-/// The [`Room`] round the job's parts (`None` for an inside cut: no part to keep off).
+/// The [`Room`] round the job's parts.
 fn room(input: &Input) -> Option<Room> {
-    if input.params.side == Side::Inside {
-        return None;
-    }
     let k = input.tool.radius() + input.params.wall_stock;
     let sil = input.model.silhouette();
     let all = [super::everywhere(input)];
@@ -132,6 +144,20 @@ fn room(input: &Input) -> Option<Room> {
         free: region::difference(&all, &region::offset(&sil, k - 1e-3)),
         pierce: region::difference(&all, &region::offset(&sil, k + input.tool.radius())),
     })
+}
+
+/// The [`Room`] inside a hole's cut (`c`, the beam's centre round its scrap): the beam may go
+/// anywhere inside it, and pierce a kerf in from it.
+fn room_in(c: &Contour, kerf: f64) -> Room {
+    let mut ring = c.pts.clone();
+    if ring_area2(&ring) < 0.0 {
+        ring.reverse();
+    }
+    Room {
+        // (A hair out: a lead ends on the contour itself; the part is a kerf further.)
+        free: region::offset(&[ring.clone()], 1e-3),
+        pierce: region::offset(&[ring], -kerf),
+    }
 }
 
 /// The lead onto a contour at `pt` (direction `t`) from the scrap on `side`: where to pierce,
@@ -280,9 +306,13 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
                 c.reversed().starting_near(from)
             } else if c.closed {
                 c.starting_near(from)
+            } else if p.direction == Direction::Climb {
+                c.reversed()
             } else {
                 c
             };
+            // A hole's pierce and lead stay in its own scrap.
+            let hole_room = (hole && c.closed).then(|| room_in(&c, t.radius()));
             let feed =
                 if hole && p.beam.small_hole > 0.0 && hole_diameter(&c.pts) < p.beam.small_hole {
                     p.speeds.feed * p.beam.small_hole_feed
@@ -299,7 +329,7 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
                 cut_one(
                     &mut b,
                     input,
-                    room.as_ref(),
+                    hole_room.as_ref().or(room.as_ref()),
                     &c,
                     hole,
                     &zz,
@@ -836,6 +866,82 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    /// A plate with a 20 × 20 through hole, cut Inside (picked or not) and Automatic (picked or
+    /// not): every pierce and lead in scrap (the hole's), never in the part, and the hole run the
+    /// same way round whether picked or not.
+    #[test]
+    fn holes_cut_from_their_scrap_however_chosen() {
+        let mut t = Vec::new();
+        for (lo, hi) in [
+            ([0.0, 0.0], [20.0, 40.0]),
+            ([40.0, 0.0], [60.0, 40.0]),
+            ([20.0, 0.0], [40.0, 10.0]),
+            ([20.0, 30.0], [40.0, 40.0]),
+        ] {
+            t.extend(box_triangles(&Aabb::new(
+                [lo[0], lo[1], 0.0],
+                [hi[0], hi[1], 3.0],
+            )));
+        }
+        let mut m = Model::from_triangles("plate", t);
+        m.edges.push(crate::model::Edge {
+            name: "hole".into(),
+            body: 0,
+            points: vec![
+                [20.0, 10.0, 3.0],
+                [40.0, 10.0, 3.0],
+                [40.0, 30.0, 3.0],
+                [20.0, 30.0, 3.0],
+                [20.0, 10.0, 3.0],
+            ],
+            circle: None,
+        });
+        let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [65.0, 45.0, 3.0]));
+        let tool = Tool::new(ToolKind::Laser, 0.2);
+        let mut turns = Vec::new();
+        for (side, picked) in [
+            (Side::Inside, false),
+            (Side::Inside, true),
+            (Side::Auto, true),
+            (Side::Auto, false),
+        ] {
+            let mut p = Params::new(Pattern::Cut, &tool, MachineKind::Laser);
+            p.side = side;
+            if picked {
+                p.drive.edges = vec!["hole".into()];
+            }
+            let input = Input {
+                model: &m,
+                stock: &stock,
+                tool: &tool,
+                machine: MachineKind::Laser,
+                params: &p,
+                rest: None,
+                fixtures: &[],
+            };
+            let tp = generate(&input).unwrap();
+            assert_scrap_only(&tp, &m, 0.1);
+            // The hole's cut: the cut moves inside the hole's box.
+            let ring: Vec<P2> = tp
+                .steps
+                .iter()
+                .filter_map(|s| match s {
+                    Step::Feed {
+                        to,
+                        kind: FeedKind::Cut,
+                        ..
+                    } if (19.0..41.0).contains(&to[0]) && (9.0..31.0).contains(&to[1]) => {
+                        Some([to[0], to[1]])
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(ring.len() >= 4, "{side:?} {picked}");
+            turns.push(ring_area2(&ring) > 0.0);
+        }
+        assert!(turns.iter().all(|t| *t == turns[0]), "{turns:?}");
     }
 
     /// A plate with a narrow slot (8.5 × 98.5 as a hole): the 4 mm lead can't fit across its

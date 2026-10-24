@@ -166,9 +166,34 @@ impl Input<'_> {
         edges.chain(faces).reduce(f64::min)
     }
 
-    /// Whether the part lies inside a closed contour at height `z`: probed just either side of
-    /// its longest segment (a loop round a pocket has the part outside it even though the
-    /// part's material is below the pocket's floor).
+    /// Which side of the segment `a`→`b` at height `z` the part is on (`Some(true)`: left),
+    /// probed just either side of its middle: first where material stands above it (an edge at
+    /// a wall's foot has the wall on one side, the floor on the other), else where there is
+    /// material up to it (a top edge); `None` when neither tells.
+    fn material_beside(&self, a: P2, b: P2, z: f64) -> Option<bool> {
+        let m = crate::geom::lerp2(a, b, 0.5);
+        let t = path::unit(crate::geom::sub2(b, a));
+        let e = 0.05;
+        let left = [m[0] - t[1] * e, m[1] + t[0] * e];
+        let right = [m[0] + t[1] * e, m[1] - t[0] * e];
+        let top = |p: P2| self.model.top_at(p);
+        let above = |p: P2| top(p).is_some_and(|h| h > z + 1e-3);
+        let up_to = |p: P2| top(p).is_some_and(|h| h >= z - 1e-3);
+        if above(left) != above(right) {
+            return Some(above(left));
+        }
+        (up_to(left) != up_to(right)).then(|| up_to(left))
+    }
+
+    /// The longest segment of `c` (closing a closed one).
+    fn longest_segment(c: &path::Contour) -> Option<(P2, P2)> {
+        let n = c.pts.len();
+        let segs = if c.closed { n } else { n.saturating_sub(1) };
+        (0..segs)
+            .map(|i| (c.pts[i], c.pts[(i + 1) % n]))
+            .max_by(|x, y| crate::geom::dist2(x.0, x.1).total_cmp(&crate::geom::dist2(y.0, y.1)))
+    }
+
     /// An open chain at `z` moved `dist` off it, to the side `side` asks for: Automatic and
     /// Outside away from the material beside it, Inside towards it (beside neither or both:
     /// left for Automatic and Outside, right for Inside). With whether its free side (the tool's)
@@ -180,24 +205,8 @@ impl Input<'_> {
         dist: f64,
         side: Side,
     ) -> (Vec<P2>, bool) {
-        let n = c.pts.len();
-        let material_left = (0..n.saturating_sub(1))
-            .max_by(|a, b| {
-                let la = crate::geom::dist2(c.pts[*a], c.pts[*a + 1]);
-                let lb = crate::geom::dist2(c.pts[*b], c.pts[*b + 1]);
-                la.total_cmp(&lb)
-            })
-            .and_then(|i| {
-                let (a, b) = (c.pts[i], c.pts[i + 1]);
-                let m = crate::geom::lerp2(a, b, 0.5);
-                let t = path::unit(crate::geom::sub2(b, a));
-                let e = 0.05;
-                let left = [m[0] - t[1] * e, m[1] + t[0] * e];
-                let right = [m[0] + t[1] * e, m[1] - t[0] * e];
-                let solid = |p: P2| self.model.top_at(p).is_some_and(|top| top >= z - 1e-3);
-                let (l, r) = (solid(left), solid(right));
-                (l != r).then_some(l)
-            });
+        let material_left =
+            Self::longest_segment(c).and_then(|(a, b)| self.material_beside(a, b, z));
         let inside = side == Side::Inside;
         let free_left = match material_left {
             Some(m) => m == inside,
@@ -207,26 +216,16 @@ impl Input<'_> {
         (path::offset_open(&c.pts, d), free_left)
     }
 
+    /// Whether the part lies inside a closed contour at height `z`: probed just either side of
+    /// its longest segment (a loop round a pocket has the part outside it even though the
+    /// part's material is below the pocket's floor).
     pub fn part_inside(&self, c: &path::Contour, z: f64) -> bool {
-        let n = c.pts.len();
-        let Some(i) = (0..n).max_by(|a, b| {
-            let la = crate::geom::dist2(c.pts[*a], c.pts[(*a + 1) % n]);
-            let lb = crate::geom::dist2(c.pts[*b], c.pts[(*b + 1) % n]);
-            la.total_cmp(&lb)
-        }) else {
+        let Some((a, b)) = Self::longest_segment(c) else {
             return false;
         };
-        let (a, b) = (c.pts[i], c.pts[(i + 1) % n]);
-        let m = crate::geom::lerp2(a, b, 0.5);
-        let t = path::unit(crate::geom::sub2(b, a));
-        let e = 0.05;
-        let left = [m[0] - t[1] * e, m[1] + t[0] * e];
-        let right = [m[0] + t[1] * e, m[1] - t[0] * e];
-        let solid = |p: crate::geom::P2| self.model.top_at(p).is_some_and(|top| top >= z - 1e-3);
-        let (l, r) = (solid(left), solid(right));
         let left_inside = c.ccw();
-        if l != r {
-            return if left_inside { l } else { r };
+        if let Some(l) = self.material_beside(a, b, z) {
+            return l == left_inside;
         }
         // Both or neither: whether the material is inside at all.
         let mut ring = c.pts.clone();
@@ -240,8 +239,13 @@ impl Input<'_> {
         self.height(self.params.heights.top)
     }
 
+    /// The bottom height. Selection with nothing picked: the model's bottom.
     pub fn bottom(&self) -> f64 {
-        self.height(self.params.heights.bottom)
+        let h = self.params.heights.bottom;
+        if h.from == HeightRef::Selection && self.selection_z().is_none() {
+            return self.model.bounds().min[2] + h.offset;
+        }
+        self.height(h)
     }
 
     /// The highest of the stock, the model and the workholding.

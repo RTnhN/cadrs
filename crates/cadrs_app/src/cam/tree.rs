@@ -273,11 +273,14 @@ pub(super) fn rebuild_tree(
         for r in &jobs {
             spawn_row(p, &t, r);
         }
-        p.spawn(Node {
-            height: Val::Px(10.0),
-            flex_shrink: 0.0,
-            ..default()
-        });
+        p.spawn((
+            Name::new("cam-tree-gap"),
+            Node {
+                height: Val::Px(10.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
         header(
             p,
             &t,

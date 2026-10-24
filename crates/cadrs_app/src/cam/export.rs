@@ -259,13 +259,16 @@ fn open_dialog(world: &mut World) {
                 let full = || Val::Percent(100.0);
                 let row =
                     |b: &mut ChildSpawner, label: &str, f: &mut dyn FnMut(&mut ChildSpawner)| {
-                        b.spawn(Node {
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(8.0),
-                            width: full(),
-                            margin: UiRect::bottom(Val::Px(6.0)),
-                            ..default()
-                        })
+                        b.spawn((
+                            Name::new(format!("cam-export-row {label}")),
+                            Node {
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(8.0),
+                                width: full(),
+                                margin: UiRect::bottom(Val::Px(6.0)),
+                                ..default()
+                            },
+                        ))
                         .with_children(|r| {
                             r.spawn((
                                 t.text(label, t.font_base, FontWeight::BOLD, t.foreground),

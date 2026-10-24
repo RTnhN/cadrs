@@ -934,6 +934,8 @@ impl Params {
             }
             Pattern::Profile2D => {
                 p.links.lead_radius = (d * 0.5).max(1.0);
+                // Down to the picked contour (the model's bottom with nothing picked).
+                p.heights.bottom = Height::new(HeightRef::Selection, 0.0);
             }
             Pattern::Chamfer2D => {
                 p.depth = 0.5;

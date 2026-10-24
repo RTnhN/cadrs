@@ -227,3 +227,134 @@ fn a_cut_on_an_open_edge_keeps_its_kerf_off_the_part() {
         assert!((y + 0.1).abs() < 1e-6, "{y}");
     }
 }
+
+/// A floor edge at a wall's foot (a 5 mm base, a wall standing on its back half to 12): picked
+/// either way round, the tool runs a radius off it on the floor's side, down to the edge (the
+/// selected contour), and cuts neither the wall nor the floor.
+#[test]
+fn a_profile_on_a_floor_edge_keeps_off_the_wall() {
+    use crate::model::{Edge, Model, box_triangles};
+    use crate::sim::{SimOp, simulate_mill_on};
+    let mut tris = box_triangles(&Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 5.0]));
+    tris.extend(box_triangles(&Aabb::new(
+        [0.0, 20.0, 5.0],
+        [60.0, 40.0, 12.0],
+    )));
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 12.0]));
+    for points in [
+        vec![[0.0, 20.0, 5.0], [60.0, 20.0, 5.0]],
+        vec![[60.0, 20.0, 5.0], [0.0, 20.0, 5.0]],
+    ] {
+        let mut m = Model::from_triangles("step", tris.clone());
+        m.edges.push(Edge {
+            name: "foot".into(),
+            body: 0,
+            points: points.clone(),
+            circle: None,
+        });
+        let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        p.drive.edges = vec!["foot".into()];
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        let tp = generate(&input).unwrap();
+        let cuts: Vec<P3> = tp
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed {
+                    to,
+                    kind: FeedKind::Cut,
+                    ..
+                } => Some(*to),
+                _ => None,
+            })
+            .collect();
+        assert!(!cuts.is_empty());
+        for q in &cuts {
+            assert!((q[1] - 17.0).abs() < 0.05, "{points:?}: {q:?}");
+            assert!(q[2] > 5.0 - 1e-6, "{points:?}: {q:?}");
+        }
+        let segs = tp.motion([0.0, 0.0, 60.0], 5_000.0);
+        let r = simulate_mill_on(
+            stock.height_map(0.25),
+            &m,
+            &[],
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+        );
+        assert_eq!(r.gouge_cells, 0, "{points:?}: {}", r.gouge_depth);
+    }
+}
+
+/// Inside a through hole, nothing picked, climb: round it counter-clockwise (the material
+/// round the hole on the right), leads in the hole, wear compensation on the left (G41), as
+/// when the hole's edges are picked.
+#[test]
+fn inside_a_hole_climbs_with_the_material_on_the_right() {
+    use crate::model::{Model, box_triangles};
+    let mut tris = Vec::new();
+    for (lo, hi) in [
+        ([0.0, 0.0], [20.0, 40.0]),
+        ([40.0, 0.0], [60.0, 40.0]),
+        ([20.0, 0.0], [40.0, 10.0]),
+        ([20.0, 30.0], [40.0, 40.0]),
+    ] {
+        tris.extend(box_triangles(&Aabb::new(
+            [lo[0], lo[1], 0.0],
+            [hi[0], hi[1], 12.0],
+        )));
+    }
+    let m = Model::from_triangles("frame", tris);
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 12.0]));
+    let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+    p.side = Side::Inside;
+    p.step_down = 12.0;
+    p.compensation = Compensation::Wear;
+    let input = Input {
+        model: &m,
+        stock: &stock,
+        tool: &tool,
+        machine: MachineKind::Mill,
+        params: &p,
+        rest: None,
+        fixtures: &[],
+    };
+    let tp = generate(&input).unwrap();
+    let ring: Vec<P2> = tp
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Feed {
+                to,
+                kind: FeedKind::Cut,
+                ..
+            } => Some([to[0], to[1]]),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        crate::geom::ring_area2(&ring) > 0.0,
+        "clockwise: conventional"
+    );
+    assert!(
+        tp.steps
+            .iter()
+            .any(|s| matches!(s, Step::Compensation(Some(true))))
+    );
+    assert!(
+        !tp.steps
+            .iter()
+            .any(|s| matches!(s, Step::Compensation(Some(false))))
+    );
+}

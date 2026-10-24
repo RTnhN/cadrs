@@ -270,13 +270,16 @@ pub fn parse_num(text: &str, unit: Unit) -> Option<f64> {
 const LABEL_W: f32 = 112.0;
 
 fn row(b: &mut ChildSpawner, t: &Theme, label: &str, content: impl Bundle) {
-    b.spawn(Node {
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(6.0),
-        min_height: Val::Px(26.0),
-        width: Val::Percent(100.0),
-        ..default()
-    })
+    b.spawn((
+        Name::new(format!("form-row {label}")),
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            min_height: Val::Px(26.0),
+            width: Val::Percent(100.0),
+            ..default()
+        },
+    ))
     .with_children(|r| {
         r.spawn((
             t.text(label, 12.0, FontWeight::NORMAL, t.muted_foreground),
@@ -286,11 +289,14 @@ fn row(b: &mut ChildSpawner, t: &Theme, label: &str, content: impl Bundle) {
                 ..default()
             },
         ));
-        r.spawn(Node {
-            flex_grow: 1.0,
-            min_width: Val::Px(0.0),
-            ..default()
-        })
+        r.spawn((
+            Name::new("form-row-content"),
+            Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                ..default()
+            },
+        ))
         .with_children(|c| {
             c.spawn(content);
         });
