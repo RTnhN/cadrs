@@ -207,29 +207,40 @@ fn cross_hole_fillet() {
     assert!((1880.0..2040.0).contains(&removed), "{removed}");
 }
 
-/// The rims of an outward shell's opening filleted 3.25 mm (a user's document: a 30 mm cube
-/// with every edge rounded 5, shelled 6.5 outward with its top, two top rounds and their corner
-/// taken away). Five of the rounds run into the inside corners of the opening and end at a
-/// pole of a corner sphere, where the faces past their rails (the top, the sphere) only touch:
-/// each end is capped on the surface of the round the shell took away there, the local fillet
-/// covering them all (the blend tool's flat ends stood out of the outer wall).
+/// The rims of an outward shell's opening filleted (a user's document: a 30 mm cube with every
+/// edge rounded 5, shelled 6.5 outward with its back, two top rounds and their corner taken
+/// away), from 0.5 to 4.5 mm. Five of the rounds run into the inside corners of the opening and
+/// end at a pole of a corner sphere, where the faces past their rails (the top, the sphere)
+/// only touch: each end is capped on the surface of the round the shell took away there, the
+/// local fillet covering them all (the blend tool's flat ends stood out of the outer wall; a
+/// cut traced on one of those faces reached the other rail's exit only roughly). From 3.54 the
+/// two either side of the pie-shaped face weld across it.
 #[test]
 fn shell_opening_rounds() {
     let mut k = NativeKernel::new();
     let b = k.insert(bodyio::read(include_bytes!("data/docs/shell_opening_rounds.body")).unwrap());
     let v0 = k.mass_properties(b).unwrap().volume;
-    let laws: Vec<FilletLaw> = [3, 1, 10, 16, 19, 49, 43]
-        .map(|e| FilletLaw {
-            edge: EdgeId(e),
-            radii: vec![(0.0, 3.25), (1.0, 3.25)],
-        })
-        .to_vec();
-    let out = blend::fillet_laws_local(&mut k, b, &laws).unwrap().bodies[0];
-    assert!(k.get(out).unwrap().check().is_empty());
-    // Five inside rounds of 6.5 mm or so add (1 − π/4)·3.25² a mm each, two outside ones take
-    // as much off.
-    let added = k.mass_properties(out).unwrap().volume - v0;
-    assert!((44.3..44.5).contains(&added), "{added}");
+    let mut last = 0.0;
+    for r in [0.5, 1.0, 1.5, 2.0, 2.8, 3.25, 4.0, 4.5] {
+        let laws: Vec<FilletLaw> = [3, 1, 10, 16, 19, 49, 43]
+            .map(|e| FilletLaw {
+                edge: EdgeId(e),
+                radii: vec![(0.0, r), (1.0, r)],
+            })
+            .to_vec();
+        let out = blend::fillet_laws_local(&mut k, b, &laws)
+            .unwrap_or_else(|e| panic!("r {r}: {e}"))
+            .bodies[0];
+        assert!(k.get(out).unwrap().check().is_empty(), "r {r}");
+        // Five inside rounds add (1 − π/4)·r² a mm each, two outside ones take as much off:
+        // more the larger.
+        let added = k.mass_properties(out).unwrap().volume - v0;
+        assert!(added > last, "r {r}: adds {added}, no more than {last}");
+        last = added;
+        if r == 3.25 {
+            assert!((44.3..44.5).contains(&added), "{added}");
+        }
+    }
 }
 
 /// The same opening's two inside rounds either side of the pie-shaped face where the shell

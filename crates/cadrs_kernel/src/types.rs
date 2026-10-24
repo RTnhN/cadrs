@@ -1036,6 +1036,11 @@ pub struct EdgeInfo {
     /// and Use projects the exact curve).
     #[serde(default)]
     pub circle: Option<Circle3>,
+    /// The faces either side meet tangentially along it (within [`crate::TANGENT_ANGLE`]): a
+    /// smooth edge, which a fillet or chamfer can't round and tangent propagation doesn't run
+    /// along.
+    #[serde(default)]
+    pub smooth: bool,
 }
 
 impl EdgeInfo {

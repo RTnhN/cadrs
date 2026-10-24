@@ -1028,6 +1028,11 @@ pub(crate) fn edge_convex(b: &Body, e: usize) -> Option<bool> {
 /// Whether the faces at edge `e` join smoothly all along it (their normals the same at every
 /// sample): the edge marks no corner, and a blend there has nothing to take off or fill.
 fn smooth_edge(b: &Body, e: usize) -> bool {
+    smooth_within(b, e, tol::ANGULAR_POINT)
+}
+
+/// Whether the faces at edge `e` join smoothly all along it, their normals within `angle`.
+pub(crate) fn smooth_within(b: &Body, e: usize, angle: f64) -> bool {
     let ed = &b.edges[e];
     let Ok([s1, s2]) = edge_sides(b, e) else {
         return false;
@@ -1044,7 +1049,7 @@ fn smooth_edge(b: &Body, e: usize) -> bool {
             f.surf.normal(u, v) * if f.sense { 1.0 } else { -1.0 }
         };
         let (n1, n2) = (normal(s1.0), normal(s2.0));
-        n1.dot(&n2) > 0.0 && n1.cross(&n2).norm() < tol::ANGULAR_POINT
+        n1.dot(&n2) > 0.0 && n1.cross(&n2).norm() < angle.sin()
     })
 }
 

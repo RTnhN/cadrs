@@ -401,6 +401,7 @@ fn edge_infos_with(b: &Body, lengths: bool) -> Vec<EdgeInfo> {
                 start_tangent: tan(t0),
                 end_tangent: tan(t1),
                 circle,
+                smooth: super::blend::smooth_within(b, ei, TANGENT_ANGLE),
             }
         })
         .collect()

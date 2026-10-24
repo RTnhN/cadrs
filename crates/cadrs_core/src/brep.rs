@@ -1526,7 +1526,9 @@ fn meridians(
 
 /// For each kernel edge, the smallest index of the edges tangent-connected to it: edges meeting
 /// at a vertex whose tangents there are parallel (within [`kernel::TANGENT_ANGLE`], Onshape's
-/// tangent propagation) are joined, and so on along the chain (union–find).
+/// tangent propagation) are joined, and so on along the chain (union–find). A smooth edge (its
+/// faces tangent along it: nothing to round) joins none, as in Onshape: else a chamfer's chain
+/// ran on from a sharp rim along every smooth edge of a rounded body.
 /// Edges shorter than this (mm) are slivers: OCCT's fillet can leave one about 1e-6 mm long
 /// where its edge crosses the join of two coplanar faces (the funnel's rim, PS21.15). They are
 /// left out of the solid's edges and their two ends count as one vertex, so the edges on
@@ -1591,7 +1593,7 @@ fn tangent_groups(edges: &[kernel::EdgeInfo], vertices: &[kernel::VertexInfo]) -
             .filter(|id| seen.insert(**id))
             .filter_map(|id| {
                 let i = *index.get(id)?;
-                if sliver(i) {
+                if sliver(i) || edges[i].smooth {
                     return None;
                 }
                 let e = &edges[i];

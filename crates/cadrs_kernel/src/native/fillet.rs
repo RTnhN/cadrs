@@ -4253,7 +4253,73 @@ fn pieces_of(
                     &base.spine,
                 )
             };
+            continue;
         }
+        // Past smooth edges of its face onto a face on another surface (a cap over a fillet's
+        // end, narrower than a chamfer there, and the plane or round it joins, maybe across a
+        // corner of it): the ball on that face instead (its section is another, the surfaces
+        // curving apart past the edge). The faces joined smoothly to it, a few deep, nearest
+        // first, the first that holds the contact.
+        let smooth_beyond = |f: usize| -> Vec<usize> {
+            b.faces[f]
+                .loops
+                .iter()
+                .flatten()
+                .filter(|c| c.edge != e && !b.edges[c.edge].degenerate && !is_seam(b, f, c.edge))
+                .filter_map(|c| {
+                    let g = beyond(b, c.edge, f).filter(|&g| g != f)?;
+                    let xe = &b.edges[c.edge];
+                    let q = xe.point(xe.mid_t());
+                    let n = |h: usize| {
+                        let h = &b.faces[h];
+                        geom::contact(h, geom::foot(h, &q, None)).n
+                    };
+                    (n(f).dot(&n(g)) > 1.0 - tol::ANGULAR_POINT).then_some(g)
+                })
+                .collect()
+        };
+        let mut seen = vec![fi, other];
+        let mut ring = vec![fi];
+        let mut past = None;
+        'search: for _ in 0..3 {
+            let mut next = Vec::new();
+            for &f in &ring {
+                for g in smooth_beyond(f) {
+                    if seen.contains(&g) {
+                        continue;
+                    }
+                    seen.push(g);
+                    next.push(g);
+                    let mut faces = base.faces;
+                    faces[k] = g;
+                    let on = EdgeFillet {
+                        faces,
+                        exact: None,
+                        ..clone_fillet(&base)
+                    };
+                    let mut guess = [base.mid.q[0].uv, base.mid.q[1].uv];
+                    guess[k] = geom::foot(&b.faces[g], &p, None);
+                    if let Some(ball) = on.ball(b, base.tm, Some(guess))
+                        && point_in_face(b, g, &ball.q[k].p)
+                    {
+                        past = Some((g, faces, ball));
+                        break 'search;
+                    }
+                }
+            }
+            ring = next;
+        }
+        let Some((g, faces, ball)) = past else {
+            continue;
+        };
+        debug(|| format!("edge {e}: the ball's contact on face {fi} is past it, on face {g}"));
+        base.faces = faces;
+        base.mid = ball;
+        base.exact = if base.law.is_some() {
+            None
+        } else {
+            geom::exact_kind([&b.faces[faces[0]], &b.faces[faces[1]]], &base.spine)
+        };
     }
     let ed = &b.edges[e];
     // From the middle towards each end: each roll starts a strip with one face changed.
@@ -4542,12 +4608,23 @@ fn plan(
                         exits,
                     }
                 } else if exits[0].into != exits[1].into && exits.iter().all(|x| x.ext.is_none()) {
-                    match end_chain(b, ef, j, &exits).or_else(|e| {
-                        debug(|| format!("edge {} end {j}: {e}; the cut traced instead", ef.e));
-                        end_chain_traced(b, ef, j, &exits).map_err(|_| e)
-                    }) {
+                    // Crossing the edges round the vertex; else, where the faces it leaves into
+                    // only touch there, capped (the cut traced on them would only reach the
+                    // other's exit roughly); else the cut traced.
+                    match end_chain(b, ef, j, &exits) {
                         Ok(links) => End::Chain { links, exits },
-                        Err(e) => cap_end(b, ef, j, &exits).ok_or(e)?,
+                        Err(e) => match cap_end(b, ef, j, &exits) {
+                            Some(cap) => cap,
+                            None => {
+                                debug(|| {
+                                    format!("edge {} end {j}: {e}; the cut traced instead", ef.e)
+                                });
+                                End::Chain {
+                                    links: end_chain_traced(b, ef, j, &exits).map_err(|_| e)?,
+                                    exits,
+                                }
+                            }
+                        },
                     }
                 } else {
                     End::Free { exits }
@@ -4789,7 +4866,20 @@ fn plan(
                             eb.spine.at(b.edges[eb.e].t[jb]).0
                         )
                     });
-                    return Err(unsupported("tangent fillets whose sections don't meet"));
+                    // (A face curving away from its tangent neighbour across the joint: a
+                    // chamfer's sections there differ by its sag.) Set back, each strip ending
+                    // at its own section and a patch filling between.
+                    if let Err(e) = set_back(b, &efs, &mut ends, &mut inside, here, v, &mut holes) {
+                        debug(|| format!("vertex {v}: no set-back corner: {e}"));
+                        return Err(unsupported("tangent fillets whose sections don't meet"));
+                    }
+                    debug(|| {
+                        format!(
+                            "vertex {v}: set back where edges {} and {} meet",
+                            ea.e, eb.e
+                        )
+                    });
+                    continue;
                 }
                 let key = SectionKey::Junction(v);
                 ends[ia][ja] = Some(End::Section {
@@ -8982,10 +9072,13 @@ pub fn chamfer_offsets(b: &Body, e: usize, d: [f64; 2]) -> Option<[f64; 2]> {
     (k[0] > 0.0 && k[1] > 0.0).then_some(k)
 }
 
-/// The angle between edge e's faces' directions away from it, if the same all along it.
+/// The angle between edge e's faces' directions away from it, if the same all along it (to
+/// its ends: where an edge between a fillet and the cap over its end meets its tangent
+/// neighbour, its angle is theirs there, not its middle's).
 pub(crate) fn chamfer_angle(b: &Body, e: usize) -> Option<f64> {
     let mut theta: Option<f64> = None;
-    for s in [0.2, 0.5, 0.8] {
+    let end = tol::REL_POINT;
+    for s in [end, 0.2, 0.5, 0.8, 1.0 - end] {
         let th = angle_at(b, e, s)?;
         if theta.is_some_and(|x| (x - th).abs() > tol::ANGULAR) {
             return None;
