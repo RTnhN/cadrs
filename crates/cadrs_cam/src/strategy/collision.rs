@@ -159,6 +159,15 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
             .then_some(Hit::Part)
     };
     let mut scratch = Vec::new();
+    // Whether a straight rapid from `a` to `b` takes the tool or holder into the workholding.
+    let fixture_on_way = |a: P3, b: P3, scratch: &mut Vec<u32>| -> bool {
+        if fixtures.is_none() {
+            return false;
+        }
+        let n = (dist(a, b) / step).ceil().max(1.0) as usize;
+        (0..=n).any(|i| hits_at(lerp(a, b, i as f64 / n as f64), scratch) == Some(Hit::Fixture))
+    };
+    let mut scratch2 = Vec::new();
     let mut hits_move = |from: P3, s: &Step| -> Option<Hit> {
         let pts: Vec<P3> = match s {
             Step::Feed { to, .. } => {
@@ -220,13 +229,36 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
                 out.push(s);
             }
             Step::Rapid(q) => {
+                let q = *q;
                 if skipping {
                     if q[2] < clearance {
                         out.push(Step::Rapid([q[0], q[1], clearance]));
                     }
                     skipping = false;
                 }
-                at = Some(*q);
+                // Over the workholding: up to the clearance height (over it all), across, down;
+                // a descent into it isn't made (the cut after it comes in by its entry).
+                if let Some(from) = at
+                    && fixture_on_way(from, q, &mut scratch2)
+                {
+                    counts[1] += 1;
+                    first[1].get_or_insert(from);
+                    let over = [q[0], q[1], clearance.max(q[2])];
+                    out.push(Step::Rapid([from[0], from[1], clearance.max(from[2])]));
+                    out.push(Step::Rapid(over));
+                    if fixture_on_way(over, q, &mut scratch2) {
+                        at = Some(q);
+                        skipping = retract;
+                        if !retract {
+                            out.push(Step::Rapid(q));
+                        }
+                        continue;
+                    }
+                    out.push(Step::Rapid(q));
+                    at = Some(q);
+                    continue;
+                }
+                at = Some(q);
                 out.push(s);
             }
             Step::Drill(d) => {
@@ -457,5 +489,84 @@ mod tests {
                 assert!(g > 1.0, "Warn keeps the moves");
             }
         }
+    }
+
+    /// A clamp 15 high just off the block: roughing round the block keeps its centre off the
+    /// clamp's footprint, and no move (rapids and links too) meets it.
+    #[test]
+    fn rough_keeps_off_a_clamp() {
+        let m = Model::from_triangles(
+            "block",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [40.0, 30.0, 10.0])),
+        );
+        let clamp = box_triangles(&Aabb::new([44.0, 10.0, 0.0], [50.0, 20.0, 15.0]));
+        let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [48.0, 35.0, 12.0]));
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let p = Params::new(Pattern::Rough3D, &tool, MachineKind::Mill);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &clamp,
+        };
+        let tp = generate(&input).unwrap();
+        let clamp_model = Model::from_triangles("clamp", clamp.clone());
+        let (g, at) = crate::strategy::testing::max_gouge(&clamp_model, &tool, &tp);
+        assert!(g < 1e-3, "{g} into the clamp at {at:?}");
+        // It still roughs: down to the floor beside the block away from the clamp.
+        assert!(lowest_cut(&tp) < 0.5);
+        // Over the clamp at the clearance height.
+        assert!(input.clearance() >= 25.0);
+    }
+
+    /// A rapid across a clamp at 5 goes over it at the clearance height instead.
+    #[test]
+    fn rapids_go_over_the_workholding() {
+        let m = Model::from_triangles(
+            "block",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])),
+        );
+        let clamp = box_triangles(&Aabb::new([20.0, -5.0, 0.0], [25.0, 5.0, 15.0]));
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]));
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &clamp,
+        };
+        let tp = Toolpath {
+            steps: vec![
+                Step::Rapid([15.0, 0.0, 5.0]),
+                Step::Rapid([30.0, 0.0, 5.0]),
+                Step::Feed {
+                    to: [35.0, 0.0, 5.0],
+                    feed: 500.0,
+                    kind: FeedKind::Cut,
+                },
+            ],
+            warnings: vec![],
+        };
+        let out = apply(&input, tp);
+        let cl = input.clearance();
+        assert!(cl >= 15.0);
+        assert!(
+            out.steps
+                .iter()
+                .any(|s| matches!(s, Step::Rapid(p) if (p[0] - 30.0).abs() < 1e-9 && (p[2] - cl).abs() < 1e-9)),
+            "{:?}",
+            out.steps
+        );
+        let clamp_model = Model::from_triangles("clamp", clamp.clone());
+        let (g, _) = crate::strategy::testing::max_gouge(&clamp_model, &tool, &out);
+        assert!(g < 1e-3);
+        assert!(out.warnings.iter().any(|w| w.contains("workholding")));
     }
 }

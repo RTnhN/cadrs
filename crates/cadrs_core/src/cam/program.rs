@@ -563,6 +563,64 @@ pub fn unroll_toolpath(tp: &Toolpath, from: &Frame, to: &Frame, rapid_rate: f64)
     }
 }
 
+/// The stock an operation starts from: as the setups before its setup leave it (each one's
+/// toolpaths cut into a height map, carried into the next setup's coordinates: moved, turned
+/// about Z or flipped), then its own setup's toolpaths before `upto` (`None`: the setup as it
+/// starts), in `frame`'s coordinates on a grid of `cell`. `None` when it can't be carried: a setup tilted against the one before, or a
+/// toolpath not calculated yet.
+#[allow(clippy::too_many_arguments)]
+pub fn stock_before(
+    cam: &CamStudio,
+    job: &Job,
+    setup: CamId,
+    upto: Option<CamId>,
+    parts: &[Part],
+    paths: &HashMap<CamId, Toolpath>,
+    frame: &Frame,
+    cell: f64,
+) -> Option<cadrs_cam::heightmap::HeightMap> {
+    let shape = stock_shape(cam, job, parts)?;
+    let target = job.setups.iter().position(|s| s.id == setup)?;
+    let rapid = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
+    let mut state: Option<(cadrs_cam::heightmap::HeightMap, Frame, f64)> = None;
+    for (si, st) in job.setups.iter().enumerate().take(target + 1) {
+        if st.suppressed && si < target {
+            continue;
+        }
+        let f = setup_frame(cam, job, st, parts);
+        let stock_f = stock_in(&shape, &f);
+        let mut map = match state.take() {
+            None => stock_f.height_map(cell),
+            Some((m, pf, pb)) => m.reframed(&pf, pb, &f, &stock_f.bounds, cell)?,
+        };
+        let ids: Vec<CamId> = st
+            .operations
+            .iter()
+            .take_while(|o| si < target || Some(o.id) != upto)
+            .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
+            .map(|o| o.id)
+            .collect();
+        let cut_here = si < target || upto.is_some();
+        if cut_here && !ids.is_empty() {
+            let run = setup_run(cam, job, st, parts, paths, Some(&ids)).ok()?;
+            for o in run.ops.iter().filter(|o| !o.tilted) {
+                let start = o.toolpath.start().unwrap_or([0.0; 3]);
+                for s in o.toolpath.motion(start, rapid) {
+                    if !s.is_rapid() {
+                        map.cut(o.tool, s.from, s.to);
+                    }
+                }
+            }
+        }
+        state = Some((map, f, stock_f.bounds.min[2]));
+    }
+    let (map, f, bottom) = state?;
+    if f == *frame && (map.cell - cell).abs() < 1e-12 {
+        return Some(map);
+    }
+    map.reframed(&f, bottom, frame, &stock_in(&shape, frame).bounds, cell)
+}
+
 /// What Verify found.
 pub enum SimResult {
     Mill(Box<MillResult>),

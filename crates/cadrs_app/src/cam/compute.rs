@@ -105,10 +105,15 @@ struct Running {
     rest: Option<Arc<RestInput>>,
 }
 
-/// What rest machining starts from: the moves of the toolpaths above an operation, with their
-/// tools. The worker simulates them into the in-process stock before the strategy runs.
+/// What rest machining starts from: the studio, its parts and the toolpaths calculated so far.
+/// The worker cuts the in-process stock from them before the strategy runs.
 pub struct RestInput {
-    ops: Vec<(cadrs_core::cam::cadrs_cam::tool::Tool, Vec<Segment>)>,
+    cam: Arc<CamStudio>,
+    job: CamId,
+    setup: CamId,
+    op: CamId,
+    parts: Vec<Part>,
+    paths: HashMap<CamId, Toolpath>,
 }
 
 /// The job cache and what's being computed.
@@ -118,6 +123,8 @@ pub struct Computed {
     pub latest: HashMap<CamId, (u64, Outcome)>,
     /// Results by key (the job cache).
     by_key: HashMap<u64, Outcome>,
+    /// The keys in the order their results came (the oldest go first).
+    order: VecDeque<u64>,
     /// Each operation's current key (or why it has none), worked out when the document or the
     /// parts change.
     keys: HashMap<CamId, Result<u64, String>>,
@@ -136,7 +143,43 @@ pub struct Computed {
     pub generation: u64,
 }
 
+/// The most results kept by key beyond the operations' current ones (the job cache's undo
+/// depth), and models.
+const KEEP_RESULTS: usize = 256;
+const KEEP_MODELS: usize = 32;
+
 impl Computed {
+    fn remember(&mut self, key: u64, out: Outcome) {
+        if self.by_key.insert(key, out).is_none() {
+            self.order.push_back(key);
+        }
+        self.evict();
+    }
+
+    /// Drops the oldest cached results past [`KEEP_RESULTS`] (never one an operation has now)
+    /// and models past [`KEEP_MODELS`].
+    fn evict(&mut self) {
+        if self.by_key.len() > KEEP_RESULTS {
+            let current: std::collections::HashSet<u64> =
+                self.latest.values().map(|(k, _)| *k).collect();
+            let extra = self.by_key.len() - KEEP_RESULTS;
+            let drop: Vec<u64> = self
+                .order
+                .iter()
+                .copied()
+                .filter(|k| !current.contains(k))
+                .take(extra)
+                .collect();
+            for k in &drop {
+                self.by_key.remove(k);
+            }
+            self.order.retain(|k| self.by_key.contains_key(k));
+        }
+        if self.models.len() > KEEP_MODELS {
+            self.models.clear();
+        }
+    }
+
     /// Where `op` stands.
     pub fn status(&self, op: CamId) -> Status {
         match self.keys.get(&op) {
@@ -241,29 +284,59 @@ pub fn studio_parts(world: &World, element: ElementId) -> Option<Vec<Part>> {
     (id == element).then(|| cache.parts.clone())
 }
 
-/// An operation's key in `cam` (or why it has none).
+/// One operation's key in `cam` (or why it has none): the live preview's draft. A rest
+/// machining key takes the keys of every toolpath before it in the job.
 fn key_of(cam: &CamStudio, op: CamId, parts: &[Part], features: u64) -> Result<u64, String> {
     let input = program::op_input(cam, op, parts)?;
     let mut k = program::op_key(&input, features);
-    // Rest machining depends on the toolpaths above it.
-    if input.params.rest {
-        let above = rest_inputs(cam, op, parts, features);
-        k ^= hash64(&format!("rest{above:?}"));
+    if input.params.rest
+        && let Some((job, setup, _)) = cam.operation(op)
+    {
+        let before: Vec<u64> = job
+            .setups
+            .iter()
+            .take_while(|x| x.id != setup.id)
+            .filter(|x| !x.suppressed)
+            .flat_map(|x| x.operations.iter())
+            .chain(setup.operations.iter().take_while(|o| o.id != op))
+            .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
+            // (Each as refresh_keys works it out: a rest one with the keys before it.)
+            .filter_map(|o| key_of(cam, o.id, parts, features).ok())
+            .collect();
+        k ^= hash64(&format!("rest{before:?}"));
     }
     Ok(k)
 }
 
 /// Works out every operation's key (the studio or its parts changed); results whose key came
-/// back are taken from the cache.
+/// back are taken from the cache. Each operation's input is worked out once: in job order,
+/// so a rest machining key takes the keys of every toolpath before it (its setup's and the
+/// setups' before) as it goes.
 fn refresh_keys(world: &mut World, cam: &CamStudio, parts: &[Part]) {
     let features = program::features_key(cam.part_features());
     let mut keys = HashMap::new();
     for job in &cam.jobs {
+        // The keys of the toolpaths so far in the job (what a rest stock is cut by).
+        let mut before: Vec<u64> = Vec::new();
         for setup in &job.setups {
             for o in &setup.operations {
-                if matches!(o.kind, OpKind::Toolpath(_)) {
-                    keys.insert(o.id, key_of(cam, o.id, parts, features));
+                if !matches!(o.kind, OpKind::Toolpath(_)) {
+                    continue;
                 }
+                let k = program::op_input(cam, o.id, parts).map(|input| {
+                    let mut k = program::op_key(&input, features);
+                    if input.params.rest {
+                        k ^= hash64(&format!("rest{before:?}"));
+                    }
+                    k
+                });
+                if !o.suppressed
+                    && !setup.suppressed
+                    && let Ok(k) = &k
+                {
+                    before.push(*k);
+                }
+                keys.insert(o.id, k);
             }
         }
     }
@@ -282,21 +355,7 @@ fn refresh_keys(world: &mut World, cam: &CamStudio, parts: &[Part]) {
     }
     c.keys = keys;
     c.generation += 1;
-}
-
-/// The keys of the toolpaths above `op` in its setup (what its rest stock comes from).
-fn rest_inputs(cam: &CamStudio, op: CamId, parts: &[Part], features: u64) -> Vec<u64> {
-    let Some((_, setup, _)) = cam.operation(op) else {
-        return Vec::new();
-    };
-    setup
-        .operations
-        .iter()
-        .take_while(|o| o.id != op)
-        .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
-        .filter_map(|o| program::op_input(cam, o.id, parts).ok())
-        .map(|i| program::op_key(&i, features))
-        .collect()
+    c.evict();
 }
 
 /// Keeps the keys current, starts what's queued and moves the running work along. Runs every
@@ -336,7 +395,7 @@ fn drive_main(world: &mut World, parts: &[Part]) {
         match step(world, &mut r, parts) {
             Some(out) => {
                 let mut c = world.resource_mut::<Computed>();
-                c.by_key.insert(r.key, out.clone());
+                c.remember(r.key, out.clone());
                 c.latest.insert(r.op, (r.key, out));
                 c.generation += 1;
             }
@@ -380,7 +439,7 @@ fn drive_preview(world: &mut World, parts: &[Part]) {
         match step(world, &mut r, parts) {
             Some(out) => {
                 let mut c = world.resource_mut::<Computed>();
-                c.by_key.insert(r.key, out.clone());
+                c.remember(r.key, out.clone());
                 c.preview = Some((r.op, r.key, out));
                 c.generation += 1;
             }
@@ -433,12 +492,16 @@ fn start(world: &mut World, cam: Arc<CamStudio>, op: CamId, key: u64, parts: &[P
     };
     let mut rest = None;
     if input.params.rest {
+        // Every toolpath before it: its setup's and the earlier setups'.
         let above: Vec<CamId> = cam
             .operation(op)
-            .map(|(_, s, _)| {
-                s.operations
+            .map(|(job, s, _)| {
+                job.setups
                     .iter()
-                    .take_while(|o| o.id != op)
+                    .take_while(|x| x.id != s.id)
+                    .filter(|x| !x.suppressed)
+                    .flat_map(|x| x.operations.iter())
+                    .chain(s.operations.iter().take_while(|o| o.id != op))
                     .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
                     .map(|o| o.id)
                     .collect()
@@ -458,7 +521,7 @@ fn start(world: &mut World, cam: Arc<CamStudio>, op: CamId, key: u64, parts: &[P
             }
             return Started::Waiting;
         }
-        rest = rest_input(world, &cam, op, &input).map(Arc::new);
+        rest = rest_input(world, &cam, op, parts).map(Arc::new);
     }
     let mk = model_key(&cam, &input, &[]);
     let stage = match world.resource::<Computed>().models.get(&mk).cloned() {
@@ -518,7 +581,7 @@ fn spawn_generate(input: Arc<OpInput>, model: Arc<Model>, rest: Option<Arc<RestI
         .name("cam-toolpath".into())
         .spawn(move || {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let rest = rest.map(|r| rest_stock(&input, &model, &r));
+                let rest = rest.map(|r| rest_stock(&input, &r));
                 program::generate(&input, &model, rest.as_ref())
             }))
             .unwrap_or_else(|_| Err("The strategy failed unexpectedly".into()));
@@ -589,40 +652,39 @@ fn step(world: &mut World, r: &mut Running, parts: &[Part]) -> Option<Outcome> {
     }
 }
 
-/// The toolpaths above `op` (all calculated, in `op`'s coordinates): what its in-process
-/// stock is cut from. `None` when one is on another work plane (its stock isn't on this one's
-/// grid).
-fn rest_input(world: &World, cam: &CamStudio, op: CamId, input: &OpInput) -> Option<RestInput> {
-    let (_, setup, _) = cam.operation(op)?;
-    let c = world.resource::<Computed>();
-    let mut ops = Vec::new();
-    for o in setup.operations.iter().take_while(|o| o.id != op) {
-        if o.suppressed || !matches!(o.kind, OpKind::Toolpath(_)) {
-            continue;
-        }
-        let d = c.current(o.id)?;
-        if d.frame != input.frame {
-            return None;
-        }
-        let tool = cam.tool_for(o.id)?.tool.clone();
-        let start = [0.0, 0.0, input.stock.bounds.max[2] + 50.0];
-        ops.push((tool, d.toolpath.motion(start, input.machine.rapid_rate)));
-    }
-    Some(RestInput { ops })
+/// What `op`'s rest stock is worked out from: the studio, its parts and the calculated
+/// toolpaths (the worker cuts the in-process stock from them, [`program::stock_before`]).
+fn rest_input(world: &World, cam: &Arc<CamStudio>, op: CamId, parts: &[Part]) -> Option<RestInput> {
+    let (job, setup, _) = cam.operation(op)?;
+    Some(RestInput {
+        cam: cam.clone(),
+        job: job.id,
+        setup: setup.id,
+        op,
+        parts: parts.to_vec(),
+        paths: world.resource::<Computed>().paths(),
+    })
 }
 
-/// The in-process stock `rest` leaves (on the worker thread).
-fn rest_stock(input: &OpInput, model: &Model, rest: &RestInput) -> HeightMap {
-    use cadrs_core::cam::cadrs_cam::sim::{SimOp, sim_cell, simulate_mill};
-    let ops: Vec<SimOp> = rest
-        .ops
-        .iter()
-        .map(|(t, m)| SimOp {
-            tool: t,
-            segments: m,
+/// The in-process stock `rest` leaves (on the worker thread); the stock itself when it can't
+/// be carried.
+fn rest_stock(input: &OpInput, rest: &RestInput) -> HeightMap {
+    let cell = cadrs_core::cam::cadrs_cam::sim::sim_cell(&input.stock, 0.2);
+    rest.cam
+        .job(rest.job)
+        .and_then(|job| {
+            program::stock_before(
+                &rest.cam,
+                job,
+                rest.setup,
+                Some(rest.op),
+                &rest.parts,
+                &rest.paths,
+                &input.frame,
+                cell,
+            )
         })
-        .collect();
-    simulate_mill(&input.stock, model, &ops, sim_cell(&input.stock, 0.2)).stock
+        .unwrap_or_else(|| input.stock.height_map(cell))
 }
 
 #[cfg(test)]

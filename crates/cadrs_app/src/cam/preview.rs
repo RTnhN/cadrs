@@ -264,17 +264,25 @@ pub fn open_for_selection(world: &mut World) {
         .filter(|o| ops.as_ref().is_none_or(|v| v.contains(&o.id)))
         .map(|o| o.id)
         .collect();
-    // The toolpaths before the first one previewed: their in-process stock is where it starts.
+    // The toolpaths before the first one previewed (the setups' before this one's too): the
+    // stock they leave is where it starts.
     let first = setup
         .operations
         .iter()
         .position(|o| wanted.contains(&o.id))
         .unwrap_or(0);
-    let before: Vec<CamId> = setup.operations[..first]
+    let earlier_setups = job
+        .setups
         .iter()
+        .take_while(|s| s.id != setup.id)
+        .filter(|s| !s.suppressed)
+        .flat_map(|s| s.operations.iter());
+    let before: Vec<CamId> = earlier_setups
+        .chain(&setup.operations[..first])
         .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
         .map(|o| o.id)
         .collect();
+    let first_id = setup.operations.get(first).map(|o| o.id);
     let missing: Vec<CamId> = before
         .iter()
         .chain(&wanted)
@@ -301,23 +309,17 @@ pub fn open_for_selection(world: &mut World) {
             return;
         }
     };
-    let prior: Vec<(Tool, Vec<Segment>)> = if before.is_empty() {
-        Vec::new()
-    } else {
-        program::setup_run(&cam, job, setup, &parts, &paths, Some(&before))
-            .map(|r| {
-                let rapid = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
-                r.ops
-                    .iter()
-                    .filter(|o| !o.tilted)
-                    .map(|o| {
-                        let start = o.toolpath.start().unwrap_or([0.0; 3]);
-                        (o.tool.clone(), o.toolpath.motion(start, rapid))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
+    // What it takes to work out that stock (on the worker thread).
+    let carry = (!before.is_empty()).then(|| {
+        (
+            cam.clone(),
+            job.id,
+            setup.id,
+            first_id,
+            parts.clone(),
+            paths.clone(),
+        )
+    });
     let Some(machine) = job.machine.clone() else {
         return;
     };
@@ -379,12 +381,25 @@ pub fn open_for_selection(world: &mut World) {
         let (tx, rx) = std::sync::mpsc::channel();
         let (stock, segments, spans) = (stock.clone(), segments.clone(), spans.clone());
         let fixtures = program::workholding_triangles(job, &parts, &run.frame);
+        let frame = run.frame;
         let spawned = std::thread::Builder::new()
             .name("cam-verify".into())
             .spawn(move || {
                 let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let start = carry.and_then(|(cam, job, setup, upto, parts, paths)| {
+                        program::stock_before(
+                            &cam,
+                            cam.job(job)?,
+                            setup,
+                            upto,
+                            &parts,
+                            &paths,
+                            &frame,
+                            cell,
+                        )
+                    });
                     analyse(
-                        &stock, &model, &fixtures, &prior, &segments, &spans, beam, cell,
+                        &stock, &model, &fixtures, start, &segments, &spans, beam, cell,
                     )
                 }))
                 .unwrap_or_else(|_| Analysis {
@@ -436,7 +451,7 @@ fn analyse(
     stock: &Stock,
     model: &cadrs_core::cam::cadrs_cam::model::Model,
     fixtures: &[[P3; 3]],
-    prior: &[(Tool, Vec<Segment>)],
+    start: Option<HeightMap>,
     segments: &[Segment],
     spans: &[OpSpan],
     beam: bool,
@@ -487,12 +502,12 @@ fn analyse(
         };
     }
     // From the stock the toolpaths before leave.
-    let before: Vec<SimOp> = prior
-        .iter()
-        .map(|(tool, segments)| SimOp { tool, segments })
-        .collect();
-    let start = sim::in_process(stock, &before, cell);
-    let r = sim::simulate_mill_on(start.clone(), model, fixtures, &ops);
+    let r = sim::simulate_mill_on(
+        start.clone().unwrap_or_else(|| stock.height_map(cell)),
+        model,
+        fixtures,
+        &ops,
+    );
     let tl = Timeline::new(segments.to_vec());
     let mut collisions = Vec::new();
     for (k, p) in r.rapid_hits.iter() {
@@ -589,7 +604,7 @@ fn analyse(
         summary,
         collisions,
         part: Some(part.eroded()),
-        start: (!prior.is_empty()).then_some(start),
+        start,
     }
 }
 

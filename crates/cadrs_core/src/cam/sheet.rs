@@ -106,6 +106,19 @@ pub fn setup_sheet(
         &cadrs_cam::post::datum_code(setup.wcs.datum.unwrap_or(1)),
     );
     row(&mut h, "WCS origin", &origin_words(&setup.wcs.origin));
+    row(
+        &mut h,
+        "On the table",
+        &match setup.mating {
+            super::Mating::Automatic => "The stock's bottom centred on the table".to_string(),
+            super::Mating::Manual(o) => format!(
+                "The stock's bottom centre at X {} Y {} Z {} from the table's centre",
+                fmt_mm(o[0]),
+                fmt_mm(o[1]),
+                fmt_mm(o[2])
+            ),
+        },
+    );
     row(&mut h, "Tool axis (Z)", &axis_words(&run.frame));
     let holding: Vec<&str> = cam
         .components
@@ -170,7 +183,12 @@ pub fn setup_sheet(
     );
     let rapid = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
     let mut total = 0.0;
-    let mut notes: Vec<String> = Vec::new();
+    let mut notes: Vec<String> = match stock_shape(cam, job, parts) {
+        Some(shape) => {
+            super::program::travel_warnings(job, setup, run, &stock_in(&shape, &run.frame))
+        }
+        None => Vec::new(),
+    };
     for (i, o) in run.ops.iter().enumerate() {
         let params = cam
             .operation(o.id)

@@ -48,8 +48,43 @@ pub(super) fn free_centres_in(input: &Input, solid: &Region, limit: &Region) -> 
     let p = input.params;
     let r = input.tool.radius();
     // Padded by the offset's tolerance: its round corners' chords cut inside the true arc.
-    let keep_out = region::offset(solid, r + p.wall_stock + region::ARC_TOLERANCE);
+    let mut keep_out = region::offset(solid, r + p.wall_stock + region::ARC_TOLERANCE);
+    // The workholding: its whole footprint, the tool and its clearance off it.
+    let fixtures = fixture_footprint(input);
+    if !fixtures.is_empty() {
+        let clear = r + p.collision.shank_clearance.max(0.5);
+        keep_out = region::union(&keep_out, &region::offset(&fixtures, clear));
+    }
     region::difference(limit, &keep_out)
+}
+
+/// The workholding's footprint from above (worked out once for a generation's fixtures).
+pub(super) fn fixture_footprint(input: &Input) -> Region {
+    use std::hash::{Hash, Hasher};
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<(u64, Region)>> = Mutex::new(None);
+    if input.fixtures.is_empty() {
+        return Vec::new();
+    }
+    // By content (hashing is far cheaper than the union).
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for t in input.fixtures {
+        for p in t {
+            for v in p {
+                v.to_bits().hash(&mut h);
+            }
+        }
+    }
+    let key = h.finish();
+    let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, r)) = c.as_ref()
+        && *k == key
+    {
+        return r.clone();
+    }
+    let r = crate::model::Model::from_triangles("fixtures", input.fixtures.to_vec()).silhouette();
+    *c = Some((key, r.clone()));
+    r
 }
 
 fn free_centres(input: &Input, z: f64, limit: &Region) -> Region {

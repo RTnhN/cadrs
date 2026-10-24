@@ -97,21 +97,7 @@ pub fn simulate_mill_with(
     simulate_mill_on(stock.height_map(cell), model, fixtures, ops)
 }
 
-/// The in-process stock `before` leaves of `stock` (the operations before the ones to check),
-/// on a grid of `cell`.
-pub fn in_process(stock: &Stock, before: &[SimOp], cell: f64) -> HeightMap {
-    let mut map = stock.height_map(cell);
-    for op in before {
-        for s in op.segments {
-            if !s.is_rapid() {
-                map.cut(op.tool, s.from, s.to);
-            }
-        }
-    }
-    map
-}
-
-/// [`simulate_mill_with`] from a stock already cut (`map`: [`in_process`]).
+/// [`simulate_mill_with`] from a stock already cut (`map`: what the operations before left).
 pub fn simulate_mill_on(
     mut map: HeightMap,
     model: &Model,

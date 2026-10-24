@@ -303,6 +303,19 @@ fn mill_job_end_to_end() {
         "{sheet}"
     );
     assert!(sheet.contains("3 operations, 2 tools"), "{sheet}");
+    // On the table where the mating puts it: centred it fits; 400 mm off in X it runs past
+    // the Fanuc mill's 762 mm X travel, and the sheet says so.
+    let stock = program::stock_in(&program::stock_shape(cam, j, &parts).unwrap(), &run.frame);
+    assert!(program::travel_warnings(j, s, &run, &stock).is_empty());
+    let mut off = s.clone();
+    off.mating = Mating::Manual([400.0, 0.0, 0.0]);
+    let w = program::travel_warnings(j, &off, &run, &stock);
+    assert!(w.iter().any(|w| w.contains("X travel")), "{w:?}");
+    let sheet_off = super::sheet::setup_sheet(cam, j, &off, &run, &parts, "x.nc");
+    assert!(
+        sheet_off.contains("beyond the machine's X travel"),
+        "{sheet_off}"
+    );
     // The bore breaks through the plate's (and the stock's) bottom: it says so.
     assert!(
         paths[&bore]
@@ -616,4 +629,60 @@ fn dynamic_work_plane_posts_a_tilted_plane() {
     assert!(nc.contains("G53.1") && nc.contains("G69"), "{nc}");
     // Verify runs, the tilted facing left out.
     assert!(program::simulate(cam, j, &run, &parts, None, 0.2).is_ok());
+}
+
+/// A second setup, the plate flipped over, starts from the stock the first left: the band the
+/// profile cut through round the plate is gone, the plate still there (upside down), the
+/// hole the bore made open.
+#[test]
+fn a_flipped_setup_starts_from_the_first_ones_stock() {
+    let mut f = Fixture::new();
+    let (job, setup) = f.job(MachineKind::Mill);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let mut p = Params::new(Pattern::Profile2D, &em, MachineKind::Mill);
+    p.step_down = 4.0;
+    let profile = f.add_toolpath(setup, p);
+    let bore = f.add_toolpath(setup, Params::new(Pattern::Bore, &em, MachineKind::Mill));
+    let flipped = Setup {
+        id: CamId::new(),
+        name: "Setup 2".into(),
+        program_number: 1002,
+        mating: Mating::Automatic,
+        wcs: WorkPlane {
+            z: [0.0, 0.0, -1.0],
+            ..WorkPlane::default()
+        },
+        operations: vec![],
+        suppressed: false,
+    };
+    let second = flipped.id;
+    f.run(Edit::AddSetup {
+        job,
+        setup: Box::new(flipped),
+    })
+    .unwrap();
+    let mut paths = HashMap::new();
+    paths.insert(profile, f.compute(profile).unwrap());
+    paths.insert(bore, f.compute(bore).unwrap());
+    let parts = f.parts();
+    let cam = f.cam();
+    let j = cam.job(job).unwrap();
+    let frame = program::setup_frame(cam, j, &j.setups[1], &parts);
+    let map = program::stock_before(cam, j, second, None, &parts, &paths, &frame, 0.25)
+        .expect("carried over the flip");
+    use cadrs_cam::heightmap::EMPTY;
+    // The setups' frames in the model: the first's origin at the stock's top centre, the
+    // second's at the flipped stock's "top" (the old bottom), Y turned over.
+    let at = |model: [f64; 3]| {
+        let q = frame.to_local(model);
+        map.sample([q[0], q[1]])
+    };
+    // The plate (0–60 × 0–40, the hole at (30, 20)): material, its top the old bottom.
+    let v = at([50.0, 30.0, 0.0]);
+    assert!(v != EMPTY && v.abs() < 0.05, "{v}");
+    // The band round it the profile cut through: gone.
+    assert_eq!(at([61.5, 20.0, 0.0]), EMPTY);
+    // The Ø16 hole the bore made: gone.
+    assert_eq!(at([30.0, 20.0, 0.0]), EMPTY);
 }

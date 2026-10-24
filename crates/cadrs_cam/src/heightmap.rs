@@ -6,7 +6,10 @@
 //!   finishing strategies and the gouge check use it.
 //! - **The stock's** ([`HeightMap::block`]): the top of the material over each cell. The
 //!   simulation ([`HeightMap::cut`]) lowers it under the cutter along each move: Verify's
-//!   in-process stock.
+//!   in-process stock. A stock map may carry each column's bottom too (`floor`): a column is
+//!   material from its floor to its top, gone when a cut reaches the floor. That's what a
+//!   setup machined from above leaves, and what the next setup gets, turned over when it's
+//!   flipped ([`HeightMap::reframed`]).
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -28,6 +31,9 @@ pub struct HeightMap {
     pub ny: usize,
     /// Row-major heights (`EMPTY` where there's nothing).
     pub z: Vec<f32>,
+    /// Each column's bottom (a stock map carried between setups); `None`: the stock's bottom.
+    #[serde(default)]
+    pub floor: Option<Vec<f32>>,
 }
 
 impl HeightMap {
@@ -47,6 +53,7 @@ impl HeightMap {
             nx,
             ny,
             z: vec![EMPTY; nx * ny],
+            floor: None,
         }
     }
 
@@ -58,6 +65,7 @@ impl HeightMap {
             nx: self.nx,
             ny: self.ny,
             z: vec![EMPTY; self.nx * self.ny],
+            floor: None,
         }
     }
 
@@ -292,12 +300,67 @@ impl HeightMap {
                 let surface = p[2] as f32 + h;
                 let v = &mut self.z[i];
                 if *v != EMPTY && *v > surface {
-                    removed += (*v - surface) * area;
-                    *v = surface;
+                    // Through to the column's bottom: nothing left of it.
+                    let bottom = self.floor.as_ref().map_or(EMPTY, |f| f[i]);
+                    if surface <= bottom + 1e-4 {
+                        removed += (*v - bottom) * area;
+                        *v = EMPTY;
+                    } else {
+                        removed += (*v - surface) * area;
+                        *v = surface;
+                    }
                 }
             }
         }
         removed as f64
+    }
+
+    /// The stock in another setup's coordinates: `self` in `from`'s (its columns' bottoms
+    /// `bottom` where it has no floor), resampled on a grid of `cell` over `area` in `to`'s.
+    /// The setups' Z must be the same or opposite (a move, a turn about Z, or a flip): each
+    /// column stays one column, turned over by a flip. `None` for any other tilt.
+    pub fn reframed(
+        &self,
+        from: &crate::geom::Frame,
+        bottom: f64,
+        to: &crate::geom::Frame,
+        area: &Aabb,
+        cell: f64,
+    ) -> Option<HeightMap> {
+        let s = crate::geom::dot(from.z, to.z);
+        if (s.abs() - 1.0).abs() > 1e-6 {
+            return None;
+        }
+        let mut m = HeightMap::new([area.min[0], area.min[1]], [area.max[0], area.max[1]], cell);
+        let mut floor = vec![EMPTY; m.nx * m.ny];
+        for j in 0..m.ny {
+            for i in 0..m.nx {
+                let q = m.point(i, j);
+                let a0 = from.to_local(to.to_world([q[0], q[1], 0.0]));
+                let Some((ai, aj)) = self.cell_of([a0[0], a0[1]]) else {
+                    continue;
+                };
+                let k = self.index(ai, aj);
+                let top = self.z[k];
+                if top == EMPTY {
+                    continue;
+                }
+                let fa = self.floor.as_ref().map_or(bottom as f32, |f| f[k]);
+                let z0 = a0[2] as f32;
+                let (lo, hi) = if s > 0.0 {
+                    (fa - z0, top - z0)
+                } else {
+                    (z0 - top, z0 - fa)
+                };
+                if hi > lo + 1e-4 {
+                    let n = m.index(i, j);
+                    m.z[n] = hi;
+                    floor[n] = lo;
+                }
+            }
+        }
+        m.floor = Some(floor);
+        Some(m)
     }
 
     /// Lowers the stock along a whole motion (feed moves only; rapids are checked by
@@ -397,5 +460,44 @@ mod tests {
         );
         assert!((before - m.volume_above(0.0) - removed).abs() < 1.0);
         assert!((m.sample([20.0, 10.0]) - 8.0).abs() < 1e-6);
+    }
+
+    /// A 20 × 10 × 10 block with a 5 deep slot along X cut from above, then flipped over
+    /// (about X): the slot is now at the bottom, the old bottom the flat top; a cut down
+    /// through the thin floor over the slot empties those columns.
+    #[test]
+    fn a_flipped_stock_keeps_its_columns() {
+        use crate::geom::Frame;
+        let mut m = HeightMap::block(&Aabb::new([0.0, 0.0, 0.0], [20.0, 10.0, 10.0]), 0.5);
+        let tool = Tool::new(crate::tool::ToolKind::EndMill, 4.0);
+        m.cut(&tool, [0.0, 5.0, 5.0], [20.0, 5.0, 5.0]);
+        let up = Frame::WORLD;
+        let flipped = Frame::from_zx([0.0, 0.0, 10.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        // In the flipped frame: x the same, y = −y, z = 10 − z.
+        let area = Aabb::new([0.0, -10.0, 0.0], [20.0, 0.0, 10.0]);
+        let f = m.reframed(&up, 0.0, &flipped, &area, 0.5).unwrap();
+        assert!(
+            (f.sample([10.0, -5.0]) - 10.0).abs() < 1e-4,
+            "the old bottom on top"
+        );
+        let fl = f.floor.as_ref().unwrap();
+        let (i, j) = f.cell_of([10.0, -5.0]).unwrap();
+        assert!(
+            (fl[f.index(i, j)] - 5.0).abs() < 1e-4,
+            "the slot under 5 of material"
+        );
+        let (i, j) = f.cell_of([10.0, -9.5]).unwrap();
+        assert!(
+            fl[f.index(i, j)].abs() < 1e-4,
+            "beside the slot, the full 10"
+        );
+        // Facing down 6 over the slot goes through: no material left there.
+        let mut f2 = f.clone();
+        f2.cut(&tool, [8.0, -5.0, 4.0], [12.0, -5.0, 4.0]);
+        assert_eq!(f2.sample([10.0, -5.0]), EMPTY);
+        assert!((f2.sample([10.0, -9.5]) - 10.0).abs() < 1e-4);
+        // A tilt can't be carried.
+        let side = Frame::from_zx([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert!(m.reframed(&up, 0.0, &side, &area, 0.5).is_none());
     }
 }

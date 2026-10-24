@@ -173,6 +173,11 @@ fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
     let file = post::file_name(&format!("{} {}", job.name, setup.name), m.dialect);
     let sheet = cadrs_core::cam::sheet::setup_sheet(cam, job, setup, &run, &parts, &file);
     let mut notes = Vec::new();
+    // Where the machine mating puts it on the table: inside the travel?
+    if let Some(shape) = program::stock_shape(cam, job, &parts) {
+        let stock = program::stock_in(&shape, &run.frame);
+        notes.extend(program::travel_warnings(job, setup, &run, &stock));
+    }
     if m.kind == cadrs_core::cam::cadrs_cam::MachineKind::Plasma
         && m.dialect == post::Dialect::LinuxCnc
         && run.ops.iter().any(|o| o.tool.beam.material == 0)
