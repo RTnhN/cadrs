@@ -933,8 +933,9 @@ mod tests {
         // White text on a primary button in a menu stays white.
         assert_eq!(
             map.dark_on(Color::WHITE, ColorRole::Ink, Surface::Floating)
-                .to_srgba(),
-            Srgba::WHITE
+                .to_srgba()
+                .to_u8_array(),
+            [255; 4]
         );
         // A swatch's translucent black rim becomes a faint light one.
         let rim = map.dark(Color::srgba(0.0, 0.0, 0.0, 0.25), ColorRole::Line);
