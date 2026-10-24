@@ -77,6 +77,13 @@ impl MachineKind {
 pub struct Indexing {
     /// The most the tool may tilt from the table's vertical (degrees).
     pub max_tilt: f64,
+    /// Its rotary axes' letters, the tilt's first (a trunnion's A and C).
+    #[serde(default = "trunnion_axes")]
+    pub rotary: [char; 2],
+}
+
+fn trunnion_axes() -> [char; 2] {
+    ['A', 'C']
 }
 
 /// A machine a job runs on.
@@ -134,7 +141,10 @@ impl Machine {
     }
 
     fn indexing(mut self, max_tilt: f64) -> Machine {
-        self.indexing = Some(Indexing { max_tilt });
+        self.indexing = Some(Indexing {
+            max_tilt,
+            rotary: trunnion_axes(),
+        });
         self
     }
 
@@ -279,17 +289,6 @@ pub fn catalog() -> Vec<Machine> {
             30_000.0,
             15_000.0,
             15_000.0,
-            true,
-        )
-        .indexing(110.0),
-        Machine::new(
-            "5-axis trunnion mill (3+2) — Haas-style",
-            Mill,
-            Haas,
-            [762.0, 508.0, 508.0],
-            25_400.0,
-            16_500.0,
-            8_100.0,
             true,
         )
         .indexing(110.0),

@@ -146,8 +146,6 @@ pub struct PostSettings {
     pub output_arcs: bool,
     /// Arcs fitted in the XY plane (also from lines that follow a circle).
     pub arcs_xy: bool,
-    pub arcs_xz: bool,
-    pub arcs_yz: bool,
     /// Helical arcs (an arc that changes Z).
     pub output_helices: bool,
     /// Decimals of coordinates.
@@ -189,8 +187,6 @@ impl PostSettings {
             rapid_rate: 5_000.0,
             output_arcs: true,
             arcs_xy: true,
-            arcs_xz: false,
-            arcs_yz: false,
             output_helices: d != Dialect::Mach3,
             decimals: if d == Dialect::Grbl { 3 } else { 4 },
             decimal_point: matches!(d, Dialect::Fanuc | Dialect::Haas),
@@ -287,6 +283,8 @@ pub enum PostError {
     OutOfTravel(String),
     /// An operation tilts the tool where the machine can't.
     CantTilt(String),
+    /// A work offset the control doesn't have.
+    NoDatum(String),
 }
 
 impl std::fmt::Display for PostError {
@@ -296,6 +294,7 @@ impl std::fmt::Display for PostError {
             PostError::WrongTool(s) => write!(f, "{s}"),
             PostError::OutOfTravel(s) => write!(f, "{s}"),
             PostError::CantTilt(s) => write!(f, "{s}"),
+            PostError::NoDatum(s) => write!(f, "{s}"),
         }
     }
 }
@@ -306,6 +305,25 @@ pub fn datum_code(n: u32) -> String {
         0 | 1 => "G54".into(),
         2..=6 => format!("G{}", 53 + n),
         n => format!("G54.1 P{}", n - 6),
+    }
+}
+
+impl Dialect {
+    /// Its code for work offset `n` (1 = G54 … 6 = G59, then the extended ones), or `None`
+    /// past what it has.
+    pub fn datum(self, n: u32) -> Option<String> {
+        let n = n.max(1);
+        if n <= 6 {
+            return Some(datum_code(n));
+        }
+        let e = n - 6;
+        match self {
+            Dialect::Fanuc if e <= 48 => Some(format!("G54.1 P{e}")),
+            Dialect::Haas if e <= 99 => Some(format!("G154 P{e}")),
+            Dialect::LinuxCnc if e <= 3 => Some(format!("G59.{e}")),
+            Dialect::Mach3 if n <= 254 => Some(format!("G59 P{n}")),
+            _ => None,
+        }
     }
 }
 
@@ -345,6 +363,8 @@ struct Writer<'a> {
     no_z: bool,
     /// The beam is on.
     beam_on: bool,
+    /// The spindle speed last set (rpm).
+    rpm: Option<f64>,
 }
 
 impl<'a> Writer<'a> {
@@ -361,6 +381,7 @@ impl<'a> Writer<'a> {
             number_next: false,
             no_z: false,
             beam_on: false,
+            rpm: None,
         }
     }
 
@@ -504,10 +525,10 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
     let d = machine.dialect;
     for op in &program.operations {
         if let Some(t) = op.tilt {
-            if !matches!(d, Dialect::Fanuc | Dialect::Haas) {
+            if d != Dialect::Fanuc {
                 return Err(PostError::CantTilt(format!(
-                    "{}: tilted work planes are posted for Fanuc and Haas-style controls \
-                     (G68.2)",
+                    "{}: tilted work planes are posted as Fanuc's tilted working plane \
+                     (G68.2) only",
                     op.name
                 )));
             }
@@ -570,15 +591,19 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             continue;
         }
         w.comment(&op.name);
-        // Out of a tilted plane that isn't this one's: up clear, then cancel it.
-        if tilted.is_some() && tilted != op.tilt {
-            retract_home(&mut w, d);
-            w.block("G69");
+        let changing =
+            machine.kind.is_milling() && (tool_in != Some(op.tool_number) || op.force_tool_change);
+        // Out of a tilted plane that isn't this one's, or for a tool change: up clear, cancel
+        // it, the rotary axes home.
+        if tilted.is_some() && (tilted != op.tilt || changing) {
+            cancel_tilt(&mut w, machine);
             tilted = None;
-            w.at = [None; 3];
+        }
+        if op.stop_before {
+            w.block("M0");
         }
         // Tool change.
-        if machine.kind.is_milling() && (tool_in != Some(op.tool_number) || op.force_tool_change) {
+        if changing {
             if tool_in.is_some() {
                 w.block("M5");
                 if coolant != Coolant::Off {
@@ -608,8 +633,6 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             tool_in = Some(op.tool_number);
             w.at = [None; 3];
             w.mode = None;
-        } else if op.stop_before {
-            w.block("M0");
         }
         // Work offset.
         let want = if s.advanced_work_planes {
@@ -621,7 +644,13 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             if datum.is_some() && s.force_retract_on_plane_change {
                 retract_home(&mut w, d);
             }
-            let code = datum_code(want);
+            let code = d.datum(want).ok_or_else(|| {
+                PostError::NoDatum(format!(
+                    "{}: {} has no work offset {want} (G54 is 1)",
+                    op.name,
+                    d.label()
+                ))
+            })?;
             w.block(&code);
             datum = Some(want);
             w.at = [None; 3];
@@ -642,6 +671,10 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             );
             w.block(&line);
             w.block("G53.1");
+            // The tool's length again, along the tilted axis.
+            if machine.kind.is_milling() {
+                w.block(&format!("G43 H{}", op.tool_number));
+            }
             tilted = Some(t);
             w.at = [None; 3];
             w.mode = None;
@@ -650,8 +683,7 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
     }
     // End.
     if tilted.is_some() {
-        retract_home(&mut w, d);
-        w.block("G69");
+        cancel_tilt(&mut w, machine);
     }
     if beam {
         // The beam off if an operation left it on.
@@ -674,6 +706,18 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
     Ok(w.out)
 }
 
+/// Out of a tilted working plane: up clear, cancel it, the rotary axes back to zero (G69 leaves
+/// them where they are).
+fn cancel_tilt(w: &mut Writer, machine: &Machine) {
+    retract_home(w, machine.dialect);
+    w.block("G69");
+    let [a, b] = machine.indexing.map_or(['A', 'C'], |i| i.rotary);
+    let zero = decimal(0.0, 0, w.s.decimal_point);
+    w.block(&format!("G0 {a}{zero} {b}{zero}"));
+    w.at = [None; 3];
+    w.mode = None;
+}
+
 /// A LinuxCNC plasma table: QtPlasmaC.
 fn qtplasmac(machine: &Machine) -> bool {
     machine.kind == MachineKind::Plasma && machine.dialect == Dialect::LinuxCnc
@@ -683,7 +727,11 @@ fn retract_home(w: &mut Writer, d: Dialect) {
     match d {
         Dialect::Fanuc | Dialect::Haas => w.block("G91 G28 Z0."),
         Dialect::LinuxCnc | Dialect::Mach3 => w.block("G53 G0 Z0"),
-        Dialect::Grbl => w.block("G53 G0 Z-1"),
+        // GRBL's machine Z is negative down from home: just under it.
+        Dialect::Grbl => {
+            let z = w.num(-1.0);
+            w.block(&format!("G53 G0 Z{z}"))
+        }
     }
     if matches!(d, Dialect::Fanuc | Dialect::Haas) {
         w.block("G90");
@@ -748,6 +796,7 @@ fn post_moves(
             Step::Spindle { rpm, cw } => {
                 if !beam {
                     let cw = *cw == (tool.hand == Hand::Right);
+                    w.rpm = Some(rpm.min(machine.max_spindle));
                     let word = spindle_word(rpm.min(machine.max_spindle), cw);
                     w.block(&word);
                     if op.coolant != *coolant {
@@ -865,6 +914,21 @@ fn post_drill(
     tool: &Tool,
     at: &mut P3,
 ) {
+    if c.kind == CycleKind::Tap && s.canned_tap && d == Dialect::LinuxCnc {
+        // LinuxCNC taps with spindle-synchronised motion: in at the pitch a turn, then back
+        // out the same way with the spindle reversed, to where it started.
+        if !at[0].is_nan() && at[2] < c.retract {
+            w.rapid([at[0], at[1], c.retract]);
+        }
+        w.rapid([c.at[0], c.at[1], c.retract]);
+        w.rapid([c.at[0], c.at[1], c.r_plane]);
+        let line = format!("G33.1 Z{} K{}", w.num(c.bottom), w.num(c.pitch));
+        w.block(&line);
+        w.mode = None;
+        w.rapid([c.at[0], c.at[1], c.retract]);
+        *at = [c.at[0], c.at[1], c.retract];
+        return;
+    }
     if s.canned(c.kind) && d.has_cycles() {
         let code = match c.kind {
             CycleKind::Drill if c.dwell > 0.0 => "G82",
@@ -896,6 +960,11 @@ fn post_drill(
         }
         if c.dwell > 0.0 {
             let _ = write!(words, " P{}", d.cycle_dwell(c.dwell));
+        }
+        // Fanuc-style rigid tapping: the spindle synchronised first.
+        if c.kind == CycleKind::Tap && matches!(d, Dialect::Fanuc | Dialect::Haas) {
+            let rpm = w.rpm.unwrap_or(c.feed / c.pitch.max(1e-6));
+            w.block(&format!("M29 S{}", rpm.round()));
         }
         // (A tap's feed is its pitch × rpm already.)
         w.feed = None;
@@ -1344,6 +1413,78 @@ mod tests {
         }
     }
 
+    fn tap_program(d: Dialect) -> String {
+        let cycle = DrillCycle {
+            at: [10.0, 20.0],
+            r_plane: 2.0,
+            bottom: -12.0,
+            retract: 10.0,
+            feed: 625.0,
+            kind: CycleKind::Tap,
+            peck: 0.0,
+            dwell: 0.0,
+            pitch: 1.25,
+        };
+        let mut m = machine(MachineKind::Mill, Dialect::Fanuc);
+        m.dialect = d;
+        let s = PostSettings::for_dialect(d, MachineKind::Mill);
+        let op = NcOperation {
+            name: "Tap".into(),
+            tool: Tool::new(ToolKind::Tap, 8.0),
+            tool_number: 4,
+            toolpath: Toolpath {
+                steps: vec![
+                    Step::Spindle {
+                        rpm: 500.0,
+                        cw: true,
+                    },
+                    Step::Rapid([10.0, 20.0, 10.0]),
+                    Step::Drill(cycle),
+                ],
+                warnings: vec![],
+            },
+            coolant: Coolant::Off,
+            datum: 1,
+            stop_before: true,
+            force_tool_change: false,
+            tilt: None,
+        };
+        post(
+            &NcProgram {
+                name: "Taps".into(),
+                number: 1,
+                operations: vec![op],
+            },
+            &m,
+            &s,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn tapping_suits_the_dialect() {
+        let lines = |nc: &str| -> Vec<String> {
+            nc.lines()
+                .map(|l| {
+                    l.split_once(' ')
+                        .filter(|(n, _)| n.starts_with('N'))
+                        .map_or(l, |(_, r)| r)
+                        .to_string()
+                })
+                .collect()
+        };
+        let fanuc = lines(&tap_program(Dialect::Fanuc));
+        let m29 = fanuc.iter().position(|l| l == "M29 S500").expect("M29");
+        assert!(fanuc[m29 + 1].starts_with("G98 G84 "), "{fanuc:?}");
+        let lcnc = tap_program(Dialect::LinuxCnc);
+        assert!(lcnc.contains("G33.1 Z-12 K1.25"), "{lcnc}");
+        assert!(!lcnc.contains("G84"), "{lcnc}");
+        // M0 is kept even with a tool change, before it.
+        let m0 = fanuc.iter().position(|l| l == "M0").expect("M0");
+        let t4 = fanuc.iter().position(|l| l == "T4 M6").unwrap();
+        assert!(m0 < t4);
+    }
+
     #[test]
     fn dwells_and_comments_suit_the_dialect() {
         assert_eq!(Dialect::Fanuc.dwell(1.0), "G4 X1.");
@@ -1384,6 +1525,12 @@ mod tests {
         assert_eq!(datum_code(1), "G54");
         assert_eq!(datum_code(6), "G59");
         assert_eq!(datum_code(7), "G54.1 P1");
+        assert_eq!(Dialect::Haas.datum(8).as_deref(), Some("G154 P2"));
+        assert_eq!(Dialect::LinuxCnc.datum(9).as_deref(), Some("G59.3"));
+        assert_eq!(Dialect::LinuxCnc.datum(10), None);
+        assert_eq!(Dialect::Mach3.datum(7).as_deref(), Some("G59 P7"));
+        assert_eq!(Dialect::Grbl.datum(7), None);
+        assert_eq!(Dialect::Grbl.datum(3).as_deref(), Some("G56"));
         assert_eq!(
             file_name("My part (v2)", Dialect::LinuxCnc),
             "My_part__v2.ngc"
@@ -1668,16 +1815,52 @@ mod tests {
         assert!(lines.contains(&"G68.2 X0. Y-20. Z5. I0. J90. K0."), "{nc}");
         let g68 = at("G68.2");
         assert_eq!(lines[g68 + 1], "G53.1");
-        // Up clear before tilting and before cancelling.
+        // The tool's length again after the plane.
+        assert_eq!(lines[g68 + 2], "G43 H1");
+        // Up clear before tilting and before cancelling; the rotaries home after G69.
         assert!(lines[g68 - 2].starts_with("G91 G28 Z0."), "{nc}");
         let g69 = at("G69");
         assert!(
             g69 > g68 && lines[g69 - 2].starts_with("G91 G28 Z0."),
             "{nc}"
         );
+        assert_eq!(lines[g69 + 1], "G0 A0. C0.", "{nc}");
         // The tilted operation's moves come between them, in its own coordinates.
         assert!(lines[g68..g69].iter().any(|l| l.contains("X10.")));
         assert_eq!(lines.iter().filter(|l| l.starts_with("G68.2")).count(), 1);
+        // Two tilted operations with different tools: the plane is cancelled for the tool
+        // change and set again after it.
+        let mut t2 = tilted.clone();
+        t2.tool_number = 2;
+        let p2 = NcProgram {
+            name: "Block".into(),
+            number: 7,
+            operations: vec![tilted.clone(), t2],
+        };
+        let nc2 = post(&p2, &five, &five.post).unwrap();
+        let l2: Vec<&str> = nc2
+            .lines()
+            .map(|l| {
+                l.split_once(' ')
+                    .filter(|(n, _)| n.starts_with('N'))
+                    .map_or(l, |(_, r)| r)
+            })
+            .collect();
+        let t2_at = l2.iter().position(|l| *l == "T2 M6").unwrap();
+        let g69_at = l2.iter().position(|l| *l == "G69").unwrap();
+        assert!(g69_at < t2_at, "{nc2}");
+        assert_eq!(
+            l2.iter().filter(|l| l.starts_with("G68.2")).count(),
+            2,
+            "{nc2}"
+        );
+        // Haas-style controls aren't given G68.2.
+        let mut haas = five.clone();
+        haas.dialect = Dialect::Haas;
+        assert!(matches!(
+            post(&p, &haas, &haas.post),
+            Err(PostError::CantTilt(_))
+        ));
         // Not on a 3-axis machine, nor on LinuxCNC.
         let three = machine(MachineKind::Mill, Dialect::Fanuc);
         assert!(matches!(

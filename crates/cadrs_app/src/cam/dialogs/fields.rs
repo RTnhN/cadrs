@@ -457,6 +457,17 @@ impl Draft {
                             ix.max_tilt,
                             Unit::Deg,
                         ));
+                        f.push(Field::select(
+                            "rotary",
+                            "Rotary axes",
+                            vec!["A and C (trunnion)", "B and C (trunnion)"],
+                            usize::from(ix.rotary[0] == 'B'),
+                        ));
+                        if machine.dialect != cadrs_core::cam::cadrs_cam::Dialect::Fanuc {
+                            f.push(Field::note(
+                                "Tilted work planes are posted as Fanuc's G68.2 only",
+                            ));
+                        }
                     }
                 } else if machine.kind == MachineKind::Laser {
                     f.push(Field::number(

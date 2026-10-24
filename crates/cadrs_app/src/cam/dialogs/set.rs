@@ -124,7 +124,13 @@ impl Draft {
                     ("indexing", Value::Bool(b)) => {
                         machine.indexing = b.then_some(cadrs_core::cam::cadrs_cam::Indexing {
                             max_tilt: machine.indexing.map_or(110.0, |i| i.max_tilt),
+                            rotary: machine.indexing.map_or(['A', 'C'], |i| i.rotary),
                         })
+                    }
+                    ("rotary", Value::Index(i)) => {
+                        if let Some(ix) = &mut machine.indexing {
+                            ix.rotary = if *i == 1 { ['B', 'C'] } else { ['A', 'C'] };
+                        }
                     }
                     ("max-tilt", Value::Number(n)) => {
                         if let Some(i) = &mut machine.indexing {

@@ -185,8 +185,9 @@ pub fn drill(input: &Input) -> Result<Toolpath, String> {
     Ok(b.finish())
 }
 
-/// Bore: a helix down each hole bigger than the end mill, a full circle at the bottom, out
-/// through the middle.
+/// Bore: helixes down each hole bigger than the end mill, a full circle at the bottom of each:
+/// first round the middle (within the tool's radius, so no core is left), then out a step over
+/// at a time to the wall; out through the cleared middle.
 pub fn bore(input: &Input) -> Result<Toolpath, String> {
     let p = input.params;
     let (holes, warnings) = pick_holes(input, true);
@@ -198,8 +199,9 @@ pub fn bore(input: &Input) -> Result<Toolpath, String> {
     let clearance = input.clearance();
     // Climb: the wall (material outside the circle) on the right, so counter-clockwise.
     let cw = p.direction != super::Direction::Climb;
+    let tr = input.tool.radius();
     for h in holes {
-        let r = h.diameter / 2.0 - input.tool.radius() - p.wall_stock;
+        let r = h.diameter / 2.0 - tr - p.wall_stock;
         if r <= 1e-3 {
             continue;
         }
@@ -210,22 +212,33 @@ pub fn bore(input: &Input) -> Result<Toolpath, String> {
         } else {
             h.bottom + p.floor_stock
         };
-        let start = [c[0] + r, c[1]];
+        // The rings it helixes down: the first within the tool's own radius of the middle, so
+        // it clears the middle (no core left standing), then out a step over at a time.
+        let mut rings = vec![r.min(tr * 0.8)];
+        let step = p.step_over.clamp(0.05, tr * 1.6);
+        while *rings.last().unwrap() < r - 1e-9 {
+            let next = (rings.last().unwrap() + step).min(r);
+            rings.push(next);
+        }
         b.up_to(clearance);
         b.rapid([c[0], c[1], clearance]);
-        b.rapid([c[0], c[1], top]);
-        b.feed([start[0], start[1], top], FeedKind::LeadIn);
-        // The helix, a turn per step down.
-        let pitch = p.step_down.max(0.05);
-        let mut z = top;
-        while z > bottom + 1e-9 {
-            let next = (z - pitch).max(bottom);
-            b.arc([start[0], start[1], next], c, cw, FeedKind::Ramp);
-            z = next;
+        for ring in &rings {
+            // (After the first ring, up the cleared middle.)
+            b.rapid([c[0], c[1], top]);
+            let start = [c[0] + ring, c[1]];
+            b.feed([start[0], start[1], top], FeedKind::LeadIn);
+            // The helix, a turn per step down.
+            let pitch = p.step_down.max(0.05);
+            let mut z = top;
+            while z > bottom + 1e-9 {
+                let next = (z - pitch).max(bottom);
+                b.arc([start[0], start[1], next], c, cw, FeedKind::Ramp);
+                z = next;
+            }
+            // A level circle at the bottom, then off the wall into the cleared middle.
+            b.arc([start[0], start[1], bottom], c, cw, FeedKind::Cut);
+            b.feed([c[0], c[1], bottom], FeedKind::LeadOut);
         }
-        // A level circle at the bottom, then off the wall and out.
-        b.arc([start[0], start[1], bottom], c, cw, FeedKind::Cut);
-        b.feed([c[0], c[1], bottom], FeedKind::LeadOut);
         b.rapid([c[0], c[1], clearance]);
     }
     if !b.moved() {
@@ -583,10 +596,50 @@ mod tests {
         assert!(arcs.len() > 3);
         for (to, c, cw) in &arcs {
             assert_eq!(*c, [70.0, 20.0]);
-            assert!((to[0] - 75.0).abs() < 1e-9);
             assert!(!cw);
+            assert!(to[0] > 70.0 && to[0] <= 75.0 + 1e-9);
         }
-        // Down through the bottom.
-        assert!(arcs.last().unwrap().0[2] < 0.0);
+        // Down through the bottom, the last ring at the wall.
+        let last = arcs.last().unwrap().0;
+        assert!(last[2] < 0.0 && (last[0] - 75.0).abs() < 1e-9);
+    }
+
+    /// A Ø20 hole with a D6: the rings start within the tool's radius of the middle (so the
+    /// middle is cut, no core left) and step out by at most the step over to the wall; every
+    /// rapid is in the middle (cleared) or above the material.
+    #[test]
+    fn bore_wide_hole_leaves_no_core() {
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let tp = run(Pattern::Bore, tool.clone()).unwrap();
+        let mut radii: Vec<f64> = tp
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Arc { to, center, .. } if *center == [70.0, 20.0] => {
+                    Some(dist2([to[0], to[1]], *center))
+                }
+                _ => None,
+            })
+            .collect();
+        radii.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert!(radii[0] <= tool.radius(), "{radii:?}");
+        assert!((radii.last().unwrap() - 7.0).abs() < 1e-9, "{radii:?}");
+        let step = Params::new(Pattern::Bore, &tool, MachineKind::Mill).step_over;
+        assert!(
+            radii.windows(2).all(|w| w[1] - w[0] <= step + 1e-9),
+            "{radii:?}"
+        );
+        let mut at = [0.0, 0.0, 50.0];
+        for s in &tp.steps {
+            match s {
+                Step::Rapid(p) => {
+                    let middle = dist2([p[0], p[1]], [70.0, 20.0]) < 1e-9;
+                    assert!(middle || p[2] > 10.0, "a rapid at {p:?} from {at:?}");
+                    at = *p;
+                }
+                Step::Feed { to, .. } | Step::Arc { to, .. } => at = *to,
+                _ => {}
+            }
+        }
     }
 }

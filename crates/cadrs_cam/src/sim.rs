@@ -185,13 +185,8 @@ pub fn simulate_mill_on(
                 dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]).max((s.to[2] - s.from[2]).abs());
             let n = ((len / map.cell).ceil() as usize).clamp(1, 100_000);
             if s.is_rapid() {
-                // Straight up out of where it was is always clear.
-                let up = dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]) < 1e-9
-                    && s.to[2] >= s.from[2];
-                if up {
-                    continue;
-                }
-                // The cutter running into material anywhere along it.
+                // The cutter's own shape running into material anywhere along it (straight up
+                // too: up through a core left standing is a crash).
                 for i in 0..=n {
                     let t = i as f64 / n as f64;
                     let p = crate::geom::lerp(s.from, s.to, t);
@@ -730,5 +725,39 @@ mod tests {
         up.feed = None;
         let r = check_against_part(&tris, &[], &tool, &[rapid, up], 0.01);
         assert_eq!(r.rapid_hits.len(), 1, "{r:?}");
+    }
+
+    /// A ring cut round a core (a D6 at radius 5 leaves a Ø4 pin) then a rapid straight up
+    /// from the middle: up through the pin is a crash.
+    #[test]
+    fn a_rapid_up_through_a_core_is_caught() {
+        let m = Model::from_triangles(
+            "b",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])),
+        );
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]));
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let mut segs = Vec::new();
+        let ring = |a: f64| [10.0 + 5.0 * a.cos(), 10.0 + 5.0 * a.sin(), 5.0];
+        for i in 0..64 {
+            let (a, b) = (
+                std::f64::consts::TAU * i as f64 / 64.0,
+                std::f64::consts::TAU * (i + 1) as f64 / 64.0,
+            );
+            segs.push(feed(ring(a), ring(b)));
+        }
+        let mut up = feed([10.0, 10.0, 5.0], [10.0, 10.0, 20.0]);
+        up.feed = None;
+        segs.push(up);
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+            0.1,
+        );
+        assert_eq!(r.rapid_hits.len(), 1, "{:?}", r.rapid_hits);
     }
 }
