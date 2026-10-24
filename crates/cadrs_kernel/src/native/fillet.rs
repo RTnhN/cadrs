@@ -4769,8 +4769,61 @@ fn plan(
     } else {
         edges.iter().zip(ratios).map(one).collect()
     };
-    for r in each {
-        let (pieces, own) = r?;
+    let each: Vec<(Pieces, Vec<Ball>)> = each.into_iter().collect::<Result<_>>()?;
+    // The faces of each piece ending at a vertex, by vertex.
+    let mut at_vertex: HashMap<usize, Vec<(usize, [usize; 2])>> = HashMap::new();
+    for (pieces, _) in &each {
+        for (f, rs) in pieces {
+            for j in 0..2 {
+                if rs[j].is_none() && !f.closed {
+                    let mut fs = f.faces;
+                    fs.sort_unstable();
+                    at_vertex
+                        .entry(b.edges[f.e].v[j])
+                        .or_default()
+                        .push((f.e, fs));
+                }
+            }
+        }
+    }
+    for (mut pieces, own) in each {
+        // A piece a hair long from a roll to the edge's end, on the faces of the strip it meets
+        // there (the contact reaching the face the neighbour runs on, at the vertex): its
+        // sections the neighbour's; none, the piece before ending at the vertex and meeting the
+        // neighbour there.
+        for end in [0, 1] {
+            let n = pieces.len();
+            if n < 2 {
+                break;
+            }
+            let (i, j) = if end == 0 { (0, 0) } else { (n - 1, 1) };
+            let (f, rs) = &pieces[i];
+            let ed = &b.edges[f.e];
+            let Some(id) = rs[1 - j] else { continue };
+            let t = f.spine.param_of(&own[id].c, f.tm);
+            let mut fs = f.faces;
+            fs.sort_unstable();
+            let beside = at_vertex.get(&ed.v[j]).is_some_and(|x| {
+                x.iter().filter(|o| o.0 != f.e).count() == 1
+                    && x.iter().any(|o| o.0 != f.e && o.1 == fs)
+            });
+            if rs[j].is_some()
+                || !beside
+                || f.spine_len(t, ed.t[j]) > tol::REL_POINT * (1.0 + f.r())
+            {
+                continue;
+            }
+            debug(|| {
+                format!(
+                    "edge {}: the piece by its end {j} is a hair long: none",
+                    f.e
+                )
+            });
+            pieces.remove(i);
+            let k = if end == 0 { 0 } else { pieces.len() - 1 };
+            pieces[k].1[j] = None;
+            pieces[k].0.at_vertex[j] = true;
+        }
         let base = rolls.len();
         rolls.extend(own);
         for (f, rs) in pieces {
@@ -11720,9 +11773,10 @@ fn collapse(nb: &mut Body, out: &mut Pieces, tol: f64) {
     }
     // A rail of no length at a new cone's apex (a chamfer round a convex corner as wide as the
     // corner's radius: the rail on the face it runs over shrinks to the corner's centre): a
-    // degenerate edge along the apex's line on the cone, which needs it to close its loop in
-    // (u, v) (the faces it cuts only have a vertex there).
-    let mut apexes: Vec<usize> = Vec::new();
+    // degenerate edge along the apex's line on the cone, as far round as the cone's other rail
+    // goes, which the cone needs to close its loop in (u, v) (the faces it cuts only have a
+    // vertex there).
+    let mut apexes: Vec<(usize, [f64; 2], P3)> = Vec::new();
     for nf in out.new_faces.iter_mut() {
         let Surface::Cone { f, r, a } = &nf.surf else {
             continue;
@@ -11731,45 +11785,83 @@ fn collapse(nb: &mut Body, out: &mut Pieces, tol: f64) {
         if a.sin().abs() < tol::ANGULAR_POINT {
             continue;
         }
+        // The cone's angle u at a point.
+        let u_of = |p: &P3| {
+            let l = f.local(p);
+            l.y.atan2(l.x)
+        };
+        // The cone's other rail, round its axis: the turn it spans in u (the apex's rail, of no
+        // length, has no parameter to go by at its ends).
+        let span = nf.edges.iter().find_map(|&e| {
+            let ed = &nb.edges[e];
+            match &ed.curve {
+                Curve::Circle { c, x, y, r: rr } if !short.contains(&e) && *rr > tol => {
+                    let l = f.local(c);
+                    if (l.x * l.x + l.y * l.y).sqrt() > tol {
+                        return None;
+                    }
+                    let turn = x.cross(y).dot(&f.z).signum();
+                    let u0 = u_of(&ed.point(ed.t[0]));
+                    Some([u0, u0 + turn * (ed.t[1] - ed.t[0])])
+                }
+                _ => None,
+            }
+        });
+        let Some([u0, u1]) = span else {
+            continue;
+        };
         for &e in nf.edges.iter().filter(|e| short.contains(e)) {
             let ed = &nb.edges[e];
-            let Curve::Circle { x, y, .. } = &ed.curve else {
-                continue;
-            };
             let l = f.local(&nb.verts[ed.v[0]].p);
-            // At the apex, the rail's circle about the cone's axis: u = φ₀ ± t (φ₀ its x's
-            // angle in the cone's frame, the sign the way round it turns).
-            let turn = x.cross(y).dot(&f.z);
-            if (l.x * l.x + l.y * l.y).sqrt() > tol || turn.abs() < 1.0 - tol::ANGULAR_POINT {
+            if !matches!(ed.curve, Curve::Circle { .. }) || (l.x * l.x + l.y * l.y).sqrt() > tol {
                 continue;
             }
-            let phi0 = x.dot(&f.y).atan2(x.dot(&f.x));
             let v_apex = -r / a.sin();
             nf.pcurves.push((
                 e,
                 Curve::Line {
-                    o: P3::new(phi0, v_apex, 0.0),
-                    d: V3::x() * turn.signum(),
+                    o: P3::new(0.0, v_apex, 0.0),
+                    d: V3::x(),
                 },
             ));
-            apexes.push(e);
+            apexes.push((e, [u0.min(u1), u0.max(u1)], nf.surf.eval(0.0, v_apex)));
         }
     }
-    for &e in &apexes {
+    // The apex exactly (the rail's vertices merged where they were, a hair off the axis where
+    // the chamfer is as wide as the corner give or take that: the lines down the cone from there
+    // would cross generators near the apex), and the straight section edges through it from
+    // there.
+    for &(e, t, apex) in &apexes {
+        let v = nb.edges[e].v[0];
+        nb.verts[v].p = apex;
         let ed = &mut nb.edges[e];
-        let p = nb.verts[ed.v[0]].p;
         ed.curve = Curve::Line {
-            o: p,
+            o: apex,
             d: V3::zeros(),
         };
+        ed.t = t;
         ed.degenerate = true;
+        for &x in &new_edges {
+            let xe = &nb.edges[x];
+            if x == e || xe.degenerate || !xe.v.contains(&v) {
+                continue;
+            }
+            if let Curve::Line { .. } = xe.curve {
+                let (a0, z0) = (nb.verts[xe.v[0]].p, nb.verts[xe.v[1]].p);
+                let (c, len) = Curve::line(a0, z0);
+                let xe = &mut nb.edges[x];
+                xe.curve = c;
+                xe.t = [0.0, len];
+            }
+        }
     }
+    let apexes: Vec<usize> = apexes.into_iter().map(|x| x.0).collect();
     for nf in out.new_faces.iter_mut() {
         nf.edges = nf
             .edges
             .iter()
             .copied()
-            .filter(|e| !short.contains(e) || apexes.contains(e))
+            .filter(|&e| !short.contains(&e) || apexes.contains(&e))
             .map(map)
             .collect();
         nf.pcurves.retain(|x| {

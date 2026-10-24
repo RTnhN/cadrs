@@ -861,7 +861,16 @@ fn exact_flat(kind: Exact, b: &Ball, spine: &Spine) -> Option<Strip> {
                 let h = (q - c).dot(&z);
                 (h, (q - (c + z * h)).norm())
             };
-            let ((h0, r0), (h1, r1)) = (ring(&q0), ring(&q1));
+            let ((h0, mut r0), (h1, mut r1)) = (ring(&q0), ring(&q1));
+            // A ring within a point's tolerance of the axis is the axis (a chamfer as wide as
+            // the corner's radius, give or take a hair: the cone's apex, not a circle too small
+            // to cut a face with, nor one turned round past the axis).
+            let snap = tol::REL_POINT * (1.0 + (q1 - q0).norm());
+            for rr in [&mut r0, &mut r1] {
+                if *rr <= snap {
+                    *rr = 0.0;
+                }
+            }
             let rail = |h: f64, rr: f64| Curve::Circle {
                 c: c + z * h,
                 x: *x,
