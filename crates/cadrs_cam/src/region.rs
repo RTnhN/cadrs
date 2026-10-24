@@ -144,6 +144,53 @@ pub fn simplify(r: &[Ring], epsilon: f64) -> Region {
     from_paths(&simplify_paths(&to_paths(r), epsilon * SCALE, true))
 }
 
+/// Whether `p` is inside the region (even-odd over its rings: holes are inside their outer
+/// ring).
+pub fn contains(r: &[Ring], p: P2) -> bool {
+    r.iter()
+        .filter(|ring| crate::geom::ring_contains(ring, p))
+        .count()
+        % 2
+        == 1
+}
+
+/// Whether the straight segment from `a` to `b` stays inside the region: it crosses no ring
+/// (touching one is allowed, so ends on the boundary count as inside) and points along it are
+/// inside.
+pub fn segment_inside(r: &[Ring], a: P2, b: P2) -> bool {
+    use crate::geom::{cross2, sub2};
+    let ab = sub2(b, a);
+    let l = ab[0].hypot(ab[1]);
+    if l < 1e-9 {
+        return contains(r, a);
+    }
+    let eps = 1e-4;
+    for ring in r {
+        let n = ring.len();
+        for i in 0..n {
+            let (c, d) = (ring[i], ring[(i + 1) % n]);
+            let cd = sub2(d, c);
+            let lcd = cd[0].hypot(cd[1]);
+            if lcd < 1e-12 {
+                continue;
+            }
+            // Signed distances of c, d from the line ab, and of a, b from the line cd.
+            let sc = cross2(ab, sub2(c, a)) / l;
+            let sd = cross2(ab, sub2(d, a)) / l;
+            let sa = cross2(cd, sub2(a, c)) / lcd;
+            let sb = cross2(cd, sub2(b, c)) / lcd;
+            if ((sc > eps && sd < -eps) || (sc < -eps && sd > eps))
+                && ((sa > eps && sb < -eps) || (sa < -eps && sb > eps))
+            {
+                return false;
+            }
+        }
+    }
+    [0.25, 0.5, 0.75]
+        .iter()
+        .all(|t| contains(r, [a[0] + ab[0] * t, a[1] + ab[1] * t]))
+}
+
 /// The region's area (mm²).
 pub fn area(r: &[Ring]) -> f64 {
     r.iter().map(|ring| ring_area2(ring) / 2.0).sum()
@@ -241,6 +288,30 @@ pub fn segments_for(radius: f64, sweep: f64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn segments_inside_a_u() {
+        // A U: 0..30 × 0..20 with the notch 10..20 × 5..20 cut out.
+        let u = difference(
+            &[rect([0.0, 0.0], [30.0, 20.0])],
+            &[rect([10.0, 5.0], [20.0, 25.0])],
+        );
+        assert!(contains(&u, [5.0, 10.0]));
+        assert!(!contains(&u, [15.0, 10.0]));
+        // Across the notch: out.
+        assert!(!segment_inside(&u, [5.0, 10.0], [25.0, 10.0]));
+        // Along the bottom bar: in.
+        assert!(segment_inside(&u, [5.0, 2.0], [25.0, 2.0]));
+        // From a boundary point into the inside: in.
+        assert!(segment_inside(&u, [0.0, 10.0], [5.0, 2.0]));
+        // A hole in the middle of a square blocks the way through it.
+        let holed = difference(
+            &[rect([0.0, 0.0], [30.0, 30.0])],
+            &[circle([15.0, 15.0], 3.0)],
+        );
+        assert!(!segment_inside(&holed, [2.0, 15.0], [28.0, 15.0]));
+        assert!(segment_inside(&holed, [2.0, 2.0], [28.0, 2.0]));
+    }
 
     #[test]
     fn offset_square_out_and_in() {

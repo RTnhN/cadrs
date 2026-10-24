@@ -132,6 +132,7 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
             let cut = Cut {
                 material_top,
                 direct_ok: false,
+                free: None,
                 free_side: None,
                 tabs: None,
                 ramp: false,
@@ -187,7 +188,8 @@ fn keep_out(input: &Input, hs: &[f64], solids: &[Region]) -> Region {
         } else {
             t.radius()
         };
-        out = region::union(&out, &region::offset(solid, r + w));
+        // Padded by the offset's tolerance (its round corners' chords cut inside the arc).
+        out = region::union(&out, &region::offset(solid, r + w + region::ARC_TOLERANCE));
     }
     out
 }
@@ -231,11 +233,14 @@ pub fn constant_z(input: &Input) -> Result<Toolpath, String> {
                 }
             })
             .collect::<Vec<Contour>>();
+        // Where the centre may go at this level: leads keep to it.
+        let free = region::difference(&[super::everywhere(input)], &ko);
         let start = b.at.map_or([mb.min[0], mb.min[1]], |a| [a[0], a[1]]);
         for c in nearest_order(rings, start) {
             let cut = Cut {
                 material_top: above,
                 direct_ok: false,
+                free: Some(&free),
                 free_side: Some(side),
                 tabs: None,
                 ramp: false,

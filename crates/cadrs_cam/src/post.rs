@@ -7,10 +7,14 @@
 //!
 //! - **Laser (GRBL)**: `M4` dynamic power (`M3` constant when chosen) with the power as `S`;
 //!   `$32` laser mode makes GRBL stop the beam on rapids.
-//! - **Plasma (LinuxCNC QtPlasmaC, Mach3 THC)**: `M3`/`M5` fire the torch, the pierce is a
-//!   dwell at the pierce height, then the torch drops to its cut height; THC is enabled with
-//!   `M65`/`M64` (LinuxCNC) or `M1003`/`M1004`-style codes are left to the user (Mach3 uses the
-//!   screen THC by default).
+//! - **Plasma, LinuxCNC (QtPlasmaC)**: QtPlasmaC runs the torch's heights and the pierce
+//!   delay from its material table and strips Z from programs, so the program has no Z moves
+//!   and no pierce dwell (the torch's own values are written as a comment). `M190 P…` then
+//!   `M66 P3 L3 Q1` select the torch's material when it has a number; `M3 $0 S1` and `M5 $0`
+//!   fire and stop it; a torch without height control turns QtPlasmaC's off with `M62 P2`
+//!   (synchronised with motion) and on again after with `M63 P2`.
+//! - **Plasma, Mach3**: `M3`/`M5` fire the torch, the pierce is a dwell at the pierce height,
+//!   then the torch drops to its cut height; the screen's THC does the rest.
 //! - **Waterjet**: `M3`/`M5` open and close the jet, with the pierce dwell.
 //!
 //! [`post`] writes a whole program: header comments, units, the work offset, each operation
@@ -75,8 +79,29 @@ impl Dialect {
     }
 
     fn comment(self, text: &str) -> String {
-        // Parentheses can't nest in a comment.
-        format!("({})", text.replace(['(', ')'], ""))
+        // Parentheses can't nest in a comment, and controls alarm on characters outside ASCII.
+        let text: String = text
+            .chars()
+            .filter_map(|c| match c {
+                '(' | ')' => None,
+                '\u{2014}' | '\u{2013}' => Some('-'),
+                '\u{00d7}' => Some('x'),
+                '\u{00b0}' => Some('d'),
+                '\u{00d8}' | '\u{2300}' => Some('D'),
+                c if c.is_ascii() && !c.is_ascii_control() => Some(c),
+                _ => Some('?'),
+            })
+            .collect();
+        format!("({text})")
+    }
+
+    /// A dwell of `sec` seconds.
+    fn dwell(self, sec: f64) -> String {
+        match self {
+            // Fanuc-style P is in milliseconds; X takes seconds with a point.
+            Dialect::Fanuc | Dialect::Haas => format!("G4 X{}", decimal(sec, 3, true)),
+            _ => format!("G4 P{}", decimal(sec, 3, false)),
+        }
     }
 }
 
@@ -118,6 +143,10 @@ pub struct PostSettings {
     pub output_helices: bool,
     /// Decimals of coordinates.
     pub decimals: u32,
+    /// Always write a decimal point (`X30.`, not `X30`): a Fanuc-style control without
+    /// decimal point programming reads `X30` as 30 least increments (0.030 mm).
+    #[serde(default)]
+    pub decimal_point: bool,
     /// Retracts: to the machine's Z home (G28/G53) at each tool change.
     pub force_retract_on_tool_change: bool,
     /// At each work plane change.
@@ -155,6 +184,7 @@ impl PostSettings {
             arcs_yz: false,
             output_helices: d != Dialect::Mach3,
             decimals: if d == Dialect::Grbl { 3 } else { 4 },
+            decimal_point: matches!(d, Dialect::Fanuc | Dialect::Haas),
             force_retract_on_tool_change: kind.is_milling() && d != Dialect::Grbl,
             force_retract_on_plane_change: false,
             force_retract_on_end: kind.is_milling() && d != Dialect::Grbl,
@@ -231,6 +261,24 @@ pub fn datum_code(n: u32) -> String {
     }
 }
 
+/// `v` with at most `decimals` decimals and no trailing zeros; with `point`, integers keep
+/// their point (`30.`).
+fn decimal(v: f64, decimals: u32, point: bool) -> String {
+    let s = format!("{:.*}", decimals.min(6) as usize, v);
+    let mut s = if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    };
+    if s == "-0" {
+        s = "0".into();
+    }
+    if point && !s.contains('.') {
+        s.push('.');
+    }
+    s
+}
+
 struct Writer<'a> {
     s: &'a PostSettings,
     d: Dialect,
@@ -245,6 +293,8 @@ struct Writer<'a> {
     mode: Option<u8>,
     /// Number the next line even with numbers at tools only.
     number_next: bool,
+    /// Leave Z out of moves (the control runs the torch's heights).
+    no_z: bool,
 }
 
 impl<'a> Writer<'a> {
@@ -259,6 +309,7 @@ impl<'a> Writer<'a> {
             feed: None,
             mode: None,
             number_next: false,
+            no_z: false,
         }
     }
 
@@ -288,14 +339,7 @@ impl<'a> Writer<'a> {
     }
 
     fn num(&self, v: f64) -> String {
-        let d = self.s.decimals.clamp(0, 6) as usize;
-        let s = format!("{:.*}", d, v * self.k);
-        let s = if s.contains('.') {
-            s.trim_end_matches('0').trim_end_matches('.').to_string()
-        } else {
-            s
-        };
-        if s == "-0" { "0".into() } else { s }
+        decimal(v * self.k, self.s.decimals, self.s.decimal_point)
     }
 
     fn feed_word(&mut self, f: f64) -> String {
@@ -323,7 +367,8 @@ impl<'a> Writer<'a> {
     /// The axis words of a move to `p` (only the axes that change).
     fn axes(&mut self, p: P3) -> String {
         let mut w = String::new();
-        for (i, a) in ["X", "Y", "Z"].iter().enumerate() {
+        let n = if self.no_z { 2 } else { 3 };
+        for (i, a) in ["X", "Y", "Z"].iter().enumerate().take(n) {
             let v = self.num(p[i]);
             let old = self.at[i].map(|o| self.num(o));
             if old.as_deref() != Some(v.as_str()) {
@@ -379,7 +424,7 @@ impl<'a> Writer<'a> {
         let mut axes = String::new();
         for (k, a) in ["X", "Y", "Z"].iter().enumerate() {
             // An arc writes X and Y always (a full circle ends where it starts).
-            if k < 2 || self.at[k].map(|o| self.num(o)) != Some(self.num(to[k])) {
+            if k < 2 || (!self.no_z && self.at[k].map(|o| self.num(o)) != Some(self.num(to[k]))) {
                 let _ = write!(axes, " {a}{}", self.num(to[k]));
             }
             self.at[k] = Some(to[k]);
@@ -434,9 +479,9 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         Dialect::LinuxCnc => w.block(&format!("G90 G94{plane} G40 G49 {unit} G64 P0.01")),
         _ => w.block(&format!("G90 G94{plane} G40 G49 G80 {unit}")),
     }
-    if machine.kind == MachineKind::Plasma && d == Dialect::LinuxCnc {
-        // QtPlasmaC: cut mode 1, take the materials from the table.
-        w.comment("QtPlasmaC: torch height control from the material table");
+    if qtplasmac(machine) {
+        w.comment("QtPlasmaC: torch heights and pierce delay from the material table");
+        w.no_z = true;
     }
     let mut tool_in: Option<u32> = None;
     let mut datum: Option<u32> = None;
@@ -499,7 +544,9 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         post_moves(&mut w, op, machine, s, beam, &mut coolant);
     }
     // End.
-    if beam {
+    if qtplasmac(machine) {
+        w.block("M5 $0");
+    } else if beam {
         w.block("M5");
     } else {
         w.block("M5");
@@ -517,9 +564,14 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
     Ok(w.out)
 }
 
+/// A LinuxCNC plasma table: QtPlasmaC.
+fn qtplasmac(machine: &Machine) -> bool {
+    machine.kind == MachineKind::Plasma && machine.dialect == Dialect::LinuxCnc
+}
+
 fn retract_home(w: &mut Writer, d: Dialect) {
     match d {
-        Dialect::Fanuc | Dialect::Haas => w.block("G91 G28 Z0"),
+        Dialect::Fanuc | Dialect::Haas => w.block("G91 G28 Z0."),
         Dialect::LinuxCnc | Dialect::Mach3 => w.block("G53 G0 Z0"),
         Dialect::Grbl => w.block("G53 G0 Z-1"),
     }
@@ -561,6 +613,23 @@ fn post_moves(
     } else {
         op.toolpath.steps.clone()
     };
+    let qtp = qtplasmac(machine);
+    if qtp {
+        let b = &tool.beam;
+        w.comment(&format!(
+            "Torch: pierce {} s at {} mm, cut at {} mm",
+            decimal(b.pierce_delay, 2, false),
+            decimal(b.pierce_height, 2, false),
+            decimal(b.cut_height, 2, false)
+        ));
+        if b.material > 0 {
+            w.block(&format!("M190 P{}", b.material));
+            w.block("M66 P3 L3 Q1");
+        }
+        if !b.thc {
+            w.block("M62 P2");
+        }
+    }
     for st in &steps {
         match st {
             Step::Comment(c) => w.comment(c),
@@ -623,15 +692,9 @@ fn post_moves(
                     w.block("M9");
                 }
             }
-            Step::Dwell(sec) => {
-                let v = match d {
-                    // Fanuc-style P is in milliseconds when it has no point; use X seconds.
-                    Dialect::Fanuc | Dialect::Haas => format!("G4 X{sec:.3}"),
-                    _ => format!("G4 P{sec:.3}"),
-                };
-                let v = v.trim_end_matches('0').trim_end_matches('.').to_string();
-                w.block(&v);
-            }
+            // QtPlasmaC pierces for the material's delay itself.
+            Step::Dwell(_) if qtp => {}
+            Step::Dwell(sec) => w.block(&d.dwell(*sec)),
             Step::Rapid(p) => {
                 // A laser in GRBL laser mode turns off on G0 itself.
                 w.rapid(*p);
@@ -673,9 +736,8 @@ fn post_moves(
             }
         }
     }
-    if w.mode.is_some_and(|m| (81..=89).contains(&m)) {
-        w.block("G80");
-        w.mode = None;
+    if qtp && !tool.beam.thc {
+        w.block("M63 P2");
     }
 }
 
@@ -747,8 +809,7 @@ fn post_drill(
                         && (seg.from[2] - c.bottom).abs() < 1e-9
                         && seg.to[2] > seg.from[2]
                     {
-                        let line = format!("G4 P{:.3}", c.dwell);
-                        w.block(&line);
+                        w.block(&d.dwell(c.dwell));
                     }
                     w.linear(seg.to, f)
                 }
@@ -1086,12 +1147,49 @@ mod tests {
             operations: vec![op],
         };
         let nc = post(&p, &m, &m.post).unwrap();
-        assert!(nc.contains("G98 G83 X10 Y20 Z-12 R2 Q3 F120"), "{nc}");
+        assert!(nc.contains("G98 G83 X10. Y20. Z-12. R2. Q3. F120"), "{nc}");
+        assert_points(&nc);
         let mut s = m.post.clone();
         s.canned_peck = false;
         let nc = post(&p, &m, &s).unwrap();
         assert!(!nc.contains("G83"));
-        assert!(nc.contains("Z-12"));
+        assert!(nc.contains("Z-12."));
+        assert_points(&nc);
+        // Without decimal points (LinuxCNC-style), integers stay bare.
+        s.decimal_point = false;
+        let nc = post(&p, &m, &s).unwrap();
+        assert!(nc.contains("Z-12"), "{nc}");
+        assert!(!nc.contains("Z-12."), "{nc}");
+    }
+
+    /// Every dimension word (X Y Z I J K R Q) in `nc` has a decimal point.
+    fn assert_points(nc: &str) {
+        for line in nc.lines() {
+            if line.starts_with('(') || line.starts_with('%') {
+                continue;
+            }
+            for word in line.split_whitespace() {
+                let mut c = word.chars();
+                let a = c.next().unwrap();
+                let rest: String = c.collect();
+                if "XYZIJKRQ".contains(a) && rest.parse::<f64>().is_ok() {
+                    assert!(rest.contains('.'), "{word} in {line}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dwells_and_comments_suit_the_dialect() {
+        assert_eq!(Dialect::Fanuc.dwell(1.0), "G4 X1.");
+        assert_eq!(Dialect::Haas.dwell(0.5), "G4 X0.5");
+        assert_eq!(Dialect::LinuxCnc.dwell(0.5), "G4 P0.5");
+        assert_eq!(Dialect::Grbl.dwell(2.0), "G4 P2");
+        assert_eq!(
+            Dialect::Fanuc.comment("D6 end mill \u{2014} Ø6 (x2) 45°"),
+            "(D6 end mill - D6 x2 45d)"
+        );
+        assert!(Dialect::Fanuc.comment("caf\u{e9}").is_ascii());
     }
 
     #[test]
@@ -1125,5 +1223,193 @@ mod tests {
             file_name("My part (v2)", Dialect::LinuxCnc),
             "My_part__v2.ngc"
         );
+    }
+
+    #[test]
+    fn qtplasmac_leaves_heights_to_the_material() {
+        let m = machine(MachineKind::Plasma, Dialect::LinuxCnc);
+        let mut tool = Tool::new(ToolKind::Plasma, 1.5);
+        tool.beam.material = 3;
+        tool.beam.thc = false;
+        tool.beam.pierce_delay = 0.5;
+        let mut op = square_op(tool, true);
+        // A pierce at its height with its dwell, as the beam strategies make it.
+        op.toolpath.steps.insert(1, Step::Rapid([0.0, 0.0, 3.8]));
+        op.toolpath.steps.insert(3, Step::Dwell(0.5));
+        let p = NcProgram {
+            name: "Bracket".into(),
+            number: 1,
+            operations: vec![op],
+        };
+        let nc = post(&p, &m, &m.post).unwrap();
+        let body: Vec<&str> = nc.lines().filter(|l| !l.starts_with('(')).collect();
+        assert!(body.iter().all(|l| !l.contains('Z')), "{nc}");
+        assert!(body.iter().all(|l| !l.starts_with("G4")), "{nc}");
+        let at = |code: &str| {
+            body.iter()
+                .position(|l| *l == code)
+                .unwrap_or_else(|| panic!("{code} in {nc}"))
+        };
+        assert!(at("M190 P3") < at("M66 P3 L3 Q1"));
+        assert!(at("M66 P3 L3 Q1") < at("M3 $0 S1"));
+        assert!(at("M62 P2") < at("M3 $0 S1"));
+        assert!(at("M63 P2") > at("M3 $0 S1"));
+        assert!(
+            nc.contains("(Torch: pierce 0.5 s at 3.8 mm, cut at 1.5 mm)"),
+            "{nc}"
+        );
+    }
+
+    /// Where a program takes the tool: every G0/G1/G2/G3 move read back (absolute XYZ, I/J from
+    /// the start), as points along it every so often. Panics on an arc whose ends aren't the
+    /// same distance from its centre.
+    fn read_back(nc: &str) -> Vec<P3> {
+        let mut pos: [Option<f64>; 3] = [None; 3];
+        let mut mode = 0u8;
+        let mut out = Vec::new();
+        for line in nc.lines() {
+            let line = line.split('(').next().unwrap().trim();
+            let words: Vec<&str> = line
+                .split_whitespace()
+                .filter(|w| !w.starts_with('N'))
+                .collect();
+            if words.is_empty() || words[0] == "%" {
+                continue;
+            }
+            // Machine-coordinate and home moves leave the work coordinates.
+            if words.iter().any(|w| matches!(*w, "G28" | "G53" | "G91")) {
+                pos[2] = None;
+                continue;
+            }
+            let mut to = pos;
+            let (mut i, mut j) = (None, None);
+            let mut moved = false;
+            for w in &words {
+                let (a, v) = w.split_at(1);
+                match a {
+                    "G" => match v {
+                        "0" | "00" => mode = 0,
+                        "1" | "01" => mode = 1,
+                        "2" | "02" => mode = 2,
+                        "3" | "03" => mode = 3,
+                        _ => {}
+                    },
+                    "X" | "Y" | "Z" => {
+                        let k = "XYZ".find(a).unwrap();
+                        to[k] = Some(v.parse().unwrap_or_else(|_| panic!("{w} in {line}")));
+                        moved = true;
+                    }
+                    "I" => i = Some(v.parse::<f64>().unwrap()),
+                    "J" => j = Some(v.parse::<f64>().unwrap()),
+                    _ => {}
+                }
+            }
+            if !moved || to.iter().any(|c| c.is_none()) {
+                pos = to;
+                continue;
+            }
+            let b = [to[0].unwrap(), to[1].unwrap(), to[2].unwrap()];
+            if let (true, [Some(x), Some(y), Some(z)]) = (mode >= 2, pos) {
+                let c = [x + i.unwrap(), y + j.unwrap()];
+                let (r0, r1) = (
+                    crate::geom::dist2([x, y], c),
+                    crate::geom::dist2([b[0], b[1]], c),
+                );
+                assert!(
+                    (r0 - r1).abs() < 2e-3,
+                    "an arc's ends {r0} and {r1} from its centre: {line}"
+                );
+                let (a0, mut a1) = ((y - c[1]).atan2(x - c[0]), (b[1] - c[1]).atan2(b[0] - c[0]));
+                let cw = mode == 2;
+                if cw && a1 >= a0 - 1e-12 {
+                    a1 -= std::f64::consts::TAU;
+                } else if !cw && a1 <= a0 + 1e-12 {
+                    a1 += std::f64::consts::TAU;
+                }
+                for k in 0..=16 {
+                    let f = k as f64 / 16.0;
+                    let a = a0 + (a1 - a0) * f;
+                    out.push([c[0] + r0 * a.cos(), c[1] + r0 * a.sin(), z + (b[2] - z) * f]);
+                }
+            } else {
+                out.push(b);
+            }
+            pos = to;
+        }
+        out
+    }
+
+    fn dist_to_path(q: P3, segs: &[crate::toolpath::Segment]) -> f64 {
+        segs.iter()
+            .map(|s| {
+                let d = crate::geom::sub(s.to, s.from);
+                let l2 = crate::geom::dot(d, d);
+                let t = if l2 < 1e-18 {
+                    0.0
+                } else {
+                    (crate::geom::dot(crate::geom::sub(q, s.from), d) / l2).clamp(0.0, 1.0)
+                };
+                dist(q, crate::geom::lerp(s.from, s.to, t))
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Real toolpaths (a multi-pass profile with arc leads and a zigzag rough) posted for every
+    /// mill dialect and read back: every point the program moves through lies on the toolpath,
+    /// and every arc is a true arc.
+    #[test]
+    fn programs_read_back_onto_their_toolpaths() {
+        use crate::strategy::testing::{pocket_block, stock_for};
+        use crate::strategy::{CuttingMethod, Input, Params, Pattern, generate};
+        let model = pocket_block();
+        let stock = stock_for(&model, 5.0, 2.0);
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let mut ops = Vec::new();
+        for pattern in [Pattern::Profile2D, Pattern::Rough2D] {
+            let mut p = Params::new(pattern, &tool, MachineKind::Mill);
+            p.step_down = 5.0;
+            p.passes = 2;
+            p.cutting_method = CuttingMethod::Zigzag;
+            let input = Input {
+                model: &model,
+                stock: &stock,
+                tool: &tool,
+                machine: MachineKind::Mill,
+                params: &p,
+                rest: None,
+            };
+            let tp = generate(&input).unwrap();
+            ops.push(NcOperation {
+                name: format!("{pattern:?}"),
+                tool: tool.clone(),
+                tool_number: 1,
+                toolpath: tp,
+                coolant: Coolant::Off,
+                datum: 1,
+                stop_before: false,
+                force_tool_change: false,
+            });
+        }
+        for d in Dialect::ALL {
+            let mut m = machine(MachineKind::Mill, Dialect::Fanuc);
+            m.dialect = d;
+            let s = PostSettings::for_dialect(d, MachineKind::Mill);
+            let p = NcProgram {
+                name: "Block".into(),
+                number: 1,
+                operations: ops.clone(),
+            };
+            let nc = post(&p, &m, &s).unwrap();
+            let segs: Vec<_> = ops
+                .iter()
+                .flat_map(|o| o.toolpath.motion([0.0, 0.0, 100.0], 5000.0))
+                .collect();
+            let pts = read_back(&nc);
+            assert!(pts.len() > 100, "{d:?}");
+            for q in pts {
+                let e = dist_to_path(q, &segs);
+                assert!(e < 0.01, "{d:?}: {q:?} is {e} mm off the toolpath");
+            }
+        }
     }
 }

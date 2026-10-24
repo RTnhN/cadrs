@@ -124,6 +124,7 @@ impl Default for CamUi {
 fn flag_pending_work(
     computed: Res<Computed>,
     dialog: Option<Res<dialogs::CamDialog>>,
+    preview: Option<Res<preview::PreviewState>>,
     mut pending: ResMut<cadrs_ui::PendingWork>,
     mut why: ResMut<cadrs_ui::PendingWhy>,
 ) {
@@ -131,6 +132,10 @@ fn flag_pending_work(
     if computed.busy() || waiting {
         pending.0 = true;
         why.add("cam toolpaths");
+    }
+    if preview.is_some_and(|p| p.checking()) {
+        pending.0 = true;
+        why.add("cam verify");
     }
 }
 

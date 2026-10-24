@@ -1161,6 +1161,11 @@ impl Draft {
                     "Decimal places",
                     s.decimals as i64,
                 ));
+                f.push(Field::check(
+                    "dec-point",
+                    "Always write a decimal point",
+                    s.decimal_point,
+                ));
                 if machine.kind.is_milling() {
                     f.push(Field::check(
                         "ret-tool",
@@ -1413,6 +1418,11 @@ impl Draft {
                             Unit::Mm,
                         ));
                         f.push(Field::check("thc", "Torch height control", tool.beam.thc));
+                        f.push(Field::count(
+                            "material",
+                            "Material number (0: as set)",
+                            tool.beam.material as i64,
+                        ));
                     }
                     if tool.kind != ToolKind::Laser {
                         f.push(Field::number(
@@ -2245,6 +2255,7 @@ impl Draft {
                     ("arcs", Value::Bool(b)) => s.output_arcs = *b,
                     ("helices", Value::Bool(b)) => s.output_helices = *b,
                     ("decimals", Value::Number(n)) => s.decimals = n.clamp(0.0, 6.0) as u32,
+                    ("dec-point", Value::Bool(b)) => s.decimal_point = *b,
                     ("ret-tool", Value::Bool(b)) => s.force_retract_on_tool_change = *b,
                     ("ret-plane", Value::Bool(b)) => s.force_retract_on_plane_change = *b,
                     ("ret-end", Value::Bool(b)) => s.force_retract_on_end = *b,
@@ -2384,6 +2395,7 @@ impl Draft {
                     ("pierce-h", Value::Number(n)) => tool.beam.pierce_height = *n,
                     ("cut-h", Value::Number(n)) => tool.beam.cut_height = *n,
                     ("thc", Value::Bool(b)) => tool.beam.thc = *b,
+                    ("material", Value::Number(n)) => tool.beam.material = n.max(0.0) as u32,
                     ("air", Value::Bool(b)) => tool.beam.air_assist = *b,
                     ("beam-passes", Value::Number(n)) => {
                         tool.beam.passes = n.clamp(1.0, 50.0) as u32

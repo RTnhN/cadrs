@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use cadrs_core::cam::cadrs_cam::Frame;
 use cadrs_core::cam::cadrs_cam::heightmap::HeightMap;
 use cadrs_core::cam::cadrs_cam::model::Model;
-use cadrs_core::cam::cadrs_cam::toolpath::{Stats, Toolpath};
+use cadrs_core::cam::cadrs_cam::toolpath::{Segment, Stats, Toolpath};
 use cadrs_core::cam::program::{self, OpInput};
 use cadrs_core::cam::{CamId, CamStudio, OpKind, geometry};
 use cadrs_core::{ElementId, Part};
@@ -32,6 +32,8 @@ pub struct Done {
     pub toolpath: Arc<Toolpath>,
     pub frame: Frame,
     pub stats: Stats,
+    /// The model it was calculated against (the kernel's, at the pattern's tolerance).
+    pub model: Arc<Model>,
 }
 
 pub type Outcome = Result<Done, String>;
@@ -85,8 +87,11 @@ enum Stage {
         job: cadrs_core::rebuild::PendingJob<Result<Model, String>>,
         sectioned: bool,
     },
-    /// The strategy on a worker thread.
-    Generate(std::sync::Mutex<mpsc::Receiver<Result<Toolpath, String>>>),
+    /// The strategy on a worker thread, with the model it runs on.
+    Generate(
+        std::sync::Mutex<mpsc::Receiver<Result<Toolpath, String>>>,
+        Arc<Model>,
+    ),
 }
 
 struct Running {
@@ -96,8 +101,14 @@ struct Running {
     cam: Arc<CamStudio>,
     input: Arc<OpInput>,
     stage: Stage,
-    /// The in-process stock for rest machining.
-    rest: Option<Arc<HeightMap>>,
+    /// The toolpaths above it, for rest machining.
+    rest: Option<Arc<RestInput>>,
+}
+
+/// What rest machining starts from: the moves of the toolpaths above an operation, with their
+/// tools. The worker simulates them into the in-process stock before the strategy runs.
+pub struct RestInput {
+    ops: Vec<(cadrs_core::cam::cadrs_cam::tool::Tool, Vec<Segment>)>,
 }
 
 /// The job cache and what's being computed.
@@ -447,7 +458,7 @@ fn start(world: &mut World, cam: Arc<CamStudio>, op: CamId, key: u64, parts: &[P
             }
             return Started::Waiting;
         }
-        rest = rest_stock(world, &cam, op, parts, &input).map(Arc::new);
+        rest = rest_input(world, &cam, op, &input).map(Arc::new);
     }
     let mk = model_key(&cam, &input, &[]);
     let stage = match world.resource::<Computed>().models.get(&mk).cloned() {
@@ -484,7 +495,7 @@ fn start_generate(
     cam: &CamStudio,
     input: &Arc<OpInput>,
     model: Arc<Model>,
-    rest: Option<Arc<HeightMap>>,
+    rest: Option<Arc<RestInput>>,
 ) -> Stage {
     let levels = program::section_levels(input, &model);
     if levels.iter().any(|z| model.sections.get(*z).is_none()) {
@@ -500,13 +511,15 @@ fn start_generate(
     spawn_generate(input.clone(), model, rest)
 }
 
-fn spawn_generate(input: Arc<OpInput>, model: Arc<Model>, rest: Option<Arc<HeightMap>>) -> Stage {
+fn spawn_generate(input: Arc<OpInput>, model: Arc<Model>, rest: Option<Arc<RestInput>>) -> Stage {
     let (tx, rx) = mpsc::channel();
+    let m = model.clone();
     let spawned = std::thread::Builder::new()
         .name("cam-toolpath".into())
         .spawn(move || {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                program::generate(&input, &model, rest.as_deref())
+                let rest = rest.map(|r| rest_stock(&input, &model, &r));
+                program::generate(&input, &model, rest.as_ref())
             }))
             .unwrap_or_else(|_| Err("The strategy failed unexpectedly".into()));
             let _ = tx.send(r);
@@ -514,7 +527,7 @@ fn spawn_generate(input: Arc<OpInput>, model: Arc<Model>, rest: Option<Arc<Heigh
     if spawned.is_err() {
         warn!("cam: couldn't start a toolpath thread");
     }
-    Stage::Generate(std::sync::Mutex::new(rx))
+    Stage::Generate(std::sync::Mutex::new(rx), m)
 }
 
 /// Moves a running computation along; its outcome when done.
@@ -553,7 +566,7 @@ fn step(world: &mut World, r: &mut Running, parts: &[Part]) -> Option<Outcome> {
             };
             None
         }
-        Stage::Generate(rx) => match rx
+        Stage::Generate(rx, model) => match rx
             .get_mut()
             .map_err(|_| mpsc::TryRecvError::Disconnected)
             .and_then(|r| r.try_recv())
@@ -565,6 +578,7 @@ fn step(world: &mut World, r: &mut Running, parts: &[Part]) -> Option<Outcome> {
                     stats: tp.stats(start, rapid),
                     toolpath: Arc::new(tp),
                     frame: r.input.frame,
+                    model: model.clone(),
                 }
             })),
             Err(mpsc::TryRecvError::Empty) => None,
@@ -575,42 +589,40 @@ fn step(world: &mut World, r: &mut Running, parts: &[Part]) -> Option<Outcome> {
     }
 }
 
-/// The in-process stock the toolpaths above `op` leave, in `op`'s coordinates (when they
-/// share them).
-fn rest_stock(
-    world: &World,
-    cam: &CamStudio,
-    op: CamId,
-    parts: &[Part],
-    input: &OpInput,
-) -> Option<HeightMap> {
-    use cadrs_core::cam::cadrs_cam::sim::{SimOp, sim_cell, simulate_mill};
-    let (job, setup, _) = cam.operation(op)?;
+/// The toolpaths above `op` (all calculated, in `op`'s coordinates): what its in-process
+/// stock is cut from. `None` when one is on another work plane (its stock isn't on this one's
+/// grid).
+fn rest_input(world: &World, cam: &CamStudio, op: CamId, input: &OpInput) -> Option<RestInput> {
+    let (_, setup, _) = cam.operation(op)?;
     let c = world.resource::<Computed>();
-    let mut motions = Vec::new();
+    let mut ops = Vec::new();
     for o in setup.operations.iter().take_while(|o| o.id != op) {
         if o.suppressed || !matches!(o.kind, OpKind::Toolpath(_)) {
             continue;
         }
         let d = c.current(o.id)?;
         if d.frame != input.frame {
-            // Another work plane: its stock isn't on this one's grid.
             return None;
         }
         let tool = cam.tool_for(o.id)?.tool.clone();
         let start = [0.0, 0.0, input.stock.bounds.max[2] + 50.0];
-        motions.push((tool, d.toolpath.motion(start, input.machine.rapid_rate)));
+        ops.push((tool, d.toolpath.motion(start, input.machine.rapid_rate)));
     }
-    let bodies = program::job_bodies(cam, job, parts);
-    let model = geometry::model_from_parts(&bodies, &input.frame);
-    let ops: Vec<SimOp> = motions
+    Some(RestInput { ops })
+}
+
+/// The in-process stock `rest` leaves (on the worker thread).
+fn rest_stock(input: &OpInput, model: &Model, rest: &RestInput) -> HeightMap {
+    use cadrs_core::cam::cadrs_cam::sim::{SimOp, sim_cell, simulate_mill};
+    let ops: Vec<SimOp> = rest
+        .ops
         .iter()
         .map(|(t, m)| SimOp {
             tool: t,
             segments: m,
         })
         .collect();
-    Some(simulate_mill(&input.stock, &model, &ops, sim_cell(&input.stock, 0.2)).stock)
+    simulate_mill(&input.stock, model, &ops, sim_cell(&input.stock, 0.2)).stock
 }
 
 #[cfg(test)]

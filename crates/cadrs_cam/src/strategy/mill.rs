@@ -15,7 +15,7 @@ use crate::region::{self, Face, Region};
 use crate::toolpath::Toolpath;
 
 use super::link::{Builder, Cut};
-use super::path::{Contour, chain, hatch, nearest_order, region_contours};
+use super::path::{Contour, chain, hatch, nearest_order, nearest_order_indexed, region_contours};
 use super::{CuttingMethod, Direction, Input, MachineBy, Side, SubPattern};
 
 /// The material at or above `z` seen from above.
@@ -47,7 +47,8 @@ fn keep_out_z(input: &Input, z: f64) -> f64 {
 fn free_centres_in(input: &Input, solid: &Region, limit: &Region) -> Region {
     let p = input.params;
     let r = input.tool.radius();
-    let keep_out = region::offset(solid, r + p.wall_stock);
+    // Padded by the offset's tolerance: its round corners' chords cut inside the true arc.
+    let keep_out = region::offset(solid, r + p.wall_stock + region::ARC_TOLERANCE);
     region::difference(limit, &keep_out)
 }
 
@@ -135,6 +136,8 @@ fn smooth(r: &Region, radius: f64) -> Region {
 fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
     let p = b.input.params;
     let dir = p.direction;
+    // The face is where the centre may go: links stay down only inside it.
+    let free = face.rings();
     match p.sub_pattern {
         SubPattern::Offset => {
             let rings = offset_rings(face, p.step_over, dir);
@@ -146,6 +149,7 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                         material_top,
                         // Between rings the tool crosses what the inner rings cleared.
                         direct_ok: !first,
+                        free: Some(&free),
                         free_side: None,
                         tabs: None,
                         ramp: true,
@@ -167,6 +171,7 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                 let cut = Cut {
                     material_top,
                     direct_ok: !first && zig,
+                    free: Some(&free),
                     free_side: None,
                     tabs: None,
                     ramp: true,
@@ -180,6 +185,7 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                 let cut = Cut {
                     material_top,
                     direct_ok: false,
+                    free: None,
                     free_side: None,
                     tabs: None,
                     ramp: true,
@@ -224,16 +230,17 @@ fn selected_faces(input: &Input) -> Vec<(Region, f64)> {
 }
 
 /// Face: flat passes over the stock's top (or the selected faces), down to the bottom height.
+/// Each level's passes keep to where the tool's centre is clear of the part there; over the
+/// whole stock they run off its edges (plunging outside it), over picked faces they ramp in.
 pub fn face(input: &Input) -> Result<Toolpath, String> {
     let p = input.params;
     let r = input.tool.radius();
-    let areas: Region = {
-        let sel = selected_faces(input);
-        if sel.is_empty() {
-            input.stock.footprint()
-        } else {
-            sel.into_iter().flat_map(|(r, _)| r).collect()
-        }
+    let sel = selected_faces(input);
+    let picked = !sel.is_empty();
+    let areas: Region = if picked {
+        sel.into_iter().flat_map(|(r, _)| r).collect()
+    } else {
+        input.stock.footprint()
     };
     let top = input.top();
     let bottom = input.bottom() + p.floor_stock;
@@ -241,30 +248,52 @@ pub fn face(input: &Input) -> Result<Toolpath, String> {
     let zig = p.cutting_method == CuttingMethod::Zigzag;
     let mut b = Builder::new(input);
     let covered = region::offset(&areas, (r - p.step_over * 0.5).max(0.0));
+    // Over the whole stock, run on and off by the radius plus a little so the face is cut
+    // clean; over picked faces, stay over them.
+    let ext = if picked { 0.0 } else { r + 2.0 };
+    let zs: Vec<f64> = levels.iter().map(|z| keep_out_z(input, *z)).collect();
+    let solids = materials_above(input, &zs);
     let mut material_top = top;
-    for z in levels {
-        let lines = hatch(&covered, p.angle, p.step_over, zig);
+    for (z, solid) in levels.into_iter().zip(&solids) {
+        let free = free_centres_in(input, solid, &region::offset(&covered, ext));
+        let lines = hatch(
+            &region::intersection(&free, &covered),
+            p.angle,
+            p.step_over,
+            zig,
+        );
         let mut first = true;
-        for l in lines {
-            // Run on and off by the radius plus a little so the face is cut clean.
-            let (a, e) = (l[0], l[l.len() - 1]);
-            let d = super::path::unit([e[0] - a[0], e[1] - a[1]]);
-            let ext = r + 2.0;
-            let a = [a[0] - d[0] * ext, a[1] - d[1] * ext];
-            let e = [e[0] + d[0] * ext, e[1] + d[1] * ext];
+        for mut l in lines {
+            if ext > 0.0 && l.len() >= 2 {
+                let n = l.len();
+                let (a, e) = (l[0], l[n - 1]);
+                let d = super::path::unit([e[0] - a[0], e[1] - a[1]]);
+                let a2 = [a[0] - d[0] * ext, a[1] - d[1] * ext];
+                let e2 = [e[0] + d[0] * ext, e[1] + d[1] * ext];
+                if region::segment_inside(&free, a2, a) {
+                    l[0] = a2;
+                }
+                if region::segment_inside(&free, e, e2) {
+                    l[n - 1] = e2;
+                }
+            }
             let cut = Cut {
                 material_top,
                 direct_ok: zig && !first,
+                free: Some(&free),
                 free_side: None,
                 tabs: None,
-                ramp: false,
+                // Entries off the stock plunge; over picked faces they ramp.
+                ramp: picked,
                 clear: None,
             };
-            // Entries are off the stock: plunge.
-            b.cut(&Contour::open(vec![a, e]), z, &cut);
+            b.cut(&Contour::open(l), z, &cut);
             first = false;
         }
         material_top = z;
+    }
+    if !b.moved() {
+        return Err("The tool doesn't fit anywhere to face".into());
     }
     Ok(b.finish())
 }
@@ -497,7 +526,7 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
             let extra = if p.side == Side::On {
                 0.0
             } else {
-                r + p.wall_stock
+                r + p.wall_stock + region::ARC_TOLERANCE
             };
             profile_paths(input, extra + k as f64 * p.step_over)
         })
@@ -523,14 +552,9 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
             .iter()
             .map(|v| v.last().cloned().unwrap_or(Contour::open(vec![[0.0, 0.0]])))
             .collect();
-        let ordered = nearest_order(firsts.clone(), start);
-        ordered
-            .iter()
-            .filter_map(|o| {
-                firsts
-                    .iter()
-                    .position(|f| f.pts.iter().any(|p| o.pts.contains(p)))
-            })
+        nearest_order_indexed(firsts, start)
+            .into_iter()
+            .map(|(k, _)| k)
             .collect()
     };
     // Lead-ins only start where the tool can come down: off the stock, or (below the first
@@ -544,6 +568,8 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         &input.stock.footprint(),
     );
     let run = |b: &mut Builder, ci: usize, li: usize, z: f64, above: f64| {
+        // The band the pass before cut at this depth.
+        let mut cut_before: Option<Region> = None;
         for (k, path) in paths_by_contour[ci].iter().enumerate() {
             let near = b.at.map_or(path.pts[0], |a| [a[0], a[1]]);
             let path = if path.closed {
@@ -551,20 +577,27 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
             } else {
                 path.clone()
             };
-            let clear = if li > 0 {
-                region::union(&outside, &region::stroke(&path.walk(), 2.0 * r - 0.02))
+            let band = region::stroke(&path.walk(), 2.0 * r - 0.02);
+            let mut clear = if li > 0 {
+                region::union(&outside, &band)
             } else {
                 outside.clone()
             };
+            if let Some(before) = &cut_before {
+                clear = region::union(&clear, before);
+            }
             let cut = Cut {
                 material_top: above,
+                // To the next pass at depth only through what's cut (checked swept).
                 direct_ok: k > 0,
+                free: None,
                 free_side: side,
                 tabs,
                 ramp: true,
                 clear: Some(&clear),
             };
             b.cut(&path, z, &cut);
+            cut_before = Some(band);
         }
     };
     if by_levels {
@@ -653,16 +686,30 @@ pub fn chamfer(input: &Input) -> Result<Toolpath, String> {
     let start = [input.model.bounds().min[0], input.model.bounds().min[1]];
     let zs: Vec<f64> = paths.iter().map(|(_, z)| *z).collect();
     let cs: Vec<Contour> = paths.into_iter().map(|(c, _)| c).collect();
-    let ordered = nearest_order(cs.clone(), start);
-    for c in ordered {
-        let i = cs
-            .iter()
-            .position(|x| x.pts.iter().any(|p| c.pts.contains(p)))
-            .unwrap_or(0);
+    let everywhere = [super::everywhere(input)];
+    let mut solids: Vec<(f64, Region)> = Vec::new();
+    for (i, c) in nearest_order_indexed(cs, start) {
         let z = zs[i] - depth;
+        // Leads keep the tip `off` from the material at the tip's depth and, once past the
+        // chamfer's width from the path, the flank (`off + width` at the edge) too.
+        let solid = match solids.iter().find(|(sz, _)| (sz - z).abs() < 1e-9) {
+            Some((_, m)) => m.clone(),
+            None => {
+                let m = material_above(input, z);
+                solids.push((z, m.clone()));
+                m
+            }
+        };
+        let near = region::stroke(&c.walk(), 2.0 * width + 2e-3);
+        let keep_out = region::union(
+            &region::offset(&solid, off - 1e-3),
+            &region::difference(&region::offset(&solid, off + width), &near),
+        );
+        let free = region::difference(&everywhere, &keep_out);
         let cut = Cut {
             material_top: zs[i],
             direct_ok: false,
+            free: Some(&free),
             free_side: Some(free_side(p.direction)),
             tabs: None,
             ramp: false,
@@ -695,6 +742,7 @@ pub fn engrave(input: &Input) -> Result<Toolpath, String> {
             let cut = Cut {
                 material_top: above,
                 direct_ok: false,
+                free: None,
                 free_side: None,
                 tabs: None,
                 ramp: true,
@@ -973,5 +1021,92 @@ mod tests {
             rest: None,
         };
         assert!(generate(&input).is_err());
+    }
+
+    fn gouge(tp: &Toolpath, tool: &Tool) -> f64 {
+        let (g, at) = crate::strategy::testing::max_gouge(&pocket_block(), tool, tp);
+        assert!(g < 1e-3, "{g} mm into the part at {at:?}");
+        g
+    }
+
+    #[test]
+    fn face_of_a_picked_floor_keeps_off_its_walls() {
+        // The pocket's floor, 8 mm under the top and walled all round.
+        let tool = Tool::new(ToolKind::EndMill, 10.0);
+        let tp = run(Pattern::Face, tool.clone(), |p| {
+            p.drive.faces = vec!["floor".into()];
+            p.heights.bottom = crate::strategy::Height {
+                from: crate::strategy::HeightRef::Selection,
+                offset: 0.0,
+            };
+            p.step_down = 2.0;
+            p.floor_stock = 0.0;
+        });
+        gouge(&tp, &tool);
+        // It reaches the floor.
+        assert!(feeds(&tp).iter().any(|p| (p[2] - 12.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn links_that_stay_down_never_cross_the_part() {
+        // Every gap a "small gap" linked directly: the links must still go round or over the
+        // walls, never through them.
+        let tool = Tool::new(ToolKind::EndMill, 3.0);
+        for sub in [SubPattern::Offset, SubPattern::Parallel] {
+            let tp = run(Pattern::Rough2D, tool.clone(), |p| {
+                p.sub_pattern = sub;
+                p.cutting_method = CuttingMethod::Zigzag;
+                p.step_down = 4.0;
+                p.links.small_gap = 1e3;
+                p.links.small_gaps = crate::strategy::LinkAction::Direct;
+            });
+            gouge(&tp, &tool);
+        }
+        let tp = run(Pattern::Profile2D, tool.clone(), |p| {
+            p.passes = 3;
+            p.links.small_gap = 1e3;
+            p.links.small_gaps = crate::strategy::LinkAction::Direct;
+        });
+        gouge(&tp, &tool);
+    }
+
+    #[test]
+    fn chamfer_leads_stay_out_of_the_far_wall() {
+        // Leads of 12 mm in the 20 mm wide pocket would swing into its far wall.
+        let tool = Tool::new(ToolKind::ChamferMill, 6.0);
+        let tp = run(Pattern::Chamfer2D, tool, |p| {
+            p.depth = 0.5;
+            p.tip_offset = 0.5;
+            p.links.lead_radius = 12.0;
+        });
+        let mut at = [0.0; 3];
+        let off = 0.5;
+        for seg in tp.motion([0.0, 0.0, 50.0], 5000.0) {
+            let lead = matches!(
+                seg.kind,
+                Some(crate::toolpath::FeedKind::LeadIn | crate::toolpath::FeedKind::LeadOut)
+            );
+            if lead && seg.to[2] < 20.0 {
+                for q in [seg.from, seg.to] {
+                    // In the pocket: the tip stays `off` from all four walls.
+                    if q[0] > 15.0 && q[0] < 45.0 && q[1] > 10.0 && q[1] < 30.0 {
+                        assert!(
+                            q[0] >= 15.0 + off - 1e-3
+                                && q[0] <= 45.0 - off + 1e-3
+                                && q[1] >= 10.0 + off - 1e-3
+                                && q[1] <= 30.0 - off + 1e-3,
+                            "a lead into the wall at {q:?}"
+                        );
+                    } else {
+                        // Outside the block: off its outline.
+                        let dx = (-q[0]).max(q[0] - 60.0);
+                        let dy = (-q[1]).max(q[1] - 40.0);
+                        assert!(dx.max(dy) >= off - 1e-3, "a lead into the block at {q:?}");
+                    }
+                }
+            }
+            at = seg.to;
+        }
+        let _ = at;
     }
 }

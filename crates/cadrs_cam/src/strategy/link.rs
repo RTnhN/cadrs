@@ -9,7 +9,7 @@ use super::path::{Contour, lead_arc, lead_out_arc, ramp_along, with_tabs};
 use super::{Entry, Input, LeadKind, LinkAction};
 
 /// Points along an XY arc from `a` to `b` about `c` (for checking what a lead sweeps).
-fn arc_path(a: P2, b: P2, c: P2, cw: bool) -> Vec<P2> {
+pub(super) fn arc_path(a: P2, b: P2, c: P2, cw: bool) -> Vec<P2> {
     let mut v = vec![a];
     v.extend(
         crate::toolpath::arc_points([a[0], a[1], 0.0], [b[0], b[1], 0.0], c, cw, 0.01)
@@ -24,8 +24,12 @@ fn arc_path(a: P2, b: P2, c: P2, cw: bool) -> Vec<P2> {
 pub struct Cut<'a> {
     /// The top of the material over the cut: feeding starts the feed distance above it.
     pub material_top: f64,
-    /// The tool may stay down and feed straight from where it is (the way there is cleared).
+    /// The tool may stay down and feed straight from where it is, where the way there is
+    /// clear: inside `free` or, swept, inside `clear` (with neither, it never stays down).
     pub direct_ok: bool,
+    /// Where the tool's centre may go at the cut's depth without touching the part (the links
+    /// that stay down must keep to it): `None` unknown.
+    pub free: Option<&'a crate::region::Region>,
     /// The free side for leads (+1 left of the direction of travel, −1 right); `None`: no
     /// leads.
     pub free_side: Option<f64>,
@@ -172,7 +176,14 @@ impl<'a> Builder<'a> {
             l.large_gaps
         };
         let same_level = (at[2] - z).abs() < 1e-6;
-        if action == LinkAction::Direct && c.direct_ok && same_level {
+        // Staying down (or just over the material) only where the straight way is known clear.
+        let from = [at[0], at[1]];
+        let way_clear = c.direct_ok
+            && (c
+                .free
+                .is_some_and(|f| crate::region::segment_inside(f, from, xy))
+                || (c.clear.is_some() && self.swept_clear(&[from, xy], c.clear)));
+        if action == LinkAction::Direct && way_clear && same_level {
             self.feed([xy[0], xy[1], z], FeedKind::Link);
             return true;
         }
@@ -183,7 +194,7 @@ impl<'a> Builder<'a> {
         };
         // Retracts to the feed distance only stay down inside cleared areas; elsewhere go to the
         // rapid plane.
-        let action = if action == LinkAction::RetractToFeed && !c.direct_ok {
+        let action = if action == LinkAction::RetractToFeed && !way_clear {
             LinkAction::RetractToRapid
         } else {
             action
@@ -232,7 +243,7 @@ impl<'a> Builder<'a> {
                     Some((ctr, cw)) => arc_path(lead.0, pt, ctr, cw),
                     None => vec![lead.0, pt],
                 };
-                self.swept_clear(&path, cut.clear).then_some(lead)
+                self.lead_clear(&path, cut).then_some(lead)
             });
         let start = walk[0];
         let entry_xy = lead_in.map_or(start, |(s, _)| s);
@@ -314,17 +325,28 @@ impl<'a> Builder<'a> {
         match l.lead_out {
             LeadKind::Arc => {
                 let (e, ctr, cw) = lead_out_arc(pt, t, side, l.lead_radius, 90.0);
-                if self.swept_clear(&arc_path(pt, e, ctr, cw), cut.clear) {
+                if self.lead_clear(&arc_path(pt, e, ctr, cw), cut) {
                     self.arc([e[0], e[1], z], ctr, cw, FeedKind::LeadOut);
                 }
             }
             _ => {
                 let n = [-t[1] * side, t[0] * side];
                 let e = [pt[0] + n[0] * l.lead_radius, pt[1] + n[1] * l.lead_radius];
-                if self.swept_clear(&[pt, e], cut.clear) {
+                if self.lead_clear(&[pt, e], cut) {
                     self.feed([e[0], e[1], z], FeedKind::LeadOut);
                 }
             }
+        }
+    }
+
+    /// Whether a lead along `path` is clear: its centre stays in the cut's `free` region, or
+    /// what it sweeps stays in its `clear` region (with neither, anywhere is).
+    fn lead_clear(&self, path: &[P2], cut: &Cut<'_>) -> bool {
+        match cut.free {
+            Some(f) => path
+                .windows(2)
+                .all(|w| crate::region::segment_inside(f, w[0], w[1])),
+            None => self.swept_clear(path, cut.clear),
         }
     }
 
@@ -351,5 +373,101 @@ impl<'a> Builder<'a> {
     /// Whether anything was cut.
     pub fn moved(&self) -> bool {
         self.at.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::MachineKind;
+    use crate::region;
+    use crate::strategy::testing::{pocket_block, stock_for};
+    use crate::strategy::{Params, Pattern};
+    use crate::tool::{Tool, ToolKind};
+
+    /// Cuts two short lines at z = 5, `free` round them, and returns the steps after the first.
+    fn link(free: Option<&region::Region>, lead: bool) -> Vec<Step> {
+        let m = pocket_block();
+        let stock = stock_for(&m, 5.0, 2.0);
+        let tool = Tool::new(ToolKind::EndMill, 4.0);
+        let mut p = Params::new(Pattern::Rough2D, &tool, MachineKind::Mill);
+        p.links.small_gap = 100.0;
+        p.links.small_gaps = LinkAction::Direct;
+        p.links.lead_in = if lead { LeadKind::Arc } else { LeadKind::None };
+        p.links.lead_out = LeadKind::None;
+        p.links.lead_radius = 3.0;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        let mut b = Builder::new(&input);
+        let cut = |direct_ok| Cut {
+            material_top: 10.0,
+            direct_ok,
+            free,
+            free_side: lead.then_some(1.0),
+            tabs: None,
+            ramp: false,
+            clear: None,
+        };
+        b.cut(
+            &Contour::open(vec![[0.0, 0.0], [10.0, 0.0]]),
+            5.0,
+            &cut(false),
+        );
+        let n = b.steps.len();
+        b.cut(
+            &Contour::open(vec![[30.0, 0.0], [40.0, 0.0]]),
+            5.0,
+            &cut(true),
+        );
+        b.steps[n..].to_vec()
+    }
+
+    fn stays_down(steps: &[Step]) -> bool {
+        matches!(
+            steps.first(),
+            Some(Step::Feed {
+                kind: FeedKind::Link,
+                ..
+            })
+        )
+    }
+
+    #[test]
+    fn stays_down_only_where_the_way_is_free() {
+        let open = vec![region::rect([-10.0, -10.0], [50.0, 10.0])];
+        assert!(stays_down(&link(Some(&open), false)));
+        // A wall across the way (the free area split in two): up and over.
+        let split = region::difference(&open, &[region::rect([18.0, -20.0], [22.0, 20.0])]);
+        let steps = link(Some(&split), false);
+        assert!(!stays_down(&steps));
+        assert!(matches!(steps[0], Step::Rapid(p) if p[2] > 5.0));
+        // Unknown: never stays down.
+        assert!(!stays_down(&link(None, false)));
+    }
+
+    #[test]
+    fn leads_keep_to_the_free_area() {
+        let open = vec![region::rect([-10.0, -10.0], [50.0, 10.0])];
+        let has_lead = |s: &[Step]| {
+            s.iter().any(|s| {
+                matches!(
+                    s,
+                    Step::Arc {
+                        kind: FeedKind::LeadIn,
+                        ..
+                    }
+                )
+            })
+        };
+        assert!(has_lead(&link(Some(&open), true)));
+        // Free only along the line's band: no room for a 3 mm lead beside it.
+        let band = vec![region::rect([-10.0, -0.5], [50.0, 0.5])];
+        assert!(!has_lead(&link(Some(&band), true)));
     }
 }

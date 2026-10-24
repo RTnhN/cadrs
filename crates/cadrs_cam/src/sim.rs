@@ -108,20 +108,27 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
                 }
                 continue;
             }
-            // The flutes must reach over the material the cut leaves standing.
-            let step = (n / 8).max(1);
-            for i in (0..=n).step_by(step) {
-                let t = i as f64 / n as f64;
-                let p = crate::geom::lerp(s.from, s.to, t);
-                let top = max_in_disc(&map, [p[0], p[1]], r * 0.95);
-                if top != EMPTY && top as f64 - p[2] > flutes + 0.01 {
-                    if holder_hits.len() < MAX_REPORTED {
-                        holder_hits.push((k, p));
+            // The flutes must reach over the material standing where the tool goes: checked
+            // piece by piece as the move cuts its way, so a pass down a wall (whose flutes
+            // clear the wall above them as they go) isn't taken for the shank rubbing it.
+            let len3 = crate::geom::dist(s.from, s.to);
+            let pieces = ((len3 / (flutes / 4.0).max(map.cell)).ceil() as usize).clamp(1, 10_000);
+            let mut hit = false;
+            let mut from = s.from;
+            for i in 1..=pieces {
+                let p = crate::geom::lerp(s.from, s.to, i as f64 / pieces as f64);
+                if !hit {
+                    let top = max_in_disc(&map, [p[0], p[1]], r * 0.95);
+                    if top != EMPTY && top as f64 - p[2] > flutes + 0.01 {
+                        if holder_hits.len() < MAX_REPORTED {
+                            holder_hits.push((k, p));
+                        }
+                        hit = true;
                     }
-                    break;
                 }
+                removed += map.cut(op.tool, from, p);
+                from = p;
             }
-            removed += map.cut(op.tool, s.from, s.to);
         }
     }
     // Gouges and excess against the part.
@@ -374,6 +381,56 @@ mod tests {
         assert!(r.gouge_cells > 0);
         assert!((r.gouge_depth - 5.0).abs() < 0.05);
         assert_eq!(r.rapid_hits.len(), 1);
+    }
+
+    fn feed(from: P3, to: P3) -> Segment {
+        Segment {
+            from,
+            to,
+            feed: Some(500.0),
+            kind: None,
+            beam: false,
+            minutes: 0.01,
+        }
+    }
+
+    /// Flutes 10 long: down a 40 mm wall along 0.3 mm of wall stock (the flutes clear it as
+    /// they go) is fine; slotting 20 deep in one go buries the shank.
+    #[test]
+    fn flutes_too_short_only_where_the_shank_meets_material() {
+        let m = Model::from_triangles(
+            "wall",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [20.0, 20.0, 40.0])),
+        );
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [20.3, 20.0, 40.0]));
+        let mut tool = Tool::new(ToolKind::EndMill, 6.0);
+        tool.cutting_length = 10.0;
+        let down = vec![feed([23.0, 10.0, 40.0], [23.0, 10.0, 0.0])];
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &down,
+            }],
+            0.1,
+        );
+        assert!(r.holder_hits.is_empty(), "{:?}", r.holder_hits);
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [60.0, 20.0, 40.0]));
+        let slot = vec![
+            feed([40.0, 10.0, 45.0], [40.0, 10.0, 20.0]),
+            feed([40.0, 10.0, 20.0], [55.0, 10.0, 20.0]),
+        ];
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &slot,
+            }],
+            0.1,
+        );
+        assert!(!r.holder_hits.is_empty());
     }
 
     #[test]

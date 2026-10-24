@@ -28,7 +28,7 @@ pub mod path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::geom::Aabb;
+use crate::geom::{Aabb, P2};
 use crate::heightmap::HeightMap;
 use crate::machine::MachineKind;
 use crate::model::Model;
@@ -909,6 +909,21 @@ impl Stock {
     }
 }
 
+/// A rectangle far round the stock and the model: the whole plane as far as a strategy is
+/// concerned (the complement of a keep-out is this minus it).
+pub fn everywhere(input: &Input) -> crate::region::Ring {
+    let mut b = input.stock.bounds;
+    let m = input.model.bounds();
+    for k in 0..3 {
+        b.min[k] = b.min[k].min(m.min[k]);
+        b.max[k] = b.max[k].max(m.max[k]);
+    }
+    crate::region::rect(
+        [b.min[0] - 1e4, b.min[1] - 1e4],
+        [b.max[0] + 1e4, b.max[1] + 1e4],
+    )
+}
+
 /// What a strategy works from.
 pub struct Input<'a> {
     pub model: &'a Model,
@@ -933,6 +948,31 @@ impl Input<'_> {
             HeightRef::Origin => 0.0,
         };
         base + h.offset
+    }
+
+    /// The highest material over the disc of radius `r` round `c`: the stock as the operations
+    /// before left it, or the stock itself (the top of the box, or of a stock body over the
+    /// disc's centre and rim).
+    pub fn material_top(&self, c: P2, r: f64) -> f64 {
+        if let Some(rest) = self.rest {
+            let flat = Tool::new(ToolKind::EndMill, 2.0 * r.max(1e-3));
+            return rest.drop_cutter(&flat, c, f64::NEG_INFINITY);
+        }
+        match &self.stock.triangles {
+            None => self.stock.bounds.max[2],
+            Some(tris) => {
+                let pts = std::iter::once(c).chain((0..8).map(|k| {
+                    let a = k as f64 * std::f64::consts::FRAC_PI_4;
+                    [c[0] + r * a.cos(), c[1] + r * a.sin()]
+                }));
+                pts.flat_map(|p| {
+                    tris.iter()
+                        .filter(move |t| crate::model::point_in_tri2(p, t))
+                        .filter_map(move |t| crate::model::height_on(t, p))
+                })
+                .fold(f64::NEG_INFINITY, f64::max)
+            }
+        }
     }
 
     /// The drive geometry's lowest height: picked edges or faces.
@@ -1159,6 +1199,46 @@ pub(crate) mod testing {
             triangles: vec![],
         });
         m
+    }
+
+    /// How far the toolpath's worst move (rapids, links, leads and cuts alike, sampled every
+    /// 0.05 mm) takes the tool into the model (exact drop-cutter), and where: 0 if never.
+    pub fn max_gouge(m: &Model, tool: &Tool, tp: &Toolpath) -> (f64, crate::geom::P3) {
+        let idx = crate::dropcutter::TriIndex::new(&m.triangles);
+        let mut scratch = Vec::new();
+        // A hair smaller, so a cutter running exactly against a wall isn't counted.
+        let mut tool = tool.clone();
+        tool.diameter -= 0.002;
+        if tool.kind == ToolKind::BallMill {
+            tool.corner_radius = tool.diameter / 2.0;
+        }
+        let tool = &tool;
+        let start = tp
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                crate::toolpath::Step::Rapid(p) => Some(*p),
+                _ => None,
+            })
+            .expect("a rapid");
+        let mut worst = (0.0, start);
+        for seg in tp.motion(start, 5000.0) {
+            let n = (crate::geom::dist(seg.from, seg.to) / 0.05).ceil().max(1.0) as usize;
+            for i in 0..=n {
+                let q = crate::geom::lerp(seg.from, seg.to, i as f64 / n as f64);
+                let low = crate::dropcutter::drop_point(
+                    tool,
+                    &idx,
+                    [q[0], q[1]],
+                    f64::NEG_INFINITY,
+                    &mut scratch,
+                );
+                if low - q[2] > worst.0 {
+                    worst = (low - q[2], q);
+                }
+            }
+        }
+        worst
     }
 
     pub fn stock_for(m: &Model, margin: f64, top: f64) -> Stock {

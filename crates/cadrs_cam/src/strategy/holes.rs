@@ -136,7 +136,9 @@ pub fn drill(input: &Input) -> Result<Toolpath, String> {
     };
     let mut prev: Option<(P2, f64)> = None;
     for h in holes {
-        let r_plane = h.top + p.links.rapid_distance;
+        // Over whatever material is left above the hole (stock not yet faced).
+        let top = h.top.max(input.material_top(h.center, t.radius()));
+        let r_plane = top + p.links.rapid_distance;
         let bottom = if h.through {
             h.bottom - p.cycle.break_through - tip
         } else {
@@ -201,7 +203,7 @@ pub fn bore(input: &Input) -> Result<Toolpath, String> {
             continue;
         }
         let c = h.center;
-        let top = h.top + p.links.feed_distance;
+        let top = h.top.max(input.material_top(c, h.diameter / 2.0)) + p.links.feed_distance;
         let bottom = if h.through {
             h.bottom - p.cycle.break_through
         } else {
@@ -274,8 +276,13 @@ mod tests {
     }
 
     fn run(pattern: Pattern, tool: Tool) -> Result<Toolpath, String> {
+        run_over(pattern, tool, 10.0)
+    }
+
+    /// With the stock's top at `stock_top` (the plate's is at 10).
+    fn run_over(pattern: Pattern, tool: Tool, stock_top: f64) -> Result<Toolpath, String> {
         let m = plate();
-        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [80.0, 40.0, 10.0]));
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [80.0, 40.0, stock_top]));
         let p = Params::new(pattern, &tool, MachineKind::Mill);
         let input = Input {
             model: &m,
@@ -305,6 +312,30 @@ mod tests {
         // Blind: to its bottom.
         assert!((cycles[1].bottom - 4.0).abs() < 1e-9);
         assert!((cycles[0].r_plane - 13.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn holes_start_over_the_unfaced_stock() {
+        // 4 mm of stock over the plate: nothing rapids below it.
+        let tp = run_over(Pattern::Drill, Tool::new(ToolKind::Drill, 6.0), 14.0).unwrap();
+        for s in &tp.steps {
+            if let Step::Drill(c) = s {
+                assert!((c.r_plane - 17.0).abs() < 1e-9, "{c:?}");
+            }
+        }
+        let tp = run_over(Pattern::Bore, Tool::new(ToolKind::EndMill, 10.0), 14.0).unwrap();
+        let mut at = [0.0; 3];
+        for s in &tp.steps {
+            match s {
+                Step::Rapid(p) => {
+                    assert!(p[2] >= 14.0 + 1e-9, "a rapid into the stock at {p:?}");
+                    at = *p;
+                }
+                Step::Feed { to, .. } | Step::Arc { to, .. } => at = *to,
+                _ => {}
+            }
+        }
+        assert!(at[2] > 14.0);
     }
 
     #[test]

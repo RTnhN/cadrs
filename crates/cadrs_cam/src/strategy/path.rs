@@ -442,13 +442,22 @@ pub fn outside_side(c: &Contour) -> f64 {
 
 /// Orders contours greedily, nearest start first from `from` (closed ones may start
 /// anywhere, so they're restarted at their point nearest the tool).
-pub fn nearest_order(mut cs: Vec<Contour>, mut from: P2) -> Vec<Contour> {
-    let mut out = Vec::with_capacity(cs.len());
-    while !cs.is_empty() {
-        let (i, c) = cs
+pub fn nearest_order(cs: Vec<Contour>, from: P2) -> Vec<Contour> {
+    nearest_order_indexed(cs, from)
+        .into_iter()
+        .map(|(_, c)| c)
+        .collect()
+}
+
+/// [`nearest_order`], each contour with its index in `cs`.
+pub fn nearest_order_indexed(cs: Vec<Contour>, mut from: P2) -> Vec<(usize, Contour)> {
+    let mut left: Vec<(usize, Contour)> = cs.into_iter().enumerate().collect();
+    let mut out = Vec::with_capacity(left.len());
+    while !left.is_empty() {
+        let (i, c) = left
             .iter()
             .enumerate()
-            .map(|(i, c)| {
+            .map(|(i, (_, c))| {
                 let c2 = if c.closed {
                     c.starting_near(from)
                 } else {
@@ -468,9 +477,9 @@ pub fn nearest_order(mut cs: Vec<Contour>, mut from: P2) -> Vec<Contour> {
             .min_by(|a, b| a.2.total_cmp(&b.2))
             .map(|(i, c, _)| (i, c))
             .unwrap();
-        cs.swap_remove(i);
+        let (k, _) = left.swap_remove(i);
         from = *c.walk().last().unwrap();
-        out.push(c);
+        out.push((k, c));
     }
     out
 }

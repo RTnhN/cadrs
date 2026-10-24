@@ -6,15 +6,24 @@
 //! is pierced in the scrap (beside the cut, through a lead-in) at the pierce height, the beam
 //! dwells for the pierce delay, drops to its cut height and runs round with the part on its
 //! right (the good side of a clockwise-swirl plasma torch), past the start by the overlap.
-//! Microjoints leave short uncut bridges that hold the parts in the sheet.
+//! Microjoints leave short uncut bridges that hold the parts in the sheet; after each bridge
+//! the beam pierces again in the scrap and leads back onto the contour.
+//!
+//! Leads and pierces are checked against the parts: a lead keeps the beam's centre a kerf
+//! (half its width plus the wall stock) off every part, and a pierce, whose crater is wider
+//! than the kerf, a kerf width more. A lead that doesn't fit is tried shorter; a hole too small
+//! for any is pierced in its middle, run straight to the edge.
 
 use crate::geom::{P2, P3, dist2, lerp2, ring_area2, ring_contains};
 use crate::machine::MachineKind;
 use crate::region::{self, Region};
 use crate::toolpath::{FeedKind, Step, Toolpath};
 
-use super::link::Builder;
-use super::path::{Contour, chain, hatch, inner_point, lead_arc, nearest_order, region_contours};
+use super::link::{Builder, arc_path};
+use super::path::{
+    Contour, chain, hatch, inner_point, lead_arc, nearest_order, nearest_order_indexed,
+    region_contours,
+};
 use super::{CuttingMethod, Direction, Input, LeadKind, Side};
 
 /// Heights of a beam cut: the top of the sheet, travel, pierce and cut heights.
@@ -96,11 +105,75 @@ fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
     Ok(out)
 }
 
-/// The radius of the largest circle in a ring, roughly (twice the area over the perimeter).
-fn inscribed(ring: &[P2]) -> f64 {
-    let a = ring_area2(ring).abs() / 2.0;
-    let per = crate::geom::ring_len(ring).max(1e-9);
-    2.0 * a / per
+/// Where a cut's beam may go, from the parts (a cut whose kerf is outside them).
+struct Room {
+    /// The beam's centre a kerf off every part: leads keep to it.
+    free: Region,
+    /// A kerf width further: where it may pierce.
+    pierce: Region,
+}
+
+/// The [`Room`] round the job's parts (`None` for an inside cut: no part to keep off).
+fn room(input: &Input) -> Option<Room> {
+    if input.params.side == Side::Inside {
+        return None;
+    }
+    let k = input.tool.radius() + input.params.wall_stock;
+    let sil = input.model.silhouette();
+    let all = [super::everywhere(input)];
+    Some(Room {
+        free: region::difference(&all, &region::offset(&sil, k - 1e-3)),
+        pierce: region::difference(&all, &region::offset(&sil, k + input.tool.radius())),
+    })
+}
+
+/// The lead onto a contour at `pt` (direction `t`) from the scrap on `side`: where to pierce,
+/// and the arc's centre and turn (`None`: straight). Tried at the lead radius, then shorter;
+/// in a hole (`hole`: its ring) too small for any, from its middle.
+fn lead_for(
+    input: &Input,
+    room: Option<&Room>,
+    pt: P2,
+    t: P2,
+    side: f64,
+    hole: Option<&[P2]>,
+) -> Option<(P2, Option<(P2, bool)>)> {
+    let l = &input.params.links;
+    if l.lead_in == LeadKind::None || l.lead_radius <= 0.0 {
+        return None;
+    }
+    let kerf = input.tool.radius();
+    let fits = |pierce: P2, path: &[P2]| match room {
+        Some(r) => {
+            region::contains(&r.pierce, pierce)
+                && path
+                    .windows(2)
+                    .all(|w| region::segment_inside(&r.free, w[0], w[1]))
+        }
+        None => true,
+    };
+    let mut radius = l.lead_radius;
+    while radius >= kerf.max(0.05) - 1e-9 {
+        let lead = match l.lead_in {
+            LeadKind::Arc => {
+                let (s, ctr, cw) = lead_arc(pt, t, side, radius, 90.0);
+                (s, Some((ctr, cw)), arc_path(s, pt, ctr, cw))
+            }
+            _ => {
+                let n = [-t[1] * side, t[0] * side];
+                let s = [pt[0] + n[0] * radius, pt[1] + n[1] * radius];
+                (s, None, vec![s, pt])
+            }
+        };
+        if fits(lead.0, &lead.2) {
+            return Some((lead.0, lead.1));
+        }
+        radius /= 2.0;
+    }
+    // A small hole: pierce in its middle and go straight to the edge.
+    let ring = hole?;
+    let mid = inner_point(ring);
+    (dist2(mid, pt) > kerf && fits(mid, &[mid, pt])).then_some((mid, None))
 }
 
 /// The part of a walk between arc lengths `s0` and `s1`.
@@ -195,6 +268,7 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
         .collect();
     by_depth.sort_by_key(|x| std::cmp::Reverse(x.0));
     let z = heights(input);
+    let room = room(input);
     let mut b = Builder::new(input);
     let power = (p.beam.power / 100.0).clamp(0.0, 1.0);
     let delay = t.beam.pierce_delay;
@@ -215,12 +289,8 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
         i += group.len();
         let holes: Vec<bool> = group.iter().map(|g| g.1).collect();
         let cs: Vec<Contour> = group.into_iter().map(|g| g.0).collect();
-        for c in nearest_order(cs.clone(), from) {
-            let hole = cs
-                .iter()
-                .position(|x| x.pts.len() == c.pts.len() && x.pts.iter().all(|q| c.pts.contains(q)))
-                .map(|k| holes[k])
-                .unwrap_or(false);
+        for (k, c) in nearest_order_indexed(cs, from) {
+            let hole = holes[k];
             // The region's rings have the part (and its kerf) on their left; the part on the
             // right (climb) is every ring reversed.
             let c = if c.closed && p.direction == Direction::Climb {
@@ -231,7 +301,7 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
                 c
             };
             let feed =
-                if hole && p.beam.small_hole > 0.0 && inscribed(&c.pts) * 2.0 < p.beam.small_hole {
+                if hole && p.beam.small_hole > 0.0 && hole_diameter(&c.pts) < p.beam.small_hole {
                     p.speeds.feed * p.beam.small_hole_feed
                 } else {
                     p.speeds.feed
@@ -243,7 +313,17 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
                     pierce: z.pierce - pass as f64 * p.beam.pass_depth,
                     cut: zc,
                 };
-                cut_one(&mut b, input, &c, hole, &zz, power, delay, feed);
+                cut_one(
+                    &mut b,
+                    input,
+                    room.as_ref(),
+                    &c,
+                    hole,
+                    &zz,
+                    power,
+                    delay,
+                    feed,
+                );
             }
             from = b.at.map_or(from, |a| [a[0], a[1]]);
         }
@@ -257,6 +337,7 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
 fn cut_one(
     b: &mut Builder,
     input: &Input,
+    room: Option<&Room>,
     c: &Contour,
     hole: bool,
     z: &Z,
@@ -267,54 +348,13 @@ fn cut_one(
     let p = input.params;
     let l = &p.links;
     let walk = c.walk();
-    let start = walk[0];
-    // The lead: in the scrap, which is on the left with the part on the right.
+    // The scrap is on the left with the part on the right.
     let scrap_side = if p.direction == Direction::Climb {
         1.0
     } else {
         -1.0
     };
-    let mut lead: Option<(P2, Option<(P2, bool)>)> = None;
-    if c.closed
-        && l.lead_in != LeadKind::None
-        && l.lead_radius > 0.0
-        && let Some((pt, t)) = c.start_tangent()
-    {
-        let room = if hole {
-            inscribed(&c.pts)
-        } else {
-            f64::INFINITY
-        };
-        if l.lead_radius < room * 0.8 {
-            lead = Some(match l.lead_in {
-                LeadKind::Arc => {
-                    let (s, ctr, cw) = lead_arc(pt, t, scrap_side, l.lead_radius, 90.0);
-                    (s, Some((ctr, cw)))
-                }
-                _ => {
-                    let n = [-t[1] * scrap_side, t[0] * scrap_side];
-                    (
-                        [pt[0] + n[0] * l.lead_radius, pt[1] + n[1] * l.lead_radius],
-                        None,
-                    )
-                }
-            });
-        } else if hole && room > input.tool.radius() * 2.0 {
-            // A small hole: pierce in its middle and go straight to the edge.
-            let mid = inner_point(&c.pts);
-            if dist2(mid, start) > input.tool.radius() {
-                lead = Some((mid, None));
-            }
-        }
-    }
-    let pierce_at = lead.map_or(start, |(s, _)| s);
-    pierce(b, pierce_at, z, power, delay);
-    if let Some((_, arc)) = lead {
-        match arc {
-            Some((ctr, cw)) => b.arc([start[0], start[1], z.cut], ctr, cw, FeedKind::LeadIn),
-            None => b.feed([start[0], start[1], z.cut], FeedKind::LeadIn),
-        }
-    }
+    let ring = (c.closed && hole).then_some(c.pts.as_slice());
     // Microjoints hold parts, not the scrap in their holes.
     let pieces = if c.closed && !hole && p.beam.microjoints > 0 {
         microjoint_pieces(
@@ -326,13 +366,23 @@ fn cut_one(
         vec![walk.clone()]
     };
     for (k, piece) in pieces.iter().enumerate() {
+        // Each piece (after a bridge too) pierced in the scrap and led on.
+        let start = piece[0];
+        let lead = if c.closed {
+            Contour::open(piece.clone())
+                .start_tangent()
+                .and_then(|(pt, t)| lead_for(input, room, pt, t, scrap_side, ring))
+        } else {
+            None
+        };
         if k > 0 {
-            // Over the bridge with the beam off, then on again.
-            b.steps.push(Step::BeamOff);
-            b.rapid([piece[0][0], piece[0][1], z.cut]);
-            b.steps.push(Step::BeamOn { power });
-            if delay > 0.0 {
-                b.steps.push(Step::Dwell(delay));
+            beam_off(b, z);
+        }
+        pierce(b, lead.map_or(start, |(s, _)| s), z, power, delay);
+        if let Some((_, arc)) = lead {
+            match arc {
+                Some((ctr, cw)) => b.arc([start[0], start[1], z.cut], ctr, cw, FeedKind::LeadIn),
+                None => b.feed([start[0], start[1], z.cut], FeedKind::LeadIn),
             }
         }
         for q in piece.iter().skip(1) {
@@ -340,7 +390,7 @@ fn cut_one(
         }
     }
     // Past the start by the overlap (unless microjoints break the loop there).
-    if c.closed && l.overlap > 0.0 && p.beam.microjoints == 0 {
+    if c.closed && l.overlap > 0.0 && pieces.len() == 1 {
         let mut left = l.overlap;
         for w in walk.windows(2) {
             let d = dist2(w[0], w[1]);
@@ -354,6 +404,24 @@ fn cut_one(
         }
     }
     beam_off(b, z);
+}
+
+/// A hole's size for the small-hole feed: the diameter of the largest circle in it (found by
+/// shrinking the ring until it vanishes), so a long narrow slot counts as small.
+fn hole_diameter(ring: &[P2]) -> f64 {
+    let r = vec![ring.to_vec()];
+    let a = ring_area2(ring).abs() / 2.0;
+    // No circle in it is bigger than the one of its area.
+    let (mut lo, mut hi) = (0.0, (a / std::f64::consts::PI).sqrt());
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if region::offset(&r, -mid).is_empty() {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    2.0 * lo
 }
 
 /// Etch: along the picked edges (or the picked faces' outlines) at marking power, no
@@ -722,5 +790,154 @@ mod tests {
             .map(|p| p.windows(2).map(|w| dist2(w[0], w[1])).sum::<f64>())
             .sum();
         assert!((cut - 36.0).abs() < 1e-6, "{cut} {pieces:?}");
+    }
+
+    #[test]
+    fn hole_diameter_is_the_inscribed_circle() {
+        let slot = region::rect([0.0, 0.0], [98.5, 8.5]);
+        assert!(
+            (hole_diameter(&slot) - 8.5).abs() < 0.01,
+            "{}",
+            hole_diameter(&slot)
+        );
+        let round = region::circle([0.0, 0.0], 5.0);
+        assert!((hole_diameter(&round) - 10.0).abs() < 0.02);
+    }
+
+    /// The pierces and leads of a cut: every pierce at least a kerf width off the kerf path
+    /// (off the parts by `2k`), every lead's beam centre at least `k` off them.
+    fn assert_scrap_only(tp: &Toolpath, m: &Model, k: f64) {
+        let sil = m.silhouette();
+        let near = |q: P2, d: f64| region::contains(&region::offset(&sil, d), q);
+        let mut at = [0.0, 0.0, 50.0];
+        for (i, s) in tp.steps.iter().enumerate() {
+            match s {
+                Step::BeamOn { .. } => {
+                    assert!(
+                        !near([at[0], at[1]], 2.0 * k - 1e-3),
+                        "a pierce at {at:?} (step {i})"
+                    );
+                }
+                Step::Feed {
+                    to,
+                    kind: FeedKind::LeadIn,
+                    ..
+                }
+                | Step::Arc {
+                    to,
+                    kind: FeedKind::LeadIn,
+                    ..
+                } => {
+                    let from = at;
+                    for t in 0..=20 {
+                        let f = t as f64 / 20.0;
+                        let q = [
+                            from[0] + (to[0] - from[0]) * f,
+                            from[1] + (to[1] - from[1]) * f,
+                        ];
+                        // (Straight between the ends: an arc lead bulges further into the
+                        // scrap, never towards the part it's tangent to.)
+                        assert!(
+                            !near(q, k - 2e-3),
+                            "a lead over the part at {q:?} (step {i})"
+                        );
+                    }
+                }
+                _ => {}
+            }
+            match s {
+                Step::Rapid(p) => at = *p,
+                Step::Feed { to, .. } | Step::Arc { to, .. } => at = *to,
+                _ => {}
+            }
+        }
+    }
+
+    /// A plate with a narrow slot (8.5 × 98.5 as a hole): the 4 mm lead can't fit across its
+    /// width, so it's shortened (or the slot pierced in its middle), never pierced by the far
+    /// wall.
+    #[test]
+    fn slot_leads_fit_the_slot() {
+        let mut t = Vec::new();
+        t.extend(box_triangles(&Aabb::new(
+            [0.0, 0.0, 0.0],
+            [120.0, 10.0, 3.0],
+        )));
+        t.extend(box_triangles(&Aabb::new(
+            [0.0, 18.5, 0.0],
+            [120.0, 28.5, 3.0],
+        )));
+        t.extend(box_triangles(&Aabb::new(
+            [0.0, 10.0, 0.0],
+            [10.0, 18.5, 3.0],
+        )));
+        t.extend(box_triangles(&Aabb::new(
+            [108.5, 10.0, 0.0],
+            [120.0, 18.5, 3.0],
+        )));
+        let m = Model::from_triangles("slotted", t);
+        let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [125.0, 35.0, 3.0]));
+        let tool = Tool::new(ToolKind::Plasma, 1.5);
+        let mut p = Params::new(Pattern::Cut, &tool, MachineKind::Plasma);
+        p.links.lead_radius = 4.0;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Plasma,
+            params: &p,
+            rest: None,
+        };
+        let tp = generate(&input).unwrap();
+        assert_scrap_only(&tp, &m, 0.75);
+        // The slot is small: cut at the small-hole feed.
+        let slow = p.speeds.feed * p.beam.small_hole_feed;
+        assert!(tp.steps.iter().any(|s| matches!(s, Step::Feed { feed, kind: FeedKind::Cut, .. } if (*feed - slow).abs() < 1e-9)) == (8.5 - 1.5 < p.beam.small_hole));
+    }
+
+    /// Microjoints: after each bridge the torch pierces again in the scrap, at its pierce
+    /// height, and leads back on.
+    #[test]
+    fn microjoints_repierce_in_the_scrap() {
+        let tool = Tool::new(ToolKind::Plasma, 1.5);
+        let tp = run(Pattern::Cut, MachineKind::Plasma, tool, |p| {
+            p.beam.microjoints = 4;
+        })
+        .unwrap();
+        let ons = tp
+            .steps
+            .iter()
+            .filter(|s| matches!(s, Step::BeamOn { .. }))
+            .count();
+        // The hole once, the outline in five pieces.
+        assert_eq!(ons, 6);
+        let leads = tp
+            .steps
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s,
+                    Step::Arc {
+                        kind: FeedKind::LeadIn,
+                        ..
+                    } | Step::Feed {
+                        kind: FeedKind::LeadIn,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(leads, 6);
+        // Every pierce at the pierce height.
+        for (i, s) in tp.steps.iter().enumerate() {
+            if matches!(s, Step::BeamOn { .. }) {
+                assert!(
+                    matches!(tp.steps[i - 1], Step::Rapid(p) if (p[2] - 6.8).abs() < 1e-9),
+                    "{:?}",
+                    &tp.steps[i - 2..=i]
+                );
+            }
+        }
+        assert_scrap_only(&tp, &plate(), 0.75);
     }
 }

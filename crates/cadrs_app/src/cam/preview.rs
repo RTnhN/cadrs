@@ -38,7 +38,14 @@ impl Plugin for PreviewPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (advance, sync_bar, sync_readout, draw, sync_stock_mesh)
+            (
+                poll_analysis,
+                advance,
+                sync_bar,
+                sync_readout,
+                draw,
+                sync_stock_mesh,
+            )
                 .chain()
                 .run_if(in_state(AppState::Document)),
         )
@@ -59,6 +66,7 @@ pub enum Mode {
 }
 
 /// An operation in the preview: where its moves start, and its name and tool.
+#[derive(Clone)]
 struct OpSpan {
     first: usize,
     name: String,
@@ -97,9 +105,24 @@ pub struct PreviewState {
     pub summary: String,
     collisions: Vec<(f64, String)>,
     paused_at: Option<f64>,
+    /// The check of the whole run, on a worker thread until it's done.
+    analysis: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Analysis>>>,
+}
+
+/// What simulating the whole run found (worked out off the main thread).
+struct Analysis {
+    summary: String,
+    collisions: Vec<(f64, String)>,
+    /// The part on the stock's grid, pulled in by a cell (mills).
+    part: Option<HeightMap>,
 }
 
 impl PreviewState {
+    /// Whether the run's check is still being worked out.
+    pub fn checking(&self) -> bool {
+        self.analysis.is_some()
+    }
+
     /// Verify and Simulate show their own stock.
     pub fn hides_stock(&self) -> bool {
         self.mode != Mode::BackPlot
@@ -276,98 +299,48 @@ pub fn open_for_selection(world: &mut World) {
         }
         segments.extend(m);
     }
-    // What the whole run finds, once.
-    let model = cadrs_core::cam::geometry::model_from_parts(
-        &program::job_bodies(&cam, job, &parts),
-        &run.frame,
-    );
+    // The model the toolpaths were calculated against (the kernel's: the finest of them),
+    // else the display meshes.
+    let model = {
+        let c = world.resource::<Computed>();
+        wanted
+            .iter()
+            .filter_map(|o| c.current(*o))
+            .filter(|d| d.frame == run.frame)
+            .map(|d| d.model.clone())
+            .max_by_key(|m| m.triangles.len())
+    }
+    .unwrap_or_else(|| {
+        std::sync::Arc::new(cadrs_core::cam::geometry::model_from_parts(
+            &program::job_bodies(&cam, job, &parts),
+            &run.frame,
+        ))
+    });
     let beam = machine.kind.is_cutting();
-    let mut collisions = Vec::new();
-    let summary;
-    let (map, part, top) = if beam {
-        let ops: Vec<SimOp> = run
-            .ops
-            .iter()
-            .zip(spans.iter().enumerate())
-            .map(|(o, (k, sp))| {
-                let end = spans.get(k + 1).map_or(segments.len(), |n| n.first);
-                SimOp {
-                    tool: o.tool,
-                    segments: &segments[sp.first..end],
-                }
-            })
-            .collect();
-        let r = sim::simulate_sheet(&stock, &model, &ops);
-        summary = format!(
-            "Cut {} mm · {} part{} free{}",
-            fmt0(r.cut_length),
-            r.parts_free,
-            if r.parts_free == 1 { "" } else { "s" },
-            if r.damage > 0.01 {
-                format!(" · {} mm² cut from the part", fmt1(r.damage))
-            } else {
-                String::new()
-            }
-        );
-        (None, None, 0.0)
+    let cell = sim::sim_cell(&stock, 0.1);
+    let (map, top) = if beam {
+        (None, 0.0)
     } else {
-        let ops: Vec<SimOp> = spans
-            .iter()
-            .enumerate()
-            .map(|(k, sp)| {
-                let end = spans.get(k + 1).map_or(segments.len(), |n| n.first);
-                SimOp {
-                    tool: &sp.tool,
-                    segments: &segments[sp.first..end],
-                }
-            })
-            .collect();
-        let cell = sim::sim_cell(&stock, 0.1);
-        let r = sim::simulate_mill(&stock, &model, &ops, cell);
-        let tl = Timeline::new(segments.clone());
-        for (k, p) in r.rapid_hits.iter() {
-            collisions.push((
-                time_near(&tl, &spans, *k, *p),
-                format!("{}: a rapid runs into the stock", spans[*k].name),
-            ));
-        }
-        for (k, p) in r.holder_hits.iter() {
-            collisions.push((
-                time_near(&tl, &spans, *k, *p),
-                format!("{}: the cut is deeper than the flutes", spans[*k].name),
-            ));
-        }
-        collisions.sort_by(|a, b| a.0.total_cmp(&b.0));
-        summary = format!(
-            "Removed {} mm³ · {} · {}{}",
-            fmt0(r.removed),
-            if r.gouge_cells == 0 {
-                "no gouges".to_string()
-            } else {
-                format!("gouges up to {} mm deep", fmt2(r.gouge_depth))
-            },
-            if collisions.is_empty() {
-                "no collisions".to_string()
-            } else {
-                format!(
-                    "{} collision{}",
-                    collisions.len(),
-                    if collisions.len() == 1 { "" } else { "s" }
-                )
-            },
-            if r.excess > 0.0 {
-                format!(" · up to {} mm left", fmt2(r.excess))
-            } else {
-                String::new()
-            }
-        );
-        let mut part = r.stock.blank();
-        part.rasterize(&model.triangles, false);
-        (
-            Some(stock.height_map(cell)),
-            Some(part.eroded()),
-            stock.bounds.max[2] as f32,
-        )
+        (Some(stock.height_map(cell)), stock.bounds.max[2] as f32)
+    };
+    // What the whole run finds, once, on a worker thread.
+    let analysis = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (stock, segments, spans) = (stock.clone(), segments.clone(), spans.clone());
+        let spawned = std::thread::Builder::new()
+            .name("cam-verify".into())
+            .spawn(move || {
+                let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    analyse(&stock, &model, &segments, &spans, beam, cell)
+                }))
+                .unwrap_or_else(|_| Analysis {
+                    summary: "The check failed unexpectedly".into(),
+                    collisions: Vec::new(),
+                    part: None,
+                });
+                let _ = tx.send(a);
+            });
+        spawned.ok().map(|_| std::sync::Mutex::new(rx))
     };
     let timeline = Timeline::new(segments);
     super::dialogs::close(world);
@@ -389,14 +362,125 @@ pub fn open_for_selection(world: &mut World) {
         stock,
         map,
         applied: 0,
-        part,
+        part: None,
         top,
         mesh_dirty: true,
         mesh_at: None,
+        summary: "Checking the run…".into(),
+        collisions: Vec::new(),
+        paused_at: None,
+        analysis,
+    });
+}
+
+/// Simulates the whole run: the summary line, the collisions' times and (mills) the part on
+/// the stock's grid.
+fn analyse(
+    stock: &Stock,
+    model: &cadrs_core::cam::cadrs_cam::model::Model,
+    segments: &[Segment],
+    spans: &[OpSpan],
+    beam: bool,
+    cell: f64,
+) -> Analysis {
+    let ops: Vec<SimOp> = spans
+        .iter()
+        .enumerate()
+        .map(|(k, sp)| {
+            let end = spans.get(k + 1).map_or(segments.len(), |n| n.first);
+            SimOp {
+                tool: &sp.tool,
+                segments: &segments[sp.first..end],
+            }
+        })
+        .collect();
+    if beam {
+        let r = sim::simulate_sheet(stock, model, &ops);
+        let summary = format!(
+            "Cut {} mm · {} part{} free{}",
+            fmt0(r.cut_length),
+            r.parts_free,
+            if r.parts_free == 1 { "" } else { "s" },
+            if r.damage > 0.01 {
+                format!(" · {} mm² cut from the part", fmt1(r.damage))
+            } else {
+                String::new()
+            }
+        );
+        return Analysis {
+            summary,
+            collisions: Vec::new(),
+            part: None,
+        };
+    }
+    let r = sim::simulate_mill(stock, model, &ops, cell);
+    let tl = Timeline::new(segments.to_vec());
+    let mut collisions = Vec::new();
+    for (k, p) in r.rapid_hits.iter() {
+        collisions.push((
+            time_near(&tl, spans, *k, *p),
+            format!("{}: a rapid runs into the stock", spans[*k].name),
+        ));
+    }
+    for (k, p) in r.holder_hits.iter() {
+        collisions.push((
+            time_near(&tl, spans, *k, *p),
+            format!("{}: the cut is deeper than the flutes", spans[*k].name),
+        ));
+    }
+    collisions.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let summary = format!(
+        "Removed {} mm³ · {} · {}{}",
+        fmt0(r.removed),
+        if r.gouge_cells == 0 {
+            "no gouges".to_string()
+        } else {
+            format!("gouges up to {} mm deep", fmt2(r.gouge_depth))
+        },
+        if collisions.is_empty() {
+            "no collisions".to_string()
+        } else {
+            format!(
+                "{} collision{}",
+                collisions.len(),
+                if collisions.len() == 1 { "" } else { "s" }
+            )
+        },
+        if r.excess > 0.0 {
+            format!(" · up to {} mm left", fmt2(r.excess))
+        } else {
+            String::new()
+        }
+    );
+    let mut part = r.stock.blank();
+    part.rasterize(&model.triangles, false);
+    Analysis {
         summary,
         collisions,
-        paused_at: None,
-    });
+        part: Some(part.eroded()),
+    }
+}
+
+/// Takes the run's check when the worker has finished it.
+fn poll_analysis(state: Option<ResMut<PreviewState>>) {
+    let Some(mut s) = state else { return };
+    let Some(rx) = s.analysis.as_mut() else {
+        return;
+    };
+    let got = match rx.get_mut().map(|r| r.try_recv()) {
+        Ok(Ok(a)) => a,
+        Ok(Err(std::sync::mpsc::TryRecvError::Empty)) => return,
+        _ => Analysis {
+            summary: "The check stopped unexpectedly".into(),
+            collisions: Vec::new(),
+            part: None,
+        },
+    };
+    s.analysis = None;
+    s.summary = got.summary;
+    s.collisions = got.collisions;
+    s.part = got.part;
+    s.mesh_dirty = true;
 }
 
 /// The time of the move of operation `k` nearest `p`.

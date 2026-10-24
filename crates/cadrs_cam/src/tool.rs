@@ -201,6 +201,10 @@ pub struct BeamData {
     pub cut_height: f64,
     /// Torch height control on during cuts (plasma).
     pub thc: bool,
+    /// The material number in the control's cut table (QtPlasmaC `M190 P…`); 0 leaves the
+    /// material the operator picked.
+    #[serde(default)]
+    pub material: u32,
     /// Air assist on while cutting (laser).
     pub air_assist: bool,
     /// Passes per cut (a thin laser pass at a time).
@@ -216,6 +220,7 @@ impl Default for BeamData {
             pierce_height: 3.8,
             cut_height: 1.5,
             thc: true,
+            material: 0,
             air_assist: true,
             passes: 1,
         }
