@@ -412,14 +412,13 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         let name = program.name.to_uppercase().replace(['(', ')'], "");
         w.raw(&format!("O{:04} ({name})", program.number.min(9999)));
     }
-    w.comment(&format!(
-        "{} for {} ({})",
-        program.name,
-        machine.title(),
-        d.label()
-    ));
+    w.comment(&format!("{} for {}", program.name, machine.title()));
+    let mut listed: Vec<(u32, &str)> = Vec::new();
     for op in &program.operations {
-        w.comment(&format!("T{} {}", op.tool_number, op.tool.name));
+        if !listed.contains(&(op.tool_number, op.tool.name.as_str())) {
+            listed.push((op.tool_number, &op.tool.name));
+            w.comment(&format!("T{} {}", op.tool_number, op.tool.name));
+        }
     }
     let unit = match s.output_unit {
         Unit::Mm => "G21",

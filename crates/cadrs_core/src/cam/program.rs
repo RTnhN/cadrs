@@ -253,9 +253,17 @@ pub fn op_input(cam: &CamStudio, op: CamId, parts: &[Part]) -> Result<OpInput, S
     })
 }
 
-/// A key for an operation's input and the parts it machines: the same key, the same toolpath
-/// (the job cache: going back to an earlier state recomputes nothing).
-pub fn op_key(input: &OpInput, features: &[crate::document::Feature]) -> u64 {
+/// A key for the studio's parts (its Derived features): worked out once for many
+/// [`op_key`]s.
+pub fn features_key(features: &[crate::document::Feature]) -> u64 {
+    let b = blake3::hash(format!("{features:?}").as_bytes());
+    u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
+}
+
+/// A key for an operation's input and the parts it machines (`features`: [`features_key`]):
+/// the same key, the same toolpath (the job cache: going back to an earlier state recomputes
+/// nothing).
+pub fn op_key(input: &OpInput, features: u64) -> u64 {
     let mut h = blake3::Hasher::new();
     h.update(format!("{:?}", input.frame).as_bytes());
     h.update(format!("{:?}", input.tool).as_bytes());
@@ -263,7 +271,7 @@ pub fn op_key(input: &OpInput, features: &[crate::document::Feature]) -> u64 {
     h.update(format!("{:?}", input.machine.kind).as_bytes());
     h.update(format!("{:?}", input.stock).as_bytes());
     h.update(format!("{:?}", input.parts).as_bytes());
-    h.update(format!("{features:?}").as_bytes());
+    h.update(&features.to_le_bytes());
     let b = h.finalize();
     u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
 }

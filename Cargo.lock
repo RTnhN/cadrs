@@ -2074,6 +2074,7 @@ name = "cadrs_app"
 version = "0.1.7"
 dependencies = [
  "bevy",
+ "blake3",
  "cadrs_core",
  "cadrs_drawing",
  "cadrs_easyeda",
