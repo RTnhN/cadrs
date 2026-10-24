@@ -25,7 +25,6 @@
 pub mod compute;
 pub mod dialogs;
 pub mod export;
-pub mod form;
 pub mod preview;
 pub mod view;
 
@@ -50,6 +49,30 @@ pub use compute::{Computed, Status};
 /// The panel's width on a CAM Studio tab.
 pub const PANEL_W: f32 = 290.0;
 
+/// The CAM Studio dialogs' widget names: `cam-f-<key>`.
+pub const FORM_PREFIX: &str = "cam-f-";
+
+/// A number typed into a CAM Studio dialog, as the sketch's dimension fields read it:
+/// expressions and units (`6*2`, `1/4 in`, `10 mm + 2`, `30 deg`).
+fn read_number(text: &str, unit: cadrs_ui::form::Unit) -> Option<f64> {
+    use cadrs_sketch::units::{Quantity, eval};
+    use cadrs_ui::form::Unit;
+    let v = match unit {
+        Unit::Mm => eval(text, Quantity::Length).ok()?,
+        Unit::Deg => eval(text, Quantity::Angle).ok()?,
+        // (Its own suffix off: what's left is a plain expression.)
+        _ => {
+            let t = text.trim();
+            let body = [" mm/min", "mm/min", " rpm", "rpm", " %", "%", " s", "s"]
+                .iter()
+                .find_map(|s| t.strip_suffix(s))
+                .unwrap_or(t);
+            eval(body, Quantity::Length).ok()?
+        }
+    };
+    v.is_finite().then_some(v)
+}
+
 pub struct CamUiPlugin;
 
 impl Plugin for CamUiPlugin {
@@ -58,7 +81,7 @@ impl Plugin for CamUiPlugin {
         app.init_resource::<CamUi>()
             .init_resource::<Computed>()
             .add_plugins((
-                form::FormPlugin,
+                cadrs_ui::form::FormPlugin::new(FORM_PREFIX).eval(read_number),
                 dialogs::DialogsPlugin,
                 view::ViewPlugin,
                 preview::PreviewPlugin,
@@ -1392,4 +1415,28 @@ fn sync_parts(
         cache.set_transparent(&see, true);
     }
     *last = Some((hidden, stock, cache.generation));
+}
+
+#[cfg(test)]
+mod number_tests {
+    use super::read_number;
+    use cadrs_ui::form::Unit;
+
+    #[test]
+    fn typed_numbers_read_as_expressions() {
+        // As the dialogs read them: the expression first, the plain reading after.
+        let f = cadrs_ui::form::FormSettings {
+            prefix: super::FORM_PREFIX.into(),
+            eval: Some(read_number),
+        };
+        let near = |a: Option<f64>, b: f64| a.is_some_and(|a| (a - b).abs() < 1e-9);
+        assert!(near(f.read("6*2", Unit::Mm), 12.0));
+        assert!(near(f.read("1/4 in", Unit::Mm), 6.35));
+        assert!(near(f.read("0.25 in", Unit::Mm), 6.35));
+        assert!(near(f.read("10 mm + 2", Unit::Mm), 12.0));
+        assert!(near(f.read("30 deg", Unit::Deg), 30.0));
+        assert!(near(f.read("1200 mm/min", Unit::Feed), 1200.0));
+        assert!(near(f.read("2000*1.5 rpm", Unit::Rpm), 3000.0));
+        assert_eq!(f.read("six", Unit::Mm), None);
+    }
 }

@@ -28,10 +28,10 @@ use cadrs_core::{ElementId, ElementKind, PartId};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{FeatureDialog, FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState};
 
-use super::form::{self, Field, FieldChange, FieldUnits, Unit, Value};
 use super::{CamRow, CamUi, active_cam_owned, edit, target_setup, toast};
 use crate::viewport::{Pick, PickRequest, ViewportArea};
 use crate::{ActiveDocument, AppState};
+use cadrs_ui::form::{self, Field, FieldChange, FieldUnits, Unit, Value};
 
 mod fields;
 mod set;
@@ -925,7 +925,7 @@ fn sync_dialog(world: &mut World) {
                         overflow: Overflow::scroll_y(),
                         ..default()
                     })
-                    .with_children(|c| form::spawn_fields(c, &t2, &fs));
+                    .with_children(|c| form::spawn_fields(c, &t2, super::FORM_PREFIX, &fs));
                 })
                 .build(&theme),
         ))
@@ -1008,7 +1008,7 @@ fn sync_typed_text(world: &mut World) {
     let typed: Vec<(String, String)> = q
         .iter(world)
         .filter_map(|(n, t)| {
-            let key = form::key_of(n.as_str())?.strip_suffix("-field")?;
+            let key = form::key_of(super::FORM_PREFIX, n.as_str())?.strip_suffix("-field")?;
             Some((key.to_string(), t.value().to_string()))
         })
         .collect();

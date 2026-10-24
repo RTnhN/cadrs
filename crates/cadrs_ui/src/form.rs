@@ -1,13 +1,16 @@
-//! The CAM Studio dialogs as data: each dialog lists its [`Field`]s (number, text, select,
-//! checkbox, a pick list fed by the view, buttons, notes, section headings and a tab strip),
-//! [`spawn_fields`] builds them in a feature dialog card, and every change comes back as a
-//! [`FieldChange`] (key and [`Value`]) for the dialog's draft. Widgets are named
-//! `cam-f-<key>`, so scenarios and tests find them by key.
+//! Dialogs as data: a dialog lists its [`Field`]s (number, text, select, checkbox, a pick list
+//! fed by the view, buttons, notes, section headings and a tab strip), [`spawn_fields`] builds
+//! them in a dialog body, and every change comes back as a [`FieldChange`] (key and [`Value`])
+//! for the dialog's model to take. Widgets are named the plugin's prefix and the key
+//! (`cam-f-<key>` for the CAM Studio's), so scenarios and tests find them by key. Typed
+//! numbers read back through the app's evaluator when it gives one ([`FormPlugin::eval`]: its
+//! expressions and units), else as a plain number with an optional unit.
 
 use bevy::prelude::*;
 use bevy::text::FontWeight;
-use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, Checkbox, NumberField, Select, SelectionList, TabStrip};
+
+use crate::prelude::*;
+use crate::{Button, Checkbox, NumberField, Select, SelectionList, TabStrip};
 
 /// What a number means (its suffix and how text reads back).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,14 +199,33 @@ pub struct FieldChange {
     pub value: Value,
 }
 
-/// The widget name of a key.
-pub fn widget(key: &str) -> String {
-    format!("cam-f-{key}")
+/// The widget name of a key under `prefix`.
+pub fn widget(prefix: &str, key: &str) -> String {
+    format!("{prefix}{key}")
 }
 
-/// The key of a widget name.
-pub fn key_of(name: &str) -> Option<&str> {
-    name.strip_prefix("cam-f-")
+/// The key of a widget name under `prefix`.
+pub fn key_of<'a>(prefix: &str, name: &'a str) -> Option<&'a str> {
+    name.strip_prefix(prefix)
+}
+
+/// Reads typed text as a number of a unit (an app's expression evaluator).
+pub type NumberEval = fn(&str, Unit) -> Option<f64>;
+
+/// The plugin's settings: the widgets' name prefix and the number evaluator.
+#[derive(Resource, Clone)]
+pub struct FormSettings {
+    pub prefix: String,
+    pub eval: Option<NumberEval>,
+}
+
+impl FormSettings {
+    /// Typed text as a number: the evaluator's reading, else [`parse_num`]'s.
+    pub fn read(&self, text: &str, unit: Unit) -> Option<f64> {
+        self.eval
+            .and_then(|e| e(text, unit))
+            .or_else(|| parse_num(text, unit))
+    }
 }
 
 /// "6", "0.25", "12000": a value without trailing zeros.
@@ -275,8 +297,9 @@ fn row(b: &mut ChildSpawner, t: &Theme, label: &str, content: impl Bundle) {
     });
 }
 
-/// Builds the fields into a dialog body.
-pub fn spawn_fields(b: &mut ChildSpawner, t: &Theme, fields: &[Field]) {
+/// Builds the fields into a dialog body, the widgets named `prefix` and their keys.
+pub fn spawn_fields(b: &mut ChildSpawner, t: &Theme, prefix: &str, fields: &[Field]) {
+    let widget = |key: &str| widget(prefix, key);
     for f in fields {
         match f {
             Field::Section(text) => {
@@ -421,11 +444,35 @@ impl FieldUnits {
     }
 }
 
-pub struct FormPlugin;
+/// Turns the form widgets' events into [`FieldChange`]s.
+pub struct FormPlugin {
+    /// The widgets' name prefix.
+    pub prefix: String,
+    /// How typed numbers read (expressions, units); `None`: plain numbers.
+    pub eval: Option<NumberEval>,
+}
+
+impl FormPlugin {
+    pub fn new(prefix: impl Into<String>) -> Self {
+        FormPlugin {
+            prefix: prefix.into(),
+            eval: None,
+        }
+    }
+
+    pub fn eval(mut self, eval: NumberEval) -> Self {
+        self.eval = Some(eval);
+        self
+    }
+}
 
 impl Plugin for FormPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<FieldChange>()
+            .insert_resource(FormSettings {
+                prefix: self.prefix.clone(),
+                eval: self.eval,
+            })
             .init_resource::<FieldUnits>()
             .add_observer(on_number)
             .add_observer(on_select)
@@ -438,23 +485,24 @@ impl Plugin for FormPlugin {
     }
 }
 
-fn key_for(q: &Query<&Name>, e: Entity) -> Option<String> {
+fn key_for(q: &Query<&Name>, f: &FormSettings, e: Entity) -> Option<String> {
     q.get(e)
         .ok()
-        .and_then(|n| key_of(n.as_str()).map(String::from))
+        .and_then(|n| key_of(&f.prefix, n.as_str()).map(String::from))
 }
 
 fn on_number(
-    ev: On<cadrs_ui::NumberFieldCommit>,
+    ev: On<crate::NumberFieldCommit>,
     q: Query<&Name>,
+    f: Res<FormSettings>,
     units: Res<FieldUnits>,
     mut out: MessageWriter<FieldChange>,
 ) {
-    let Some(key) = key_for(&q, ev.entity) else {
+    let Some(key) = key_for(&q, &f, ev.entity) else {
         return;
     };
     let unit = units.0.get(&key).copied().unwrap_or(Unit::None);
-    if let Some(v) = parse_num(&ev.text, unit) {
+    if let Some(v) = f.read(&ev.text, unit) {
         out.write(FieldChange {
             key,
             value: Value::Number(v),
@@ -468,8 +516,13 @@ fn on_number(
     }
 }
 
-fn on_select(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut out: MessageWriter<FieldChange>) {
-    if let Some(key) = key_for(&q, ev.entity) {
+fn on_select(
+    ev: On<crate::SelectChange>,
+    q: Query<&Name>,
+    f: Res<FormSettings>,
+    mut out: MessageWriter<FieldChange>,
+) {
+    if let Some(key) = key_for(&q, &f, ev.entity) {
         out.write(FieldChange {
             key,
             value: Value::Index(ev.index),
@@ -478,11 +531,12 @@ fn on_select(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut out: MessageWr
 }
 
 fn on_check(
-    ev: On<cadrs_ui::CheckboxChange>,
+    ev: On<crate::CheckboxChange>,
     q: Query<&Name>,
+    f: Res<FormSettings>,
     mut out: MessageWriter<FieldChange>,
 ) {
-    if let Some(key) = key_for(&q, ev.entity) {
+    if let Some(key) = key_for(&q, &f, ev.entity) {
         out.write(FieldChange {
             key,
             value: Value::Bool(ev.checked),
@@ -490,10 +544,15 @@ fn on_check(
     }
 }
 
-fn on_text(ev: On<cadrs_ui::TextSubmit>, q: Query<&Name>, mut out: MessageWriter<FieldChange>) {
+fn on_text(
+    ev: On<crate::TextSubmit>,
+    q: Query<&Name>,
+    f: Res<FormSettings>,
+    mut out: MessageWriter<FieldChange>,
+) {
     // (The event bubbles from the inner `-field` entity; take it once, there.)
     let Ok(n) = q.get(ev.entity) else { return };
-    let Some(key) = key_of(n.as_str()).and_then(|k| k.strip_suffix("-field")) else {
+    let Some(key) = key_of(&f.prefix, n.as_str()).and_then(|k| k.strip_suffix("-field")) else {
         return;
     };
     out.write(FieldChange {
@@ -505,10 +564,11 @@ fn on_text(ev: On<cadrs_ui::TextSubmit>, q: Query<&Name>, mut out: MessageWriter
 fn on_activate(
     ev: On<bevy::ui_widgets::Activate>,
     q: Query<&Name>,
+    f: Res<FormSettings>,
     mut out: MessageWriter<FieldChange>,
 ) {
     if let Ok(n) = q.get(ev.entity)
-        && let Some(key) = key_of(n.as_str())
+        && let Some(key) = key_of(&f.prefix, n.as_str())
     {
         out.write(FieldChange {
             key: key.to_string(),
@@ -518,11 +578,12 @@ fn on_activate(
 }
 
 fn on_list_activate(
-    ev: On<cadrs_ui::SelectionListActivate>,
+    ev: On<crate::SelectionListActivate>,
     q: Query<&Name>,
+    f: Res<FormSettings>,
     mut out: MessageWriter<FieldChange>,
 ) {
-    if let Some(key) = key_for(&q, ev.entity) {
+    if let Some(key) = key_for(&q, &f, ev.entity) {
         out.write(FieldChange {
             key,
             value: Value::Activate,
@@ -531,11 +592,12 @@ fn on_list_activate(
 }
 
 fn on_list_remove(
-    ev: On<cadrs_ui::SelectionListRemove>,
+    ev: On<crate::SelectionListRemove>,
     q: Query<&Name>,
+    f: Res<FormSettings>,
     mut out: MessageWriter<FieldChange>,
 ) {
-    if let Some(key) = key_for(&q, ev.entity) {
+    if let Some(key) = key_for(&q, &f, ev.entity) {
         out.write(FieldChange {
             key,
             value: Value::Remove(ev.index),
@@ -543,8 +605,13 @@ fn on_list_remove(
     }
 }
 
-fn on_tab(ev: On<cadrs_ui::TabStripSelect>, q: Query<&Name>, mut out: MessageWriter<FieldChange>) {
-    if let Some(key) = key_for(&q, ev.entity) {
+fn on_tab(
+    ev: On<crate::TabStripSelect>,
+    q: Query<&Name>,
+    f: Res<FormSettings>,
+    mut out: MessageWriter<FieldChange>,
+) {
+    if let Some(key) = key_for(&q, &f, ev.entity) {
         out.write(FieldChange {
             key,
             value: Value::Index(ev.index),
