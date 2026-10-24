@@ -22,21 +22,15 @@ const SIZES: [u32; 6] = [10, 12, 14, 16, 20, 24];
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=src/icon_raster.rs");
-    println!("cargo::rerun-if-changed=icons");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let icon_out = out_dir.join("icons");
     std::fs::create_dir_all(&icon_out).unwrap();
 
     let mut entries: Vec<(&str, Icon, f32)> =
         icon_rs::ALL.iter().map(|i| (i.name, *i, 1.0)).collect();
-    for icon in icon_raster::STAND_INS {
-        if icon_rs::get(icon.name).is_none() {
-            entries.push((icon.name, *icon, 1.0));
-        }
-    }
     for &(name, base, scale) in icon_raster::WEIGHTS {
-        let icon = icon_raster::get(base)
-            .unwrap_or_else(|| panic!("icon-rs has no {base:?} for {name:?}"));
+        let icon =
+            icon_rs::get(base).unwrap_or_else(|| panic!("icon-rs has no {base:?} for {name:?}"));
         entries.push((name, icon, scale));
     }
 

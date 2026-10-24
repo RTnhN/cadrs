@@ -22,34 +22,11 @@ pub const WEIGHTS: &[(&str, &str, f32)] = &[
     ("chevron-right-medium", "chevron-right", 1.3),
 ];
 
-/// Interface icons icon-rs doesn't have yet, drawn in its line style (`icons/`). A release of
-/// icon-rs that adds one by the same name replaces it.
-pub const STAND_INS: &[Icon] = &[
-    stand_in("sun", "Light", include_str!("../icons/sun.svg")),
-    stand_in("moon", "Dark", include_str!("../icons/moon.svg")),
-    stand_in("contrast", "System", include_str!("../icons/contrast.svg")),
-];
-
-const fn stand_in(name: &'static str, title: &'static str, svg: &'static str) -> Icon {
-    Icon {
-        name,
-        kind: icon_rs::Kind::Line,
-        title,
-        svg,
-        svg_dark: svg,
-    }
-}
-
-/// The icon by `name`: icon-rs's own, else a stand-in.
-pub fn get(name: &str) -> Option<Icon> {
-    icon_rs::get(name).or_else(|| STAND_INS.iter().find(|i| i.name == name).copied())
-}
-
 /// The icon `name` is drawn from, and its stroke weight (1 for icon-rs's own names).
 pub fn source(name: &str) -> Option<(Icon, f32)> {
     match WEIGHTS.iter().find(|(n, ..)| *n == name) {
-        Some(&(_, base, weight)) => get(base).map(|i| (i, weight)),
-        None => get(name).map(|i| (i, 1.0)),
+        Some(&(_, base, weight)) => icon_rs::get(base).map(|i| (i, weight)),
+        None => icon_rs::get(name).map(|i| (i, 1.0)),
     }
 }
 
