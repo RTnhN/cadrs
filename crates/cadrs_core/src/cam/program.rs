@@ -1,0 +1,586 @@
+//! From a CAM Studio's jobs to toolpaths, a simulated stock and G-code.
+//!
+//! - **Frames**: a setup's work coordinate system and each work plane ([`work_frame`]): the
+//!   origin (the model's, a point of the bodies' or the stock's box, or typed) and the axes.
+//! - **Stock** ([`StockShape`]): the job's box or cylinder round its bodies (in the stock's own
+//!   directions) or a stock component's body, expressed in any frame ([`stock_in`]).
+//! - **Toolpaths** ([`op_input`], [`generate`]): an operation's tool, work plane, the parts and
+//!   stock in that plane's coordinates and the parameters, handed to `cadrs_cam`'s strategies;
+//!   [`op_key`] identifies an input so the app computes each toolpath once (the job cache).
+//! - **Verify** ([`simulate`]): a setup's operations run over its stock.
+//! - **Post** ([`nc_program`], [`post_setup`]): a setup's toolpaths in its datum (or in work
+//!   planes' own datums, with Advanced work planes), with tool numbers, coolant and stops, through
+//!   the job machine's post.
+
+use std::collections::HashMap;
+
+use cadrs_cam::geom::{Aabb, Frame, P3, dot, normalize};
+use cadrs_cam::model::Model;
+use cadrs_cam::sim::{self, MillResult, SheetResult, SimOp};
+use cadrs_cam::strategy::Stock;
+use cadrs_cam::toolpath::{Step, Toolpath};
+use cadrs_cam::{Machine, NcOperation, NcProgram};
+
+use super::{
+    CamId, CamStudio, Job, OpKind, Origin, Role, Setup, StockKind, WorkPlane, WorkPlaneType,
+    box_point,
+};
+use crate::parts::Part;
+
+/// The job's bodies among the studio's built parts: the picked ones, else every part
+/// component's.
+pub fn job_bodies<'a>(cam: &CamStudio, job: &Job, parts: &'a [Part]) -> Vec<&'a Part> {
+    parts
+        .iter()
+        .filter(|p| {
+            if job.bodies.is_empty() {
+                cam.component_of(p.id).is_some_and(|c| c.role == Role::Part)
+            } else {
+                job.bodies.contains(&p.id)
+            }
+        })
+        .collect()
+}
+
+/// The job's workholding bodies.
+pub fn job_workholding<'a>(job: &Job, parts: &'a [Part]) -> Vec<&'a Part> {
+    parts
+        .iter()
+        .filter(|p| job.workholdings.contains(&p.id))
+        .collect()
+}
+
+/// The box of parts' display meshes in `frame`'s coordinates.
+pub fn parts_box(parts: &[&Part], frame: &Frame) -> Aabb {
+    Aabb::of(
+        parts
+            .iter()
+            .flat_map(|p| p.solid.positions.iter().map(|q| frame.to_local(*q))),
+    )
+}
+
+/// The job's stock in model coordinates.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StockShape {
+    /// A box in a frame's coordinates.
+    Box { frame: Frame, b: Aabb },
+    /// A cylinder about a frame's Z: its centre (frame XY), radius and Z range.
+    Cylinder {
+        frame: Frame,
+        center: [f64; 2],
+        radius: f64,
+        z: [f64; 2],
+    },
+    /// A body's triangles (model coordinates).
+    Mesh(Vec<[P3; 3]>),
+}
+
+impl StockShape {
+    /// Its triangles in model coordinates.
+    pub fn triangles(&self) -> Vec<[P3; 3]> {
+        match self {
+            StockShape::Box { frame, b } => cadrs_cam::model::box_triangles(b)
+                .into_iter()
+                .map(|t| t.map(|p| frame.to_world(p)))
+                .collect(),
+            StockShape::Cylinder {
+                frame,
+                center,
+                radius,
+                z,
+            } => cadrs_cam::model::cylinder_triangles(*center, *radius, z[0], z[1], 96)
+                .into_iter()
+                .map(|t| t.map(|p| frame.to_world(p)))
+                .collect(),
+            StockShape::Mesh(t) => t.clone(),
+        }
+    }
+
+    /// Its box in `frame`'s coordinates.
+    pub fn bounds_in(&self, frame: &Frame) -> Aabb {
+        Aabb::of(
+            self.triangles()
+                .iter()
+                .flatten()
+                .map(|p| frame.to_local(*p)),
+        )
+    }
+}
+
+/// The job's stock (see [`StockShape`]); `None` without bodies.
+pub fn stock_shape(cam: &CamStudio, job: &Job, parts: &[Part]) -> Option<StockShape> {
+    let bodies = job_bodies(cam, job, parts);
+    if let StockKind::Component(id) = job.stock.kind {
+        let c = cam.component(id)?;
+        let tris: Vec<[P3; 3]> = parts
+            .iter()
+            .filter(|p| p.id.feature == c.feature_id())
+            .flat_map(|p| super::geometry::part_triangles(p, &Frame::WORLD))
+            .collect();
+        return (!tris.is_empty()).then_some(StockShape::Mesh(tris));
+    }
+    if bodies.is_empty() {
+        return None;
+    }
+    let frame = job.stock.frame();
+    let b = parts_box(&bodies, &frame);
+    let o = job.stock.offsets;
+    match job.stock.kind {
+        StockKind::Box => Some(StockShape::Box {
+            frame,
+            b: Aabb::new(
+                [b.min[0] - o[0], b.min[1] - o[2], b.min[2] - o[4]],
+                [b.max[0] + o[1], b.max[1] + o[3], b.max[2] + o[5]],
+            ),
+        }),
+        StockKind::Cylinder => {
+            let c = [(b.min[0] + b.max[0]) / 2.0, (b.min[1] + b.max[1]) / 2.0];
+            let r = bodies
+                .iter()
+                .flat_map(|p| p.solid.positions.iter().map(|q| frame.to_local(*q)))
+                .map(|p| (p[0] - c[0]).hypot(p[1] - c[1]))
+                .fold(0.0, f64::max);
+            Some(StockShape::Cylinder {
+                frame,
+                center: c,
+                radius: r + job.stock.radial,
+                z: [b.min[2] - o[4], b.max[2] + o[5]],
+            })
+        }
+        StockKind::Component(_) => unreachable!(),
+    }
+}
+
+/// The stock as a strategy sees it in `frame`: a box when it's one aligned with the frame,
+/// else its triangles.
+pub fn stock_in(shape: &StockShape, frame: &Frame) -> Stock {
+    let bounds = shape.bounds_in(frame);
+    match shape {
+        StockShape::Box { frame: sf, .. } if aligned(sf, frame) => Stock::block(bounds),
+        _ => Stock {
+            bounds,
+            triangles: Some(
+                shape
+                    .triangles()
+                    .into_iter()
+                    .map(|t| t.map(|p| frame.to_local(p)))
+                    .collect(),
+            ),
+        },
+    }
+}
+
+/// Whether two frames' axes are parallel (each axis to one of the other's).
+fn aligned(a: &Frame, b: &Frame) -> bool {
+    [a.x, a.y, a.z].iter().all(|u| {
+        [b.x, b.y, b.z]
+            .iter()
+            .any(|v| dot(*u, *v).abs() > 1.0 - 1e-9)
+    })
+}
+
+/// A work plane's frame in model coordinates (see the module docs).
+pub fn work_frame(cam: &CamStudio, job: &Job, wp: &WorkPlane, parts: &[Part]) -> Frame {
+    let axes = Frame::from_zx([0.0; 3], normalize(wp.z), wp.x);
+    let origin = match wp.origin {
+        Origin::World => [0.0; 3],
+        Origin::Manual(p) => p,
+        Origin::ComponentBox(bp) => {
+            let b = parts_box(&job_bodies(cam, job, parts), &axes);
+            if b.is_empty() {
+                [0.0; 3]
+            } else {
+                axes.to_world(box_point(&b, bp))
+            }
+        }
+        Origin::StockBox(bp) => match stock_shape(cam, job, parts) {
+            Some(s) => axes.to_world(box_point(&s.bounds_in(&axes), bp)),
+            None => [0.0; 3],
+        },
+    };
+    Frame { origin, ..axes }
+}
+
+/// The setup's work coordinate system.
+pub fn setup_frame(cam: &CamStudio, job: &Job, setup: &Setup, parts: &[Part]) -> Frame {
+    work_frame(cam, job, &setup.wcs, parts)
+}
+
+/// Everything a toolpath needs, in its work plane's coordinates.
+pub struct OpInput {
+    pub op: CamId,
+    pub frame: Frame,
+    pub tool: cadrs_cam::Tool,
+    pub tool_number: u32,
+    pub params: cadrs_cam::Params,
+    pub machine: Machine,
+    pub stock: Stock,
+    /// The parts to send to the kernel: (features, part ids).
+    pub parts: Vec<crate::ids::PartId>,
+    pub tolerance: f64,
+}
+
+/// An operation's input, or why it can't be computed.
+pub fn op_input(cam: &CamStudio, op: CamId, parts: &[Part]) -> Result<OpInput, String> {
+    let (job, _, o) = cam.operation(op).ok_or("The toolpath is gone")?;
+    let OpKind::Toolpath(tp) = &o.kind else {
+        return Err("Not a toolpath".into());
+    };
+    let machine = job
+        .machine
+        .clone()
+        .ok_or("Create the job's machine first")?;
+    let tool = cam
+        .tool_for(op)
+        .ok_or("Create a tool above the toolpath first")?;
+    let (_, wp) = cam.work_plane_for(op).ok_or("The toolpath is gone")?;
+    let frame = work_frame(cam, job, wp, parts);
+    let shape = stock_shape(cam, job, parts).ok_or("The job has no bodies")?;
+    let bodies = job_bodies(cam, job, parts);
+    if bodies.is_empty() {
+        return Err("The job has no bodies".into());
+    }
+    Ok(OpInput {
+        op,
+        frame,
+        tool: tool.tool.clone(),
+        tool_number: tool.number,
+        params: tp.params.clone(),
+        stock: stock_in(&shape, &frame),
+        machine,
+        parts: bodies.iter().map(|p| p.id).collect(),
+        tolerance: tp.params.tolerance,
+    })
+}
+
+/// A key for an operation's input and the parts it machines: the same key, the same toolpath
+/// (the job cache: going back to an earlier state recomputes nothing).
+pub fn op_key(input: &OpInput, features: &[crate::document::Feature]) -> u64 {
+    let mut h = blake3::Hasher::new();
+    h.update(format!("{:?}", input.frame).as_bytes());
+    h.update(format!("{:?}", input.tool).as_bytes());
+    h.update(format!("{:?}", input.params).as_bytes());
+    h.update(format!("{:?}", input.machine.kind).as_bytes());
+    h.update(format!("{:?}", input.stock).as_bytes());
+    h.update(format!("{:?}", input.parts).as_bytes());
+    h.update(format!("{features:?}").as_bytes());
+    let b = h.finalize();
+    u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
+}
+
+/// Runs the strategy (the model already in the input's frame).
+pub fn generate(
+    input: &OpInput,
+    model: &Model,
+    rest: Option<&cadrs_cam::heightmap::HeightMap>,
+) -> Result<Toolpath, String> {
+    let strategy_input = cadrs_cam::Input {
+        model,
+        stock: &input.stock,
+        tool: &input.tool,
+        machine: input.machine.kind,
+        params: &input.params,
+        rest,
+    };
+    cadrs_cam::generate(&strategy_input)
+}
+
+/// The heights a toolpath wants exact sections at (ask the kernel for them with the model).
+pub fn section_levels(input: &OpInput, model: &Model) -> Vec<f64> {
+    cadrs_cam::strategy::section_levels(&cadrs_cam::Input {
+        model,
+        stock: &input.stock,
+        tool: &input.tool,
+        machine: input.machine.kind,
+        params: &input.params,
+        rest: None,
+    })
+}
+
+/// The model request for an operation (the kernel works it out, [`super::geometry::model`]).
+pub fn model_request(
+    cam: &CamStudio,
+    input: &OpInput,
+    levels: Vec<f64>,
+) -> super::geometry::ModelRequest {
+    super::geometry::ModelRequest {
+        features: cam.part_features().to_vec(),
+        parts: input.parts.clone(),
+        frame: input.frame,
+        tolerance: (input.tolerance * 0.5).clamp(0.002, 0.05),
+        levels,
+    }
+}
+
+/// A toolpath computed in frame `from` moved into frame `to` (their Z axes must agree: a
+/// 3-axis machine can't tilt).
+pub fn move_toolpath(tp: &Toolpath, from: &Frame, to: &Frame) -> Result<Toolpath, String> {
+    if !from.same_z(to) {
+        return Err(
+            "The work plane tilts the tool: only a 3+2 or 5-axis machine can cut it".into(),
+        );
+    }
+    let rel = to.relative(from);
+    let map = |p: P3| rel.to_world(p);
+    let map2 = |p: [f64; 2]| {
+        let q = rel.to_world([p[0], p[1], 0.0]);
+        [q[0], q[1]]
+    };
+    let steps = tp
+        .steps
+        .iter()
+        .map(|s| match s {
+            Step::Rapid(p) => Step::Rapid(map(*p)),
+            Step::Feed { to, feed, kind } => Step::Feed {
+                to: map(*to),
+                feed: *feed,
+                kind: *kind,
+            },
+            Step::Arc {
+                to,
+                center,
+                cw,
+                feed,
+                kind,
+            } => Step::Arc {
+                to: map(*to),
+                center: map2(*center),
+                cw: *cw,
+                feed: *feed,
+                kind: *kind,
+            },
+            Step::Drill(c) => {
+                let mut c = *c;
+                let dz = rel.origin[2];
+                c.at = map2(c.at);
+                c.r_plane += dz;
+                c.bottom += dz;
+                c.retract += dz;
+                Step::Drill(c)
+            }
+            other => other.clone(),
+        })
+        .collect();
+    Ok(Toolpath {
+        steps,
+        warnings: tp.warnings.clone(),
+    })
+}
+
+/// The toolpaths of a setup, in order, with their tools and frames: what a simulation or post
+/// runs. `paths` holds the computed toolpaths by operation; missing ones are an error naming
+/// the first.
+pub struct SetupRun<'a> {
+    pub ops: Vec<RunOp<'a>>,
+    pub frame: Frame,
+}
+
+pub struct RunOp<'a> {
+    pub id: CamId,
+    pub name: &'a str,
+    pub tool: &'a cadrs_cam::Tool,
+    pub tool_number: u32,
+    pub posting: &'a cadrs_cam::strategy::Posting,
+    /// In the setup's coordinates.
+    pub toolpath: Toolpath,
+    /// The work plane it was computed in (`None`: the setup's), its type and datum.
+    pub plane: Option<(Frame, WorkPlaneType, Option<u32>)>,
+    /// In its own work plane's coordinates.
+    pub local: &'a Toolpath,
+}
+
+/// Collects a setup's operations (see [`SetupRun`]); `only`: just these operations.
+pub fn setup_run<'a>(
+    cam: &'a CamStudio,
+    job: &'a Job,
+    setup: &'a Setup,
+    parts: &[Part],
+    paths: &'a HashMap<CamId, Toolpath>,
+    only: Option<&[CamId]>,
+) -> Result<SetupRun<'a>, String> {
+    let frame = setup_frame(cam, job, setup, parts);
+    let mut ops = Vec::new();
+    for o in &setup.operations {
+        let OpKind::Toolpath(tp) = &o.kind else {
+            continue;
+        };
+        if o.suppressed || only.is_some_and(|ids| !ids.contains(&o.id)) {
+            continue;
+        }
+        let local = paths
+            .get(&o.id)
+            .ok_or_else(|| format!("{} isn't calculated: regenerate it first", o.name))?;
+        let tool = cam
+            .tool_for(o.id)
+            .ok_or_else(|| format!("{} has no tool above it", o.name))?;
+        let (wid, wp) = cam.work_plane_for(o.id).ok_or("gone")?;
+        let (toolpath, plane) = match wid {
+            None => (local.clone(), None),
+            Some(_) => {
+                let wf = work_frame(cam, job, wp, parts);
+                (
+                    move_toolpath(local, &wf, &frame).map_err(|e| format!("{}: {e}", o.name))?,
+                    Some((wf, wp.kind, wp.datum)),
+                )
+            }
+        };
+        ops.push(RunOp {
+            id: o.id,
+            name: &o.name,
+            tool: &tool.tool,
+            tool_number: tool.number,
+            posting: &tp.params.posting,
+            toolpath,
+            plane,
+            local,
+        });
+    }
+    Ok(SetupRun { ops, frame })
+}
+
+/// What Verify found.
+pub enum SimResult {
+    Mill(Box<MillResult>),
+    Sheet(Box<SheetResult>),
+}
+
+/// Simulates a setup's operations over its stock (all of them, or up to and including `upto`).
+pub fn simulate(
+    cam: &CamStudio,
+    job: &Job,
+    run: &SetupRun,
+    parts: &[Part],
+    upto: Option<CamId>,
+    quality: f64,
+) -> Result<SimResult, String> {
+    let machine = job.machine.as_ref().ok_or("The job has no machine")?;
+    let shape = stock_shape(cam, job, parts).ok_or("The job has no bodies")?;
+    let stock = stock_in(&shape, &run.frame);
+    let model = super::geometry::model_from_parts(&job_bodies(cam, job, parts), &run.frame);
+    let start = [0.0, 0.0, stock.bounds.max[2] + 50.0];
+    let mut motions = Vec::new();
+    for o in &run.ops {
+        motions.push((o.tool, o.toolpath.motion(start, machine.rapid_rate)));
+        if upto == Some(o.id) {
+            break;
+        }
+    }
+    let ops: Vec<SimOp> = motions
+        .iter()
+        .map(|(t, m)| SimOp {
+            tool: t,
+            segments: m,
+        })
+        .collect();
+    Ok(if machine.kind.is_cutting() {
+        SimResult::Sheet(Box::new(sim::simulate_sheet(&stock, &model, &ops)))
+    } else {
+        let cell = sim::sim_cell(&stock, quality);
+        SimResult::Mill(Box::new(sim::simulate_mill(&stock, &model, &ops, cell)))
+    })
+}
+
+/// The program for a setup's operations (see the module docs).
+pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram, String> {
+    let machine = job.machine.as_ref().ok_or("The job has no machine")?;
+    let s = &machine.post;
+    let base = setup.wcs.datum.unwrap_or(1).max(1);
+    let mut next_datum = base + 1;
+    let mut datums: HashMap<u64, u32> = HashMap::new();
+    let mut operations = Vec::new();
+    for o in &run.ops {
+        let (toolpath, datum) = match &o.plane {
+            None => (o.toolpath.clone(), base),
+            Some((_, WorkPlaneType::Dynamic, _)) => {
+                return Err(format!(
+                    "{}: a Dynamic work plane needs a 3+2 machine",
+                    o.name
+                ));
+            }
+            Some((_, WorkPlaneType::None, _)) => (o.toolpath.clone(), base),
+            Some((wf, WorkPlaneType::Absolute, d)) => {
+                if s.advanced_work_planes {
+                    let key = {
+                        let b = blake3::hash(format!("{wf:?}").as_bytes());
+                        u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
+                    };
+                    let n = d.unwrap_or_else(|| {
+                        *datums.entry(key).or_insert_with(|| {
+                            let n = next_datum;
+                            next_datum += 1;
+                            n
+                        })
+                    });
+                    (o.local.clone(), n)
+                } else {
+                    (o.toolpath.clone(), base)
+                }
+            }
+        };
+        operations.push(NcOperation {
+            name: o.name.to_string(),
+            tool: o.tool.clone(),
+            tool_number: o.tool_number,
+            toolpath,
+            coolant: o.posting.coolant,
+            datum,
+            stop_before: o.posting.stop_before,
+            force_tool_change: o.posting.force_tool_change,
+        });
+    }
+    Ok(NcProgram {
+        name: format!("{} {}", job.name, setup.name),
+        number: setup.program_number,
+        operations,
+    })
+}
+
+/// The G-code for a setup's operations.
+pub fn post_setup(setup: &Setup, job: &Job, run: &SetupRun) -> Result<String, String> {
+    let machine = job.machine.as_ref().ok_or("The job has no machine")?;
+    let program = nc_program(setup, job, run)?;
+    cadrs_cam::post(&program, machine, &machine.post).map_err(|e| e.to_string())
+}
+
+/// Moves outside the machine's travel, as warnings: the setup's toolpaths placed on the table
+/// by its machine mating (the stock's bottom centre on the table's centre, or offset).
+pub fn travel_warnings(job: &Job, setup: &Setup, run: &SetupRun, stock: &Stock) -> Vec<String> {
+    let Some(m) = &job.machine else {
+        return Vec::new();
+    };
+    let centre = [
+        (stock.bounds.min[0] + stock.bounds.max[0]) / 2.0,
+        (stock.bounds.min[1] + stock.bounds.max[1]) / 2.0,
+        stock.bounds.min[2],
+    ];
+    let shift = match setup.mating {
+        super::Mating::Automatic => [0.0; 3],
+        super::Mating::Manual(o) => o,
+    };
+    let mut out = Vec::new();
+    for o in &run.ops {
+        let b = o.toolpath.bounds();
+        if b.is_empty() {
+            continue;
+        }
+        for i in 0..2 {
+            let lo = b.min[i] - centre[i] + shift[i];
+            let hi = b.max[i] - centre[i] + shift[i];
+            if lo < -m.travel[i] / 2.0 - 1e-6 || hi > m.travel[i] / 2.0 + 1e-6 {
+                out.push(format!(
+                    "{} runs beyond the machine's {} travel",
+                    o.name,
+                    ["X", "Y"][i]
+                ));
+                break;
+            }
+        }
+        if b.max[2] - b.min[2] > m.travel[2] {
+            out.push(format!(
+                "{} needs more Z travel than the machine has",
+                o.name
+            ));
+        }
+    }
+    out
+}

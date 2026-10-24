@@ -80,15 +80,9 @@ fn max_in_disc(map: &HeightMap, c: P2, r: f64) -> f32 {
 /// Runs the operations over the stock (see the module docs).
 pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> MillResult {
     let mut map = stock.height_map(cell);
-    let part = HeightMap::of_triangles(
-        &model.triangles,
-        map.origin,
-        [
-            map.origin[0] + (map.nx - 1) as f64 * map.cell,
-            map.origin[1] + (map.ny - 1) as f64 * map.cell,
-        ],
-        map.cell,
-    );
+    // The part on exactly the stock's grid.
+    let mut part = map.blank();
+    part.rasterize(&model.triangles, false);
     let mut removed = 0.0;
     let mut rapid_hits = Vec::new();
     let mut holder_hits = Vec::new();
@@ -136,15 +130,19 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
     let mut gouge_depth = 0.0f64;
     let mut excess = 0.0f64;
     let tol = (map.cell * 0.5).max(0.01) as f32;
+    // A gouge is under the part pulled in by a cell: the meshes' chords and a wall's place
+    // within its cell aren't gouges.
+    let solid = part.eroded();
     for j in 0..map.ny {
         for i in 0..map.nx {
             let (s, p) = (map.at(i, j), part.at(i, j));
             if p == EMPTY || s == EMPTY {
                 continue;
             }
-            if s < p - tol {
+            let q = solid.at(i, j);
+            if q != EMPTY && s < q - tol {
                 gouge_cells += 1;
-                gouge_depth = gouge_depth.max((p - s) as f64);
+                gouge_depth = gouge_depth.max((q - s) as f64);
                 if gouges.len() < MAX_REPORTED {
                     let q = map.point(i, j);
                     gouges.push([q[0], q[1], s as f64]);
@@ -214,7 +212,8 @@ pub fn simulate_sheet(stock: &Stock, model: &Model, ops: &[SimOp]) -> SheetResul
     let left = region::difference(&sheet, &kerf);
     let pieces = region::faces(&left);
     let sil = model.silhouette();
-    let damage = region::area(&region::intersection(&kerf, &sil));
+    // Within 0.02 mm of the outline is the meshes' own chordal error, not a cut into the part.
+    let damage = region::area(&region::intersection(&kerf, &region::offset(&sil, -0.02)));
     // A part piece lies within the part's outline (allowing for the arc tolerance).
     let grown = region::offset(&sil, 0.05);
     let parts_free = pieces
@@ -276,6 +275,57 @@ mod tests {
         // The pocket is roughed to about the floor stock.
         let s = r.stock.sample([30.0, 20.0]);
         assert!((s - 12.3).abs() < 0.35, "{s}");
+    }
+
+    /// A multi-depth profile round a block with a square hole: leads only where the tool can
+    /// come down, lead-outs the way the tool is going; Verify finds nothing wrong.
+    #[test]
+    fn profile_round_a_hole_is_clean() {
+        let mut t = Vec::new();
+        t.extend(box_triangles(&Aabb::new(
+            [0.0, 0.0, 0.0],
+            [20.0, 40.0, 10.0],
+        )));
+        t.extend(box_triangles(&Aabb::new(
+            [40.0, 0.0, 0.0],
+            [60.0, 40.0, 10.0],
+        )));
+        t.extend(box_triangles(&Aabb::new(
+            [20.0, 0.0, 0.0],
+            [40.0, 10.0, 10.0],
+        )));
+        t.extend(box_triangles(&Aabb::new(
+            [20.0, 30.0, 0.0],
+            [40.0, 40.0, 10.0],
+        )));
+        let m = Model::from_triangles("block", t);
+        let stock = Stock::block(Aabb::new([-2.0, -2.0, 0.0], [62.0, 42.0, 11.0]));
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        p.step_down = 3.0;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        let tp = generate(&input).unwrap();
+        let segs = tp.motion([0.0, 0.0, 40.0], 5000.0);
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+            0.1,
+        );
+        assert_eq!(r.gouge_cells, 0, "{:?}", &r.gouges[..r.gouges.len().min(4)]);
+        assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
+        // The hole's walls are cut to the bottom.
+        assert!(r.stock.sample([21.0, 20.0]) < 0.01);
     }
 
     #[test]

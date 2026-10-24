@@ -219,8 +219,9 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
                 .position(|x| x.pts.len() == c.pts.len() && x.pts.iter().all(|q| c.pts.contains(q)))
                 .map(|k| holes[k])
                 .unwrap_or(false);
-            // The part on the right: reverse the region's ring orientation.
-            let c = if c.closed && (p.direction == Direction::Climb) == c.ccw() {
+            // The region's rings have the part (and its kerf) on their left; the part on the
+            // right (climb) is every ring reversed.
+            let c = if c.closed && p.direction == Direction::Climb {
                 c.reversed().starting_near(from)
             } else if c.closed {
                 c.starting_near(from)
@@ -528,7 +529,8 @@ mod tests {
             .map(|(i, _)| i)
             .collect();
         assert_eq!(ons.len(), 2);
-        // The first cut is the hole: its feeds stay inside 40..60.
+        // The first cut is the hole, counter-clockwise (the part on the right), pierced in the
+        // scrap: its feeds stay inside 40..60.
         let first_cut: Vec<P3> = tp.steps[ons[0]..ons[1]]
             .iter()
             .filter_map(|s| match s {

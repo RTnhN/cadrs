@@ -135,6 +135,7 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
                 free_side: None,
                 tabs: None,
                 ramp: false,
+                clear: None,
             };
             b.travel_to([start[0], start[1]], start[2], &cut);
             b.feed(start, FeedKind::Plunge);
@@ -213,6 +214,7 @@ pub fn constant_z(input: &Input) -> Result<Toolpath, String> {
                 free_side: Some(side),
                 tabs: None,
                 ramp: false,
+                clear: None,
             };
             b.cut(&c, z, &cut);
         }

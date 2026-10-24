@@ -130,6 +130,7 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                         free_side: None,
                         tabs: None,
                         ramp: true,
+                        clear: None,
                     };
                     b.cut(&c, z, &cut);
                     first = false;
@@ -150,6 +151,7 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                     free_side: None,
                     tabs: None,
                     ramp: true,
+                    clear: None,
                 };
                 b.cut(&c, z, &cut);
                 first = false;
@@ -162,6 +164,7 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                     free_side: None,
                     tabs: None,
                     ramp: true,
+                    clear: None,
                 };
                 b.cut(&c, z, &cut);
             }
@@ -236,6 +239,7 @@ pub fn face(input: &Input) -> Result<Toolpath, String> {
                 free_side: None,
                 tabs: None,
                 ramp: false,
+                clear: None,
             };
             // Entries are off the stock: plunge.
             b.cut(&Contour::open(vec![a, e]), z, &cut);
@@ -507,6 +511,16 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
             })
             .collect()
     };
+    // Lead-ins only start where the tool can come down: off the stock, or (below the first
+    // depth) in the band this contour cut at the depth above.
+    let sb = input.stock.bounds;
+    let outside = region::difference(
+        &[region::rect(
+            [sb.min[0] - 1e4, sb.min[1] - 1e4],
+            [sb.max[0] + 1e4, sb.max[1] + 1e4],
+        )],
+        &input.stock.footprint(),
+    );
     let run = |b: &mut Builder, ci: usize, li: usize, z: f64, above: f64| {
         for (k, path) in paths_by_contour[ci].iter().enumerate() {
             let near = b.at.map_or(path.pts[0], |a| [a[0], a[1]]);
@@ -515,12 +529,18 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
             } else {
                 path.clone()
             };
+            let clear = if li > 0 {
+                region::union(&outside, &region::stroke(&path.walk(), 2.0 * r - 0.02))
+            } else {
+                outside.clone()
+            };
             let cut = Cut {
                 material_top: above,
                 direct_ok: k > 0,
                 free_side: side,
                 tabs,
-                ramp: li > 0 || side.is_none(),
+                ramp: true,
+                clear: Some(&clear),
             };
             b.cut(&path, z, &cut);
         }
@@ -624,6 +644,7 @@ pub fn chamfer(input: &Input) -> Result<Toolpath, String> {
             free_side: Some(free_side(p.direction)),
             tabs: None,
             ramp: false,
+            clear: None,
         };
         b.cut(&c, z, &cut);
     }
@@ -655,6 +676,7 @@ pub fn engrave(input: &Input) -> Result<Toolpath, String> {
                 free_side: None,
                 tabs: None,
                 ramp: true,
+                clear: None,
             };
             b.cut(&c, *z, &cut);
             above = *z;

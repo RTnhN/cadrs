@@ -50,6 +50,17 @@ impl HeightMap {
         }
     }
 
+    /// An empty map on the same grid.
+    pub fn blank(&self) -> HeightMap {
+        HeightMap {
+            origin: self.origin,
+            cell: self.cell,
+            nx: self.nx,
+            ny: self.ny,
+            z: vec![EMPTY; self.nx * self.ny],
+        }
+    }
+
     /// A block of stock: `bounds`' top over its footprint.
     pub fn block(bounds: &Aabb, cell: f64) -> HeightMap {
         let mut m = HeightMap::new(
@@ -61,15 +72,26 @@ impl HeightMap {
         m
     }
 
-    /// The highest point of the triangles over each cell of a map covering `min`–`max`.
+    /// The highest point of the triangles over each cell's centre, on a map covering
+    /// `min`–`max`: the part as the simulation compares the stock with.
     pub fn of_triangles(tris: &[[P3; 3]], min: P2, max: P2, cell: f64) -> HeightMap {
         let mut m = HeightMap::new(min, max, cell);
-        m.rasterize(tris);
+        m.rasterize(tris, false);
         m
     }
 
-    /// Raises cells to the triangles' heights (vertical walls through their edges).
-    pub fn rasterize(&mut self, tris: &[[P3; 3]]) {
+    /// The same with every cell an edge passes near raised to the edge (walls and slivers
+    /// thinner than a cell kept, edges never between cells): a cutter dropped on it never goes
+    /// lower than on the true surface, at the price of up to a cell's worth too high.
+    pub fn of_triangles_covering(tris: &[[P3; 3]], min: P2, max: P2, cell: f64) -> HeightMap {
+        let mut m = HeightMap::new(min, max, cell);
+        m.rasterize(tris, true);
+        m
+    }
+
+    /// Raises cells to the triangles' heights: at their centres, and with `covering` along
+    /// their edges too.
+    pub fn rasterize(&mut self, tris: &[[P3; 3]], covering: bool) {
         let (nx, ny, cell, o) = (self.nx, self.ny, self.cell, self.origin);
         // Rows in parallel: each row takes the triangles whose y range covers it.
         let rows: Vec<Vec<f32>> = (0..ny)
@@ -99,6 +121,9 @@ impl HeightMap {
                         {
                             *c = c.max(h as f32);
                         }
+                    }
+                    if !covering {
+                        continue;
                     }
                     // Edges: walls and slivers thinner than a cell still show.
                     for k in 0..3 {
@@ -168,70 +193,78 @@ impl HeightMap {
         self.cell_of(p).map_or(EMPTY, |(i, j)| self.at(i, j))
     }
 
-    /// The cutter's kernel: for each cell offset within its radius, how high its surface is
-    /// above its tip there.
-    fn kernel(&self, tool: &Tool) -> Vec<(isize, isize, f32)> {
+    /// Every cell under the cutter with its tip at `p`: the cell's index and how high the
+    /// cutter's surface is above its tip over the cell. Exact (cells whose centres are within
+    /// the radius, at their centres' distance) or, `covering`, every cell the cutter overlaps at
+    /// the cutter's lowest height over it (a drop never comes out lower than the true one).
+    fn stamp(&self, tool: &Tool, p: P2, covering: bool, mut f: impl FnMut(usize, f32)) {
         let r = tool.radius();
-        let n = (r / self.cell).ceil() as isize;
-        let mut k = Vec::new();
-        for dj in -n..=n {
-            for di in -n..=n {
-                let d = ((di * di + dj * dj) as f64).sqrt() * self.cell;
-                if let Some(h) = tool
-                    .height_at(d.min(r))
-                    .filter(|_| d <= r + 0.5 * self.cell)
-                {
-                    k.push((di, dj, h as f32));
+        let slack = if covering {
+            self.cell * std::f64::consts::FRAC_1_SQRT_2
+        } else {
+            0.0
+        };
+        let reach = r + slack;
+        let x0 = ((p[0] - reach - self.origin[0]) / self.cell)
+            .ceil()
+            .max(0.0) as usize;
+        let y0 = ((p[1] - reach - self.origin[1]) / self.cell)
+            .ceil()
+            .max(0.0) as usize;
+        let x1 = ((p[0] + reach - self.origin[0]) / self.cell).floor();
+        let y1 = ((p[1] + reach - self.origin[1]) / self.cell).floor();
+        if x1 < 0.0 || y1 < 0.0 {
+            return;
+        }
+        let (x1, y1) = (
+            (x1 as usize).min(self.nx - 1),
+            (y1 as usize).min(self.ny - 1),
+        );
+        for j in y0..=y1 {
+            let dy = self.origin[1] + j as f64 * self.cell - p[1];
+            for i in x0..=x1 {
+                let dx = self.origin[0] + i as f64 * self.cell - p[0];
+                let d = (dx * dx + dy * dy).sqrt();
+                if d > reach + 1e-12 {
+                    continue;
+                }
+                let at = (d - slack).clamp(0.0, r);
+                if let Some(h) = tool.height_at(at) {
+                    f(j * self.nx + i, h as f32);
                 }
             }
         }
-        k
     }
 
-    /// How low the tool's tip can go at `p` without cutting into the map's surface (the
-    /// map's lowest value when nothing is under it: `floor`).
+    /// How low the tool's tip can go at `p` without cutting into the map's surface (`floor`
+    /// when nothing is under it). Cells the cutter only partly covers count, so it never comes
+    /// out lower than the true drop.
     pub fn drop_cutter(&self, tool: &Tool, p: P2, floor: f64) -> f64 {
-        let k = self.kernel(tool);
-        self.drop_with(&k, p, floor)
-    }
-
-    fn drop_with(&self, k: &[(isize, isize, f32)], p: P2, floor: f64) -> f64 {
-        let ci = ((p[0] - self.origin[0]) / self.cell).round() as isize;
-        let cj = ((p[1] - self.origin[1]) / self.cell).round() as isize;
         let mut z = floor as f32;
-        for &(di, dj, h) in k {
-            let (i, j) = (ci + di, cj + dj);
-            if i < 0 || j < 0 || i >= self.nx as isize || j >= self.ny as isize {
-                continue;
-            }
-            let v = self.z[j as usize * self.nx + i as usize];
+        self.stamp(tool, p, true, |i, h| {
+            let v = self.z[i];
             if v != EMPTY {
                 z = z.max(v - h);
             }
-        }
+        });
         z as f64
     }
 
     /// [`HeightMap::drop_cutter`] at many points at once (in parallel).
     pub fn drop_many(&self, tool: &Tool, pts: &[P2], floor: f64) -> Vec<f64> {
-        let k = self.kernel(tool);
         pts.par_iter()
-            .map(|p| self.drop_with(&k, *p, floor))
+            .map(|p| self.drop_cutter(tool, *p, floor))
             .collect()
     }
 
     /// Lowers the stock under the tool moving from `a` to `b` (tip positions). Returns the
     /// volume removed (mm³).
     pub fn cut(&mut self, tool: &Tool, a: P3, b: P3) -> f64 {
-        let k = self.kernel(tool);
-        self.cut_with(&k, a, b)
-    }
-
-    fn cut_with(&mut self, k: &[(isize, isize, f32)], a: P3, b: P3) -> f64 {
         let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
         let n = ((len / (self.cell * 0.5)).ceil() as usize).max(1);
         let area = (self.cell * self.cell) as f32;
         let mut removed = 0.0f32;
+        let mut cells: Vec<(usize, f32)> = Vec::new();
         for s in 0..=n {
             let f = s as f64 / n as f64;
             let p = [
@@ -239,16 +272,11 @@ impl HeightMap {
                 a[1] + (b[1] - a[1]) * f,
                 a[2] + (b[2] - a[2]) * f,
             ];
-            let ci = ((p[0] - self.origin[0]) / self.cell).round() as isize;
-            let cj = ((p[1] - self.origin[1]) / self.cell).round() as isize;
-            for &(di, dj, h) in k {
-                let (i, j) = (ci + di, cj + dj);
-                if i < 0 || j < 0 || i >= self.nx as isize || j >= self.ny as isize {
-                    continue;
-                }
-                let idx = j as usize * self.nx + i as usize;
+            cells.clear();
+            self.stamp(tool, [p[0], p[1]], false, |i, h| cells.push((i, h)));
+            for &(i, h) in &cells {
                 let surface = p[2] as f32 + h;
-                let v = &mut self.z[idx];
+                let v = &mut self.z[i];
                 if *v != EMPTY && *v > surface {
                     removed += (*v - surface) * area;
                     *v = surface;
@@ -261,11 +289,40 @@ impl HeightMap {
     /// Lowers the stock along a whole motion (feed moves only; rapids are checked by
     /// [`crate::sim`]). Returns the volume removed.
     pub fn cut_motion(&mut self, tool: &Tool, segs: &[crate::toolpath::Segment]) -> f64 {
-        let k = self.kernel(tool);
         segs.iter()
             .filter(|s| !s.is_rapid())
-            .map(|s| self.cut_with(&k, s.from, s.to))
+            .map(|s| self.cut(tool, s.from, s.to))
             .sum()
+    }
+
+    /// Each cell lowered to the lowest of it and its eight neighbours (an empty neighbour
+    /// empties it): the surface pulled in by a cell, for comparisons that shouldn't trip over
+    /// a wall's position within a cell.
+    pub fn eroded(&self) -> HeightMap {
+        let mut out = self.clone();
+        for j in 0..self.ny {
+            for i in 0..self.nx {
+                let mut m = self.at(i, j);
+                for (di, dj) in [
+                    (-1, -1),
+                    (0, -1),
+                    (1, -1),
+                    (-1, 0),
+                    (1, 0),
+                    (-1, 1),
+                    (0, 1),
+                    (1, 1),
+                ] {
+                    let (x, y) = (i as isize + di, j as isize + dj);
+                    if x < 0 || y < 0 || x >= self.nx as isize || y >= self.ny as isize {
+                        continue;
+                    }
+                    m = m.min(self.at(x as usize, y as usize));
+                }
+                out.z[j * self.nx + i] = m;
+            }
+        }
+        out
     }
 
     /// The material's volume over the map (mm³) above `base`.
@@ -296,7 +353,7 @@ mod tests {
     #[test]
     fn drop_flat_and_ball() {
         let tris = box_triangles(&Aabb::new([0.0, 0.0, 0.0], [10.0, 10.0, 5.0]));
-        let m = HeightMap::of_triangles(&tris, [-10.0, -10.0], [20.0, 20.0], 0.1);
+        let m = HeightMap::of_triangles_covering(&tris, [-10.0, -10.0], [20.0, 20.0], 0.1);
         let flat = Tool::new(ToolKind::EndMill, 6.0);
         // Over the top, and overhanging the edge by less than the radius: on the top.
         assert!((m.drop_cutter(&flat, [5.0, 5.0], -1.0) - 5.0).abs() < 1e-6);
@@ -305,8 +362,10 @@ mod tests {
         assert_eq!(m.drop_cutter(&flat, [14.0, 5.0], -1.0), -1.0);
         let ball = Tool::new(ToolKind::BallMill, 6.0);
         // 2 mm past the edge, a 3 mm ball touches the edge 3 − √5 up its side.
+        // Never lower than the exact drop, at most a cell's slope higher.
         let z = m.drop_cutter(&ball, [12.0, 5.0], -1.0);
-        assert!((z - (5.0 - (3.0 - 5f64.sqrt()))).abs() < 0.06, "{z}");
+        let exact = 5.0 - (3.0 - 5f64.sqrt());
+        assert!(z >= exact - 1e-6 && z < exact + 0.1, "{z} {exact}");
     }
 
     #[test]
