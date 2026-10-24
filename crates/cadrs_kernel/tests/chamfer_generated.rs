@@ -439,15 +439,22 @@ fn chamfered_rounded_prisms() {
                 .filter(|e| (e.mid.z - h).abs() < 1e-6)
                 .map(|e| e.id)
                 .collect();
-            let opts = ChamferOpts::new(ChamferSpec::EqualDistance(d));
-            match k.chamfer_with(body, &top, &opts) {
+            // By the local chamfer alone (the blend tool's, matching by chance, would hide a
+            // broken corner): the prism's faces (its sides, rounds, top and bottom) and one per
+            // chamfer, the corners' cones (fanning or not).
+            match cadrs_kernel::native::blend::chamfer_local(&mut k, body, &top, d) {
                 Ok(out) => {
                     let o = out.bodies[0];
-                    let issues = k.get(o).unwrap().check();
+                    let body = k.get(o).unwrap();
+                    let issues = body.check();
+                    let faces = body.faces.len();
                     let removed = v0 - k.mass_properties(o).unwrap().volume;
-                    if !issues.is_empty() || (removed - want).abs() > 1e-6 * (1.0 + want) {
+                    if !issues.is_empty()
+                        || faces != 2 + 4 * n
+                        || (removed - want).abs() > 1e-6 * (1.0 + want)
+                    {
                         failures.push(format!(
-                            "{n}-gon r {r} d {d}: removed {removed:.9}, want {want:.9}, {issues:?}"
+                            "{n}-gon r {r} d {d}: removed {removed:.9}, want {want:.9}, {faces} faces, {issues:?}"
                         ));
                     }
                 }

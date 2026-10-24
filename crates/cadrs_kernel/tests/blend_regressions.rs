@@ -213,9 +213,11 @@ fn cross_hole_fillet() {
 }
 
 /// The same document's Chamfer 1 round the opening (its rim edges, by tangent propagation),
-/// on the body Fillet 2 left, chamfered 0.5 to 2 by the local chamfer alone: valid, each taking
-/// off about w²/2 a mm of rim (the narrowest's times (w/w₀)², a little more where corners grow
-/// faster), and as it does now (`want`).
+/// on the body Fillet 2 left, chamfered 0.5 to 2 by the local chamfer alone: valid, and each
+/// taking off about w²/2 a mm of rim (the narrowest's times (w/w₀)², a little more where corners
+/// grow faster). `want` pins what it takes off now (not an independent answer: a change that
+/// moves it should explain why); w²/2 of rim at 0.5 puts the rim at 312 mm at fillet 1 and 293
+/// at fillet 4, two loops round the opening less its rounds' corners.
 fn shell_opening_chamfer(data: &[u8], edges: &[u64], want: [f64; 4]) {
     let mut k = NativeKernel::new();
     let b = k.insert(bodyio::read(data).unwrap());
