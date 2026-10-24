@@ -180,6 +180,19 @@ fn a_profile_on_open_edges_keeps_off_the_part() {
     };
     let e = generate(&input).unwrap_err();
     assert!(e.contains("no through holes"), "{e}");
+    // Inside on the picked edges is the part's side: cut, but said.
+    let mut q = p.clone();
+    q.drive.edges = vec!["e1".into(), "e2".into()];
+    let input = Input {
+        params: &q,
+        ..input
+    };
+    let tp = generate(&input).unwrap();
+    assert!(
+        tp.warnings.iter().any(|w| w.contains("cuts into the part")),
+        "{:?}",
+        tp.warnings
+    );
 }
 
 /// A laser cut along a picked open edge: the beam runs half its kerf off it, outside the part.
@@ -356,5 +369,72 @@ fn inside_a_hole_climbs_with_the_material_on_the_right() {
         !tp.steps
             .iter()
             .any(|s| matches!(s, Step::Compensation(Some(false))))
+    );
+}
+
+/// A through hole's top edges picked (the ones in view), the bottom left at the selection: the
+/// profile cuts down the hole's wall to the model's bottom, and says so.
+#[test]
+fn a_contour_picked_by_its_top_edges_is_cut_down_its_wall() {
+    use crate::model::{Edge, Model, box_triangles};
+    let mut tris = Vec::new();
+    for (lo, hi) in [
+        ([0.0, 0.0], [20.0, 40.0]),
+        ([40.0, 0.0], [60.0, 40.0]),
+        ([20.0, 0.0], [40.0, 10.0]),
+        ([20.0, 30.0], [40.0, 40.0]),
+    ] {
+        tris.extend(box_triangles(&Aabb::new(
+            [lo[0], lo[1], 0.0],
+            [hi[0], hi[1], 12.0],
+        )));
+    }
+    let mut m = Model::from_triangles("frame", tris);
+    m.edges.push(Edge {
+        name: "hole-top".into(),
+        body: 0,
+        points: vec![
+            [20.0, 10.0, 12.0],
+            [40.0, 10.0, 12.0],
+            [40.0, 30.0, 12.0],
+            [20.0, 30.0, 12.0],
+            [20.0, 10.0, 12.0],
+        ],
+        circle: None,
+    });
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 12.0]));
+    let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+    p.drive.edges = vec!["hole-top".into()];
+    assert_eq!(p.heights.bottom.from, HeightRef::Selection);
+    let input = Input {
+        model: &m,
+        stock: &stock,
+        tool: &tool,
+        machine: MachineKind::Mill,
+        params: &p,
+        rest: None,
+        fixtures: &[],
+    };
+    let tp = generate(&input).unwrap();
+    let lowest = tp
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Feed {
+                to,
+                kind: FeedKind::Cut,
+                ..
+            } => Some(to[2]),
+            _ => None,
+        })
+        .fold(f64::INFINITY, f64::min);
+    assert!(lowest < 1e-6, "{lowest}");
+    assert!(
+        tp.warnings
+            .iter()
+            .any(|w| w.contains("picked edges are at the top")),
+        "{:?}",
+        tp.warnings
     );
 }

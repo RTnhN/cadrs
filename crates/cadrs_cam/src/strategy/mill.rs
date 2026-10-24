@@ -586,6 +586,10 @@ fn group_passes(passes: &[Vec<Contour>]) -> Vec<Vec<Contour>> {
     paths_by_contour
 }
 
+/// What a profile or cut says when Inside puts the tool on the part's side of picked open edges.
+pub(super) const INSIDE_INTO_MATERIAL: &str = "Inside puts the tool on the part's side of the \
+     picked edges: it cuts into the part there (Automatic or Outside keeps it off)";
+
 /// 2-axis profile: round the outline (or the picked edges) at depth passes, with finishing
 /// passes, leads and tabs.
 pub fn profile(input: &Input) -> Result<Toolpath, String> {
@@ -594,7 +598,9 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
     let top = input.top();
     let bottom = input.bottom() + p.floor_stock;
     if bottom >= top {
-        return Err("The bottom height is above the top".into());
+        return Err(
+            "The bottom height isn't below the top: set Bottom lower (or Top higher)".into(),
+        );
     }
     let levels = input.levels(top, bottom, false);
     let passes = p.passes.max(1);
@@ -720,6 +726,17 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         ));
         b
     };
+    let mut b = b;
+    if input.inside_into_material() {
+        b.warnings.push(INSIDE_INTO_MATERIAL.into());
+    }
+    if input.bottom_from_top_pick() {
+        b.warnings.push(
+            "The picked edges are at the top: cut down to the model's bottom (pick the \
+             contour's bottom edges, or set Bottom, to stop higher)"
+                .into(),
+        );
+    }
     Ok(b.finish())
 }
 

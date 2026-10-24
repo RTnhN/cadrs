@@ -1027,3 +1027,77 @@ fn a_tap_feeds_its_pitch_at_the_speed_set() {
     let line = nc.lines().find(|l| l.contains("G84")).expect(&nc);
     assert!(line.ends_with("F625"), "{line}");
 }
+
+/// A stop before the second operation (same tool): the spindle and coolant go off before the
+/// M0, and both come back on (M3, M8) before it cuts again.
+#[test]
+fn a_stop_turns_the_spindle_and_coolant_off_and_back_on() {
+    for d in [Dialect::Fanuc, Dialect::Haas, Dialect::LinuxCnc] {
+        let mut m = machine(MachineKind::Mill, Dialect::Fanuc);
+        m.dialect = d;
+        let s = PostSettings::for_dialect(d, MachineKind::Mill);
+        let first = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+        let mut second = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+        second.stop_before = true;
+        let p = NcProgram {
+            name: "Stop".into(),
+            number: 1,
+            offsets: Vec::new(),
+            operations: vec![first, second],
+        };
+        let nc = post(&p, &m, &s).unwrap();
+        let lines: Vec<&str> = nc.lines().collect();
+        let stop = lines
+            .iter()
+            .position(|l| l.split_whitespace().any(|w| w == "M0" || w == "M00"))
+            .expect(&nc);
+        let before = &lines[..stop];
+        let m5 = before.iter().rposition(|l| l.contains("M5")).expect(&nc);
+        let m9 = before.iter().rposition(|l| l.contains("M9")).expect(&nc);
+        let cut_before = before.iter().rposition(|l| l.contains("G1")).unwrap();
+        assert!(m5 > cut_before && m9 > cut_before, "{d:?}:\n{nc}");
+        let after = &lines[stop..];
+        let m3 = after.iter().position(|l| l.contains("M3")).expect(&nc);
+        let m8 = after.iter().position(|l| l.contains("M8")).expect(&nc);
+        let cut_after = after.iter().position(|l| l.contains("G1")).unwrap();
+        assert!(m3 < cut_after && m8 < cut_after, "{d:?}:\n{nc}");
+    }
+}
+
+/// From one operation to the next with the same tool and offset: never a diagonal rapid. Up
+/// to the higher height first, across, then down.
+#[test]
+fn between_operations_up_across_down() {
+    let m = machine(MachineKind::Mill, Dialect::Fanuc);
+    for (z, want) in [(25.0, ["Z25.", "X30. Y40."]), (2.0, ["X30. Y40.", "Z2."])] {
+        let first = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+        let mut second = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+        second.name = "Second".into();
+        second.toolpath.steps[0] = Step::Rapid([30.0, 40.0, z]);
+        let p = NcProgram {
+            name: "Two".into(),
+            number: 1,
+            offsets: Vec::new(),
+            operations: vec![first, second],
+        };
+        let nc = post(&p, &m, &m.post).unwrap();
+        let after = &nc[nc.find("(Second)").expect(&nc)..];
+        let moves: Vec<&str> = after
+            .lines()
+            .filter(|l| l.contains('X') || l.contains('Y') || l.contains('Z'))
+            .take(2)
+            .collect();
+        for (l, w) in moves.iter().zip(want) {
+            let words: Vec<&str> = l
+                .split_whitespace()
+                .filter(|t| !t.starts_with('N'))
+                .collect();
+            let axes: Vec<&str> = words
+                .iter()
+                .copied()
+                .filter(|t| t.starts_with(['X', 'Y', 'Z']))
+                .collect();
+            assert_eq!(axes.join(" "), w, "{nc}");
+        }
+    }
+}

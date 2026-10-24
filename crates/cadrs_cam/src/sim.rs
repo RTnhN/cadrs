@@ -118,7 +118,8 @@ pub fn simulate_mill_on(
         let flutes = op.tool.cutting_length.max(0.1);
         // The cutter for the rapids' check (see there).
         let mut lean = op.tool.clone();
-        lean.diameter = (lean.diameter - 1.5 * map.cell).max(lean.diameter * 0.5);
+        lean.diameter =
+            (lean.diameter - map.cell * std::f64::consts::FRAC_1_SQRT_2).max(lean.diameter * 0.5);
         lean.corner_radius = lean.corner_radius.min(lean.diameter / 2.0);
         // The holder and arbor: discs above the stick-out (the shank is the flutes' check).
         let holder: Vec<(f64, f64)> = crate::strategy::collision::assembly_discs(
@@ -176,10 +177,9 @@ pub fn simulate_mill_on(
             let n = ((len / map.cell).ceil() as usize).clamp(1, 100_000);
             if s.is_rapid() {
                 // The cutter's own shape running into material anywhere along it (straight up
-                // too: up through a core left standing is a crash). Narrower by most of a cell
-                // each side: the map can't place a wall closer than its cells, and a rapid
-                // tangent to one (a wall's stock, a terrace the toolpath keeps clear of) isn't
-                // a hit.
+                // too: up through a core left standing is a crash). Narrower by the stamp's
+                // own error (a cell's half diagonal across): the map can't place a wall closer,
+                // and a rapid tangent to one (a wall's stock) isn't a hit.
                 for i in 0..=n {
                     let t = i as f64 / n as f64;
                     let p = crate::geom::lerp(s.from, s.to, t);

@@ -174,6 +174,26 @@ fn clear(b: &mut Builder, input: &Input, face: &Region, reach: &Region, z: f64, 
             break;
         }
     }
+    // Once round the face's edge where it touches material: the growth only cuts where at
+    // least half a step is left, so slivers up to that could stand along the walls (uneven
+    // stock for the finish, and in the way of the hops over them). At most a step from what's
+    // cleared, so never more than the step over.
+    let rings: Vec<Vec<P2>> = orient(region_contours(face), p.direction, false)
+        .iter()
+        .map(|c| c.walk())
+        .collect();
+    let near = region::intersection(reach, &region::offset(&cleared, step));
+    let runs = region::clip_open(&rings, &near);
+    let from = b.at.map_or(face[0][0], |a| [a[0], a[1]]);
+    for run in nearest_order(runs.into_iter().map(Contour::open).collect(), from) {
+        if run.pts.len() < 2 {
+            continue;
+        }
+        go_down_near(b, face, &cleared, face, run.pts[0], z, above);
+        for q in run.pts.iter().skip(1) {
+            b.feed([q[0], q[1], z], FeedKind::Cut);
+        }
+    }
 }
 
 /// Gets the tool to `to` at depth `z`: along at depth when it's down and the way is inside
@@ -407,11 +427,10 @@ mod tests {
         );
     }
 
-    /// A walled pocket roughed adaptively, from a fresh block, at the defaults: Verify finds
-    /// no rapid into the stock (the fine levels' hops feed down beside their terraces) and no
-    /// gouge.
-    #[test]
-    fn a_default_adaptive_rapids_clear_of_the_stock() {
+    /// A walled pocket roughed adaptively, from a fresh block, at the defaults: Verify finds no
+    /// rapid into the stock (the fine levels' hops feed down beside their terraces; no slivers
+    /// are left along the walls to hop over) and no gouge.
+    fn default_adaptive_on_a_walled_pocket(cell: f64) {
         use crate::geom::Aabb;
         use crate::model::{Model, box_triangles};
         use crate::sim::{SimOp, simulate_mill_on};
@@ -446,7 +465,7 @@ mod tests {
         let tp = generate(&input).unwrap();
         let segs = tp.motion([0.0, 0.0, 60.0], 5_000.0);
         let r = simulate_mill_on(
-            stock.height_map(0.25),
+            stock.height_map(cell),
             &m,
             &[],
             &[SimOp {
@@ -456,5 +475,17 @@ mod tests {
         );
         assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
         assert_eq!(r.gouge_cells, 0, "{}", r.gouge_depth);
+    }
+
+    #[test]
+    fn a_default_adaptive_rapids_clear_of_the_stock() {
+        default_adaptive_on_a_walled_pocket(0.25);
+    }
+
+    /// The same on a fine (0.05 mm) grid, where a graze of a tenth would show (slow).
+    #[test]
+    #[ignore]
+    fn a_default_adaptive_rapids_clear_of_the_stock_finely() {
+        default_adaptive_on_a_walled_pocket(0.05);
     }
 }

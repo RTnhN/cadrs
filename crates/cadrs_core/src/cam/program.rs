@@ -720,7 +720,8 @@ fn stock_before_voxels(
 /// The motion of a setup's operations (in its coordinates) as the posted program makes it,
 /// from `start`: each operation from where the one before ended; where the program changes tool
 /// or work offset, up clear over where the tool was, down to the operation's first height and
-/// across at it (the post's Z-first entry), else straight to its first move.
+/// across at it (the post's Z-first entry); else up to the higher of the two heights, across
+/// and down.
 pub fn run_motions(
     setup: &Setup,
     job: &Job,
@@ -775,6 +776,20 @@ pub fn run_motions(
                 None => [at[0], at[1], f[2]],
             };
             for (a, b) in [(at, over), (over, down), (down, f)] {
+                if cadrs_cam::geom::dist(a, b) > 1e-9 {
+                    segs.push(rapid(a, b));
+                }
+            }
+            at = f;
+        } else if milling
+            && let Some(f) = first
+            && ((f[0] - at[0]).abs() > 1e-9 || (f[1] - at[1]).abs() > 1e-9)
+        {
+            // On with the same tool and offset: up to the higher height, across, down (as the
+            // post writes it).
+            let h = at[2].max(f[2]);
+            let (up, over) = ([at[0], at[1], h], [f[0], f[1], h]);
+            for (a, b) in [(at, up), (up, over), (over, f)] {
                 if cadrs_cam::geom::dist(a, b) > 1e-9 {
                     segs.push(rapid(a, b));
                 }

@@ -341,6 +341,9 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
             from = b.at.map_or(from, |a| [a[0], a[1]]);
         }
     }
+    if input.inside_into_material() {
+        b.warnings.push(super::mill::INSIDE_INTO_MATERIAL.into());
+    }
     let mut tp = b.finish();
     tp.steps.retain(|s| !matches!(s, Step::Spindle { .. }));
     Ok(tp)

@@ -677,7 +677,16 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             cancel_tilt(&mut w, machine);
             tilted = None;
         }
+        // A stop for the operator: the spindle and coolant off first (M0 doesn't stop them on
+        // every control), both written again as the operation starts.
         if op.stop_before {
+            if !beam && tool_in.is_some() {
+                w.block("M5");
+                if coolant != Coolant::Off {
+                    w.block("M9");
+                    coolant = Coolant::Off;
+                }
+            }
             w.block("M0");
         }
         // Tool change (its length comes in with the first move, after the work offset).
@@ -789,6 +798,23 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             w.block(&line);
             w.at[2] = Some(z);
             w.mode = Some(0);
+        }
+        // On from where the last operation left the tool: up to the higher of there and this
+        // one's first height, across, then down (a control's G0 isn't a straight line, and the
+        // way across must clear what's between them).
+        let first = op.toolpath.steps.iter().find_map(|st| match st {
+            Step::Rapid(p) => Some(*p),
+            Step::Feed { .. } | Step::Arc { .. } | Step::Drill(_) => Some([f64::NAN; 3]),
+            _ => None,
+        });
+        if machine.kind.is_milling()
+            && let (Some(f), [Some(x), Some(y), Some(z)]) = (first, w.at)
+            && !f[0].is_nan()
+            && ((f[0] - x).abs() > 1e-9 || (f[1] - y).abs() > 1e-9)
+        {
+            let h = z.max(f[2]);
+            w.rapid([x, y, h]);
+            w.rapid([f[0], f[1], h]);
         }
         post_moves(&mut w, op, machine, s, beam, &mut coolant);
     }

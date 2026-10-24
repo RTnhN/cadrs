@@ -185,6 +185,32 @@ impl Input<'_> {
         (up_to(left) != up_to(right)).then(|| up_to(left))
     }
 
+    /// Which side of a chain at `z` the part is on (`Some(true)`: left of its way), from its
+    /// longest segment ([`Input::material_beside`]).
+    pub fn material_left_of(&self, c: &path::Contour, z: f64) -> Option<bool> {
+        Self::longest_segment(c).and_then(|(a, b)| self.material_beside(a, b, z))
+    }
+
+    /// Whether Inside on the picked open chains puts the tool on the material's side of any (it
+    /// would cut into the part).
+    pub fn inside_into_material(&self) -> bool {
+        if self.params.side != Side::Inside {
+            return false;
+        }
+        let polys: Vec<Vec<crate::geom::P3>> = self
+            .params
+            .drive
+            .edges
+            .iter()
+            .filter_map(|n| self.model.edge(n))
+            .map(|e| e.points.clone())
+            .collect();
+        let z = self.selection_z().unwrap_or(self.model.bounds().max[2]);
+        path::chain(&polys, 1e-3)
+            .iter()
+            .any(|c| !c.closed && self.material_left_of(c, z).is_some())
+    }
+
     /// The longest segment of `c` (closing a closed one).
     fn longest_segment(c: &path::Contour) -> Option<(P2, P2)> {
         let n = c.pts.len();
@@ -205,8 +231,7 @@ impl Input<'_> {
         dist: f64,
         side: Side,
     ) -> (Vec<P2>, bool) {
-        let material_left =
-            Self::longest_segment(c).and_then(|(a, b)| self.material_beside(a, b, z));
+        let material_left = self.material_left_of(c, z);
         let inside = side == Side::Inside;
         let free_left = match material_left {
             Some(m) => m == inside,
@@ -239,13 +264,24 @@ impl Input<'_> {
         self.height(self.params.heights.top)
     }
 
-    /// The bottom height. Selection with nothing picked: the model's bottom.
+    /// The bottom height. Selection with nothing picked, or with the picked edges at the top
+    /// (a contour's top edges, the ones in view: [`Input::bottom_from_top_pick`]): the model's
+    /// bottom.
     pub fn bottom(&self) -> f64 {
         let h = self.params.heights.bottom;
-        if h.from == HeightRef::Selection && self.selection_z().is_none() {
+        if h.from == HeightRef::Selection
+            && (self.selection_z().is_none() || self.bottom_from_top_pick())
+        {
             return self.model.bounds().min[2] + h.offset;
         }
         self.height(h)
+    }
+
+    /// Whether the bottom is the selection's and the picks are at (or over) the top height:
+    /// cut down the wall under them instead.
+    pub fn bottom_from_top_pick(&self) -> bool {
+        self.params.heights.bottom.from == HeightRef::Selection
+            && self.selection_z().is_some_and(|z| z >= self.top() - 1e-6)
     }
 
     /// The highest of the stock, the model and the workholding.
