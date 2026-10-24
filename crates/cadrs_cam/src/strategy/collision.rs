@@ -307,48 +307,49 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
 fn reenter(out: &mut Vec<Step>, input: &Input, from: P3, next: &Step, clearance: f64, fd: f64) {
     let p = input.params;
     out.push(Step::Rapid([from[0], from[1], clearance.max(from[2])]));
-    let way = match next {
-        Step::Feed { to, .. } | Step::Arc { to, .. } => {
-            let d = [to[0] - from[0], to[1] - from[1]];
-            let l = d[0].hypot(d[1]);
-            (l > 1e-6).then(|| ([d[0] / l, d[1] / l], l))
-        }
-        _ => None,
+    // The way the next move goes, along itself (an arc's own curve, never its chord).
+    let way: Vec<crate::geom::P2> = match next {
+        Step::Feed { to, .. } => vec![[from[0], from[1]], [to[0], to[1]]],
+        Step::Arc { to, center, cw, .. } => std::iter::once([from[0], from[1]])
+            .chain(
+                arc_points(from, *to, *center, *cw, 0.01)
+                    .into_iter()
+                    .map(|q| [q[0], q[1]]),
+            )
+            .collect(),
+        _ => Vec::new(),
     };
-    let ramp = p.links.entry == super::Entry::Ramp && way.is_some();
+    let len: f64 = way.windows(2).map(|w| crate::geom::dist2(w[0], w[1])).sum();
+    let ramp = p.links.entry == super::Entry::Ramp && len > 1e-6;
     // The material over it: as much as a step down (a level above cut down to it).
     let top = (from[2] + p.step_down.max(0.0)).min(clearance - fd);
     let start = top + fd;
     if start < clearance {
         out.push(Step::Rapid([from[0], from[1], start]));
     }
-    if let (true, Some((u, l))) = (ramp, way) {
+    if ramp {
         // Back and forth along the next move's first stretch, down at the ramp angle.
-        let run = l.min(input.tool.diameter * 2.0).max(1e-3);
+        let run = len.min(input.tool.diameter * 2.0).max(1e-3);
+        let stretch = super::path::sub_walk(&way, 0.0, run);
+        let back: Vec<crate::geom::P2> = stretch.iter().rev().copied().collect();
         let drop = run * p.links.ramp_angle.clamp(0.5, 45.0).to_radians().tan();
         let mut z = start;
         let mut out_leg = true;
-        while z > from[2] + 1e-9 {
-            z = (z - drop).max(from[2]);
-            let q = if out_leg {
-                [from[0] + u[0] * run, from[1] + u[1] * run, z]
-            } else {
-                [from[0], from[1], z]
-            };
-            out.push(Step::Feed {
-                to: q,
-                feed: p.speeds.ramp,
-                kind: FeedKind::Ramp,
-            });
+        while z > from[2] + 1e-9 || !out_leg {
+            let target = (z - drop).max(from[2]);
+            let leg = if out_leg { &stretch } else { &back };
+            let mut s = 0.0;
+            for w in leg.windows(2) {
+                s += crate::geom::dist2(w[0], w[1]);
+                let zz = z + (target - z) * (s / run).min(1.0);
+                out.push(Step::Feed {
+                    to: [w[1][0], w[1][1], zz],
+                    feed: p.speeds.ramp,
+                    kind: FeedKind::Ramp,
+                });
+            }
+            z = target;
             out_leg = !out_leg;
-        }
-        // Back to where the cut goes on.
-        if !out_leg {
-            out.push(Step::Feed {
-                to: from,
-                feed: p.speeds.feed,
-                kind: FeedKind::Cut,
-            });
         }
     } else {
         out.push(Step::Feed {
@@ -568,5 +569,59 @@ mod tests {
         let (g, _) = crate::strategy::testing::max_gouge(&clamp_model, &tool, &out);
         assert!(g < 1e-3);
         assert!(out.warnings.iter().any(|w| w.contains("workholding")));
+    }
+
+    /// Back in after a skipped stretch, onto a corner arc: the ramp follows the arc, never its
+    /// chord (which cuts inside the corner).
+    #[test]
+    fn reentry_ramps_along_an_arc() {
+        let m = Model::from_triangles(
+            "block",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [10.0, 10.0, 10.0])),
+        );
+        let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [15.0, 15.0, 10.0]));
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        // The corner arc round (10, 10) at radius 3, from (13, 10) to (10, 13).
+        let arc = Step::Arc {
+            to: [10.0, 13.0, 2.0],
+            center: [10.0, 10.0],
+            cw: false,
+            feed: 500.0,
+            kind: FeedKind::Cut,
+        };
+        let mut out = Vec::new();
+        reenter(&mut out, &input, [13.0, 10.0, 2.0], &arc, 30.0, 1.0);
+        let ramps: Vec<P3> = out
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed {
+                    to,
+                    kind: FeedKind::Ramp,
+                    ..
+                } => Some(*to),
+                _ => None,
+            })
+            .collect();
+        assert!(!ramps.is_empty());
+        for q in &ramps {
+            let r = crate::geom::dist2([q[0], q[1]], [10.0, 10.0]);
+            assert!((r - 3.0).abs() < 0.01, "{q:?} {r} off the arc");
+        }
+        // Back where the cut goes on, at its depth.
+        let last = *ramps.last().unwrap();
+        assert!(
+            crate::geom::dist(last, [13.0, 10.0, 2.0]) < 1e-6,
+            "{last:?}"
+        );
     }
 }

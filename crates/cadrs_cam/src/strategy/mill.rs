@@ -177,14 +177,19 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
         SubPattern::Offset => {
             let rings = offset_rings(face, p.step_over, dir);
             let mut first = true;
+            // Within a step over of the rings cut so far: a link through there takes no more
+            // than a ring does (not a slot through ground no ring has reached, as across a
+            // pocket's neck between two lobes' first rings).
+            let mut near_cut: Region = Vec::new();
             for level in rings {
                 let start = b.at.map_or([0.0, 0.0], |a| [a[0], a[1]]);
                 for c in nearest_order(level, start) {
+                    let reach = region::intersection(&free, &near_cut);
                     let cut = Cut {
                         material_top,
                         // Between rings the tool crosses what the inner rings cleared.
                         direct_ok: !first,
-                        free: Some(&free),
+                        free: Some(&reach),
                         free_side: None,
                         tabs: None,
                         ramp: true,
@@ -192,6 +197,10 @@ fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
                     };
                     b.cut(&c, z, &cut);
                     first = false;
+                    near_cut = region::union(
+                        &near_cut,
+                        &region::stroke(&c.walk(), 2.0 * p.step_over + 2e-3),
+                    );
                 }
             }
         }
@@ -537,6 +546,34 @@ fn profile_paths(input: &Input, dist: f64) -> Vec<Contour> {
     out
 }
 
+/// Each contour's passes, outermost first, its finishing pass last (`passes`: each pass's
+/// contours, the finishing pass last): every rough pass goes with the finishing contour
+/// nearest it, so an offset that merged or dropped a contour doesn't shift the pairing.
+fn group_passes(passes: &[Vec<Contour>]) -> Vec<Vec<Contour>> {
+    let finishing = passes.last().cloned().unwrap_or_default();
+    let mut paths_by_contour: Vec<Vec<Contour>> = vec![Vec::new(); finishing.len()];
+    for pass in &passes[..passes.len().saturating_sub(1)] {
+        for c in pass {
+            let Some(q) = c.pts.first() else { continue };
+            let near = |f: &Contour| {
+                f.walk()
+                    .windows(2)
+                    .map(|w| crate::geom::dist_to_segment2(*q, w[0], w[1]))
+                    .fold(f64::INFINITY, f64::min)
+            };
+            if let Some(j) = (0..finishing.len())
+                .min_by(|a, b| near(&finishing[*a]).total_cmp(&near(&finishing[*b])))
+            {
+                paths_by_contour[j].push(c.clone());
+            }
+        }
+    }
+    for (j, f) in finishing.into_iter().enumerate() {
+        paths_by_contour[j].push(f);
+    }
+    paths_by_contour
+}
+
 /// 2-axis profile: round the outline (or the picked edges) at depth passes, with finishing
 /// passes, leads and tabs.
 pub fn profile(input: &Input) -> Result<Toolpath, String> {
@@ -570,16 +607,7 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         return Err("No contour to profile".into());
     }
     let side = (p.side != Side::On).then_some(free_side(p.direction));
-    let mut paths_by_contour: Vec<Vec<Contour>> = Vec::new();
-    let n = pass_paths.iter().map(|v| v.len()).max().unwrap_or(0);
-    for i in 0..n {
-        paths_by_contour.push(
-            pass_paths
-                .iter()
-                .filter_map(|v| v.get(i).cloned())
-                .collect(),
-        );
-    }
+    let paths_by_contour = group_passes(&pass_paths);
     let by_levels = p.machine_by == MachineBy::Levels;
     let start = [input.model.bounds().min[0], input.model.bounds().min[1]];
     let order: Vec<usize> = {
@@ -1179,5 +1207,99 @@ mod tests {
             at = seg.to;
         }
         let _ = at;
+    }
+
+    /// A dumbbell pocket (two lobes joined by a neck): the offset rings split at the neck.
+    /// The link from one lobe's first ring to the other's never stays down through the neck
+    /// (no ring has been there), even with every gap linked directly.
+    #[test]
+    fn rings_dont_slot_through_a_neck() {
+        let mut tris = Vec::new();
+        tris.extend(crate::model::box_triangles(&crate::geom::Aabb::new(
+            [0.0, 0.0, 0.0],
+            [80.0, 40.0, 5.0],
+        )));
+        // The walls round the dumbbell (two 30 × 30 lobes, a 10 wide neck), up to 15.
+        for (a, b) in [
+            ([0.0, 0.0], [80.0, 5.0]),
+            ([0.0, 35.0], [80.0, 40.0]),
+            ([0.0, 0.0], [5.0, 40.0]),
+            ([75.0, 0.0], [80.0, 40.0]),
+            ([35.0, 0.0], [45.0, 15.0]),
+            ([35.0, 25.0], [45.0, 40.0]),
+        ] {
+            tris.extend(crate::model::box_triangles(&crate::geom::Aabb::new(
+                [a[0], a[1], 5.0],
+                [b[0], b[1], 15.0],
+            )));
+        }
+        let m = crate::model::Model::from_triangles("dumbbell", tris);
+        let stock =
+            super::super::Stock::block(crate::geom::Aabb::new([0.0, 0.0, 0.0], [80.0, 40.0, 15.0]));
+        let tool = Tool::new(ToolKind::EndMill, 4.0);
+        let mut p = Params::new(Pattern::Rough2D, &tool, MachineKind::Mill);
+        p.step_down = 10.0;
+        p.step_over = 1.6;
+        p.wall_stock = 0.0;
+        p.floor_stock = 0.0;
+        p.links.small_gap = 1e3;
+        p.links.small_gaps = crate::strategy::LinkAction::Direct;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        let tp = generate(&input).unwrap();
+        // No link at depth crosses the neck's middle (x 37–43) before a ring has: the first
+        // move through the neck is a ring's cut, never a link.
+        let mut at = [0.0, 0.0, 50.0];
+        for s in &tp.steps {
+            match s {
+                Step::Feed { to, kind, .. } => {
+                    let crosses = (at[0] < 37.0 && to[0] > 43.0) || (at[0] > 43.0 && to[0] < 37.0);
+                    if crosses && to[2] < 10.0 {
+                        assert_ne!(
+                            *kind,
+                            crate::toolpath::FeedKind::Link,
+                            "a link across the neck from {at:?} to {to:?}"
+                        );
+                    }
+                    at = *to;
+                }
+                Step::Rapid(q) => at = *q,
+                Step::Arc { to, .. } => at = *to,
+                _ => {}
+            }
+        }
+    }
+
+    /// Two contours (an outline and a small hole) with three passes, the hole's outer rough
+    /// pass gone (offset away): the outline's passes stay together, the hole's too.
+    #[test]
+    fn passes_group_by_contour() {
+        let sq = |c: f64, h: f64| {
+            Contour::closed(vec![
+                [c - h, c - h],
+                [c + h, c - h],
+                [c + h, c + h],
+                [c - h, c + h],
+            ])
+        };
+        let outline = |k: f64| sq(50.0, 40.0 + k);
+        let hole = |k: f64| sq(50.0, 5.0 - k);
+        // (Each pass lists its contours in its own order: by position they'd mix.)
+        let passes = vec![
+            vec![outline(8.0)],
+            vec![hole(4.0), outline(4.0)],
+            vec![outline(0.0), hole(0.0)],
+        ];
+        let g = group_passes(&passes);
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[0], vec![outline(8.0), outline(4.0), outline(0.0)]);
+        assert_eq!(g[1], vec![hole(4.0), hole(0.0)]);
     }
 }

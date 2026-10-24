@@ -342,7 +342,7 @@ impl Tool {
             holder: None,
             arbor: None,
             cutting: CuttingData {
-                spindle_rpm: 18_000.0,
+                spindle_rpm: 10_000.0,
                 feed: 1_200.0,
                 plunge_feed: 300.0,
                 step_down: (d * 0.5).max(0.1),

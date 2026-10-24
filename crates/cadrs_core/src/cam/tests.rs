@@ -250,6 +250,8 @@ fn mill_job_end_to_end() {
     let em = Tool::new(ToolKind::EndMill, 6.0);
     let mut p = Params::new(Pattern::Profile2D, &em, MachineKind::Mill);
     p.step_down = 3.0;
+    // Faster than the Fanuc mill's spindle goes (the post limits it).
+    p.speeds.spindle_rpm = 18_000.0;
     let profile = f.add_toolpath(setup, p);
     let bore = f.add_toolpath(setup, Params::new(Pattern::Bore, &em, MachineKind::Mill));
     f.add_tool(setup, Tool::new(ToolKind::ChamferMill, 6.0), 2);

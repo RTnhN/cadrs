@@ -107,8 +107,10 @@ impl Dialect {
     /// A dwell of `sec` seconds.
     fn dwell(self, sec: f64) -> String {
         match self {
-            // Fanuc-style P is in milliseconds; X takes seconds with a point.
-            Dialect::Fanuc | Dialect::Haas => format!("G4 X{}", decimal(sec, 3, true)),
+            // Fanuc's P is in milliseconds; X takes seconds with a point.
+            Dialect::Fanuc => format!("G4 X{}", decimal(sec, 3, true)),
+            // Haas: P with a point is seconds.
+            Dialect::Haas => format!("G4 P{}", decimal(sec, 3, true)),
             _ => format!("G4 P{}", decimal(sec, 3, false)),
         }
     }
@@ -602,7 +604,8 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         if op.stop_before {
             w.block("M0");
         }
-        // Tool change.
+        // Tool change (its length comes in with the first move, after the work offset).
+        let mut length_comp = false;
         if changing {
             if tool_in.is_some() {
                 w.block("M5");
@@ -610,26 +613,21 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
                     w.block("M9");
                     coolant = Coolant::Off;
                 }
-                if s.force_retract_on_tool_change {
-                    retract_home(&mut w, d);
-                }
+            }
+            if s.force_retract_on_tool_change {
+                retract_home(&mut w, d);
             }
             w.number_next = true;
             if machine.tool_changer {
                 w.block(&format!("T{} M6", op.tool_number));
-                if d != Dialect::Grbl {
-                    w.block(&format!("G43 H{}", op.tool_number));
-                }
             } else {
                 w.comment(&format!("Change to T{}: {}", op.tool_number, op.tool.name));
                 match d {
                     Dialect::Grbl => w.block("M0"),
-                    _ => {
-                        w.block(&format!("T{} M6", op.tool_number));
-                        w.block(&format!("G43 H{}", op.tool_number));
-                    }
+                    _ => w.block(&format!("T{} M6", op.tool_number)),
                 }
             }
+            length_comp = d != Dialect::Grbl;
             tool_in = Some(op.tool_number);
             w.at = [None; 3];
             w.mode = None;
@@ -672,12 +670,27 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             w.block(&line);
             w.block("G53.1");
             // The tool's length again, along the tilted axis.
-            if machine.kind.is_milling() {
-                w.block(&format!("G43 H{}", op.tool_number));
-            }
+            length_comp = machine.kind.is_milling();
             tilted = Some(t);
             w.at = [None; 3];
             w.mode = None;
+        }
+        // The tool's length on with a move to the operation's first height, after the work
+        // offset (and the tilted plane): `G0 G43 H1 Z…`.
+        if length_comp {
+            let z = op.toolpath.steps.iter().find_map(|st| match st {
+                Step::Rapid(p) => Some(p[2]),
+                _ => None,
+            });
+            match z {
+                Some(z) => {
+                    let line = format!("G0 G43 H{} Z{}", op.tool_number, w.num(z));
+                    w.block(&line);
+                    w.at[2] = Some(z);
+                    w.mode = Some(0);
+                }
+                None => w.block(&format!("G43 H{}", op.tool_number)),
+            }
         }
         post_moves(&mut w, op, machine, s, beam, &mut coolant);
     }
@@ -961,8 +974,9 @@ fn post_drill(
         if c.dwell > 0.0 {
             let _ = write!(words, " P{}", d.cycle_dwell(c.dwell));
         }
-        // Fanuc-style rigid tapping: the spindle synchronised first.
-        if c.kind == CycleKind::Tap && matches!(d, Dialect::Fanuc | Dialect::Haas) {
+        // Fanuc rigid tapping: the spindle synchronised first (Haas taps rigidly with G84
+        // alone).
+        if c.kind == CycleKind::Tap && d == Dialect::Fanuc {
             let rpm = w.rpm.unwrap_or(c.feed / c.pitch.max(1e-6));
             w.block(&format!("M29 S{}", rpm.round()));
         }
@@ -986,19 +1000,44 @@ fn post_drill(
         } else {
             *at
         };
+        // A tap backs out with the spindle reversed (stopped first: a floating holder or a
+        // control without rigid tapping), then turns the right way again.
+        let tap = c.kind == CycleKind::Tap;
+        let rpm = w.rpm.unwrap_or(c.feed / c.pitch.max(1e-6)).round();
+        let (fwd, rev) = if tool.hand == Hand::Left {
+            ("M4", "M3")
+        } else {
+            ("M3", "M4")
+        };
+        let mut reversed = false;
         for seg in tp.motion(start, 1.0) {
             match seg.feed {
-                None => w.rapid(seg.to),
+                None => {
+                    if reversed && seg.to[2] > seg.from[2] {
+                        w.block("M5");
+                        w.block(&format!("S{rpm} {fwd}"));
+                        reversed = false;
+                    }
+                    w.rapid(seg.to)
+                }
                 Some(f) => {
-                    if c.dwell > 0.0
-                        && (seg.from[2] - c.bottom).abs() < 1e-9
-                        && seg.to[2] > seg.from[2]
-                    {
+                    let out_of_bottom =
+                        (seg.from[2] - c.bottom).abs() < 1e-9 && seg.to[2] > seg.from[2];
+                    if c.dwell > 0.0 && out_of_bottom {
                         w.block(&d.dwell(c.dwell));
+                    }
+                    if tap && out_of_bottom {
+                        w.block("M5");
+                        w.block(&format!("S{rpm} {rev}"));
+                        reversed = true;
                     }
                     w.linear(seg.to, f)
                 }
             }
+        }
+        if reversed {
+            w.block("M5");
+            w.block(&format!("S{rpm} {fwd}"));
         }
         *at = [c.at[0], c.at[1], c.retract];
     }
@@ -1226,7 +1265,10 @@ mod tests {
         let nc = post(&p, &m, &m.post).unwrap();
         assert!(nc.starts_with("%\nO1001 (BRACKET)"));
         assert!(nc.contains("T1 M6"));
-        assert!(nc.contains("G43 H1"));
+        // The tool's length on with the first move, after the work offset.
+        let g54 = nc.find("G54").unwrap();
+        let g43 = nc.find("G0 G43 H1 Z5.").expect(&nc);
+        assert!(g54 < g43, "{nc}");
         assert!(nc.contains("S10000 M3"));
         assert!(nc.contains("M8"));
         assert!(nc.contains("G54"));
@@ -1461,6 +1503,19 @@ mod tests {
         .unwrap()
     }
 
+    /// Without a tapping cycle (GRBL has none) the tap backs out with the spindle reversed.
+    #[test]
+    fn expanded_taps_reverse_the_spindle() {
+        let nc = tap_program(Dialect::Grbl);
+        let lines: Vec<&str> = nc.lines().collect();
+        let bottom = lines.iter().position(|l| l.contains("Z-12")).expect(&nc);
+        let rev = lines.iter().position(|l| *l == "S500 M4").expect(&nc);
+        let out = lines.iter().rposition(|l| l.contains("Z2")).expect(&nc);
+        assert!(bottom < rev && rev < out, "{nc}");
+        // Turning forward again after.
+        assert!(lines[out..].iter().any(|l| *l == "S500 M3"), "{nc}");
+    }
+
     #[test]
     fn tapping_suits_the_dialect() {
         let lines = |nc: &str| -> Vec<String> {
@@ -1488,7 +1543,7 @@ mod tests {
     #[test]
     fn dwells_and_comments_suit_the_dialect() {
         assert_eq!(Dialect::Fanuc.dwell(1.0), "G4 X1.");
-        assert_eq!(Dialect::Haas.dwell(0.5), "G4 X0.5");
+        assert_eq!(Dialect::Haas.dwell(0.5), "G4 P0.5");
         assert_eq!(Dialect::LinuxCnc.dwell(0.5), "G4 P0.5");
         assert_eq!(Dialect::Grbl.dwell(2.0), "G4 P2");
         assert_eq!(
@@ -1816,7 +1871,7 @@ mod tests {
         let g68 = at("G68.2");
         assert_eq!(lines[g68 + 1], "G53.1");
         // The tool's length again after the plane.
-        assert_eq!(lines[g68 + 2], "G43 H1");
+        assert_eq!(lines[g68 + 2], "G0 G43 H1 Z5.");
         // Up clear before tilting and before cancelling; the rotaries home after G69.
         assert!(lines[g68 - 2].starts_with("G91 G28 Z0."), "{nc}");
         let g69 = at("G69");

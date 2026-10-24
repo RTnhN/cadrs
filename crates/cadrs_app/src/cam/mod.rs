@@ -623,6 +623,10 @@ struct RowSnap {
     selected: bool,
     trailing: Option<String>,
     error: bool,
+    /// What the row's hover says: a toolpath's warnings, or why it failed.
+    tip: Option<String>,
+    /// The toolpath has warnings (its time shows ⚠).
+    warn: bool,
     eye: Option<bool>,
 }
 
@@ -651,6 +655,8 @@ fn rows_of(cam: &CamStudio, ui: &CamUi, computed: &Computed) -> (Vec<RowSnap>, V
             selected: ui.selected.contains(&job.id),
             trailing: None,
             error: false,
+            tip: None,
+            warn: false,
             eye: None,
         });
         if !open {
@@ -682,6 +688,8 @@ fn rows_of(cam: &CamStudio, ui: &CamUi, computed: &Computed) -> (Vec<RowSnap>, V
             selected: false,
             trailing: None,
             error: false,
+            tip: None,
+            warn: false,
             eye: None,
         });
         for setup in &job.setups {
@@ -698,19 +706,33 @@ fn rows_of(cam: &CamStudio, ui: &CamUi, computed: &Computed) -> (Vec<RowSnap>, V
                 selected: ui.selected.contains(&setup.id),
                 trailing: None,
                 error: false,
+                tip: None,
+                warn: false,
                 eye: None,
             });
             if !sopen {
                 continue;
             }
             for o in &setup.operations {
+                let mut tip = None;
+                let mut warn = false;
                 let (label, trailing, error, eye) = match &o.kind {
                     OpKind::Tool(t) => (format!("T{} {}", t.number, o.name), None, false, None),
                     OpKind::Toolpath(_) => {
                         let st = computed.status(o.id);
+                        let warnings = computed
+                            .current(o.id)
+                            .map(|d| d.toolpath.warnings.clone())
+                            .unwrap_or_default();
+                        tip = st
+                            .problem()
+                            .map(String::from)
+                            .or_else(|| (!warnings.is_empty()).then(|| warnings.join("\n")));
+                        warn = !warnings.is_empty() && st.problem().is_none();
+                        let short = st.short();
                         (
                             o.name.clone(),
-                            Some(st.short()),
+                            Some(if warn { format!("⚠ {short}") } else { short }),
                             st.problem().is_some(),
                             Some(!o.hidden),
                         )
@@ -729,6 +751,8 @@ fn rows_of(cam: &CamStudio, ui: &CamUi, computed: &Computed) -> (Vec<RowSnap>, V
                     selected: ui.selected.contains(&o.id),
                     trailing,
                     error,
+                    tip,
+                    warn,
                     eye,
                 });
             }
@@ -753,6 +777,8 @@ fn rows_of(cam: &CamStudio, ui: &CamUi, computed: &Computed) -> (Vec<RowSnap>, V
                 c.derived.version_name.clone()
             }),
             error: false,
+            tip: None,
+            warn: false,
             eye: Some(!c.hidden),
         })
         .collect();
@@ -887,6 +913,8 @@ fn spawn_row(p: &mut ChildSpawnerCommands, t: &Theme, r: &RowSnap) {
     if let Some(tr) = &r.trailing {
         let c = if r.error {
             t.danger
+        } else if r.warn {
+            t.warning_icon
         } else {
             t.muted_foreground
         };
@@ -903,7 +931,10 @@ fn spawn_row(p: &mut ChildSpawnerCommands, t: &Theme, r: &RowSnap) {
             item = item.toggle_keeps_off();
         }
     }
-    p.spawn((item.build(t), r.row));
+    let mut e = p.spawn((item.build(t), r.row));
+    if let Some(tip) = &r.tip {
+        e.insert(cadrs_ui::Tooltip::new(tip.clone()));
+    }
 }
 
 fn on_row_activate(ev: On<Activate>, q: Query<&CamRow>, mut commands: Commands) {

@@ -990,6 +990,19 @@ fn sync_dialog(world: &mut World) {
     }) else {
         return;
     };
+    // A toolpath's live preview: what its calculation warns of, under its fields.
+    let mut fields = fields;
+    if let Some(d) = world.get_resource::<CamDialog>()
+        && let Draft::Toolpath { op, .. } = &d.draft
+        && let Some((pop, Ok(done))) = world.resource::<super::Computed>().preview()
+        && pop == op.id
+        && !done.toolpath.warnings.is_empty()
+    {
+        fields.push(Field::section("Warnings"));
+        for w in &done.toolpath.warnings {
+            fields.push(Field::note(format!("⚠ {w}")));
+        }
+    }
     // Picks go to the dialog while a pick list takes them.
     let want = filter;
     if world.resource::<crate::viewport::PickFilterOverride>().0 != want {

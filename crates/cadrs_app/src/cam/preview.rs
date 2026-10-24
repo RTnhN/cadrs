@@ -113,6 +113,8 @@ pub struct PreviewState {
     paused_at: Option<f64>,
     /// The stock before the run: as the toolpaths before the previewed ones leave it.
     start: Option<HeightMap>,
+    /// How many warnings the run's toolpaths carry (the readout counts them).
+    warnings: usize,
     /// The check of the whole run, on a worker thread until it's done.
     analysis: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Analysis>>>,
 }
@@ -440,6 +442,7 @@ pub fn open_for_selection(world: &mut World) {
         collisions: Vec::new(),
         paused_at: None,
         start: None,
+        warnings: run.ops.iter().map(|o| o.toolpath.warnings.len()).sum(),
         analysis,
     });
 }
@@ -625,7 +628,11 @@ fn poll_analysis(state: Option<ResMut<PreviewState>>) {
         },
     };
     s.analysis = None;
-    s.summary = got.summary;
+    s.summary = match s.warnings {
+        0 => got.summary,
+        1 => format!("{} · ⚠ 1 toolpath warning", got.summary),
+        n => format!("{} · ⚠ {n} toolpath warnings", got.summary),
+    };
     s.collisions = got.collisions;
     s.part = got.part;
     if let Some(start) = got.start {
