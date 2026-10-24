@@ -4106,9 +4106,10 @@ fn first_roll(
                     continue;
                 }
                 // (Not the crossing the strip starts at, found again a hair off: where the rail
-                // runs nearly along the edge it rolled over.)
+                // runs nearly along the edge it rolled over, its contact hardly moved.)
                 if !(t > lo + tol::REL * span && t < hi - tol::REL * span)
                     || (t - t0).abs() < 1e-6 * whole
+                    || (ball.q[k].p - from.q[k].p).norm() < 1e-4 * (1.0 + ef.r())
                 {
                     continue;
                 }
@@ -4165,6 +4166,7 @@ fn traced_roll(
     t1: f64,
 ) -> Option<(usize, usize, Ball, f64)> {
     let n = ((ef.spine_len(t0, t1) / (0.25 * ef.r())).ceil() as usize).clamp(8, 64);
+    let step = (t1 - t0) / n as f64;
     let on = |ball: &Ball, k: usize| point_in_face(b, ef.faces[k], &ball.q[k].p);
     let (mut ta, mut ba) = (t0, *from);
     for i in 1..=n {
@@ -4172,7 +4174,7 @@ fn traced_roll(
         let bb = ef.ball(b, tb, Some([ba.q[0].uv, ba.q[1].uv]))?;
         if let Some(k) = (0..2).find(|&k| on(&ba, k) && !on(&bb, k)) {
             // Bisected to where the contact leaves.
-            let (mut lo, mut hi, mut blo) = (ta, tb, ba);
+            let (mut lo, mut hi, mut blo, mut bhi) = (ta, tb, ba, bb);
             for _ in 0..50 {
                 let m = 0.5 * (lo + hi);
                 let Some(bm) = ef.ball(b, m, Some([blo.q[0].uv, blo.q[1].uv])) else {
@@ -4181,7 +4183,7 @@ fn traced_roll(
                 if on(&bm, k) {
                     (lo, blo) = (m, bm);
                 } else {
-                    hi = m;
+                    (hi, bhi) = (m, bm);
                 }
             }
             // (At the end within a hair: the contact reaching its face's edge at the vertex,
@@ -4189,25 +4191,74 @@ fn traced_roll(
             if ef.spine_len(lo, t1) <= 1e-4 * (1.0 + ef.r()) {
                 return None;
             }
-            // Over the face's edge nearest there, onto the face beyond, if smooth there.
+            // Over the face's edge nearest there, onto the face beyond, if smooth there: of
+            // those, the one the contact lands on just past (by a corner of the face, the nearest
+            // edge may be the other one there).
             let fi = ef.faces[k];
             let p = blo.q[k].p;
             let dist = |x: usize| {
                 let xe = &b.edges[x];
                 (xe.point(xe.curve.closest(&p, xe.t[0], xe.t[1])) - p).norm()
             };
-            let x = b.faces[fi]
+            let mut near: Vec<usize> = b.faces[fi]
                 .loops
                 .iter()
                 .flatten()
                 .map(|c| c.edge)
                 .filter(|&x| x != ef.e && !b.edges[x].degenerate && !is_seam(b, fi, x))
-                .min_by(|&x, &y| dist(x).total_cmp(&dist(y)))?;
+                .collect();
+            near.sort_by(|&x, &y| dist(x).total_cmp(&dist(y)));
+            let landed =
+                |x: usize| beyond(b, x, fi).is_some_and(|g| point_in_face(b, g, &bhi.q[k].p));
+            let x = near
+                .iter()
+                .copied()
+                .take_while(|&x| dist(x) <= dist(near[0]) + tol::REL_POINT * (1.0 + ef.r()))
+                .find(|&x| landed(x))
+                .or_else(|| near.first().copied())?;
             let into = beyond(b, x, fi)?;
             let g = &b.faces[into];
             let n = geom::contact(g, geom::foot(g, &p, None)).n;
             if n.dot(&blo.q[k].n) < 1.0 - tol::ANGULAR_POINT {
                 return None;
+            }
+            // On the edge itself (the face test has its tolerance: a contact crossing at a
+            // shallow angle flips it short of the edge): bisected on the contact's signed
+            // distance from the edge across the face (into it positive).
+            let xe = &b.edges[x];
+            let across = |bl: &Ball| {
+                let q = bl.q[k].p;
+                let tx = xe.curve.closest(&q, xe.t[0], xe.t[1]);
+                let (pe, de) = (xe.point(tx), xe.curve.tangent(tx));
+                let w = bl.q[k].n.cross(&de);
+                let d = (q - pe).norm();
+                if (q - pe).dot(&w) < 0.0 { -d } else { d }
+            };
+            let sa = across(&blo);
+            // (The face test flipped short of the edge: the bracket run on a step.)
+            let (h0, bh0) = if (across(&bhi) < 0.0) != (sa < 0.0) {
+                (hi, bhi)
+            } else {
+                let h = (hi + step).clamp(t0.min(t1), t0.max(t1));
+                match ef.ball_from(b, &bhi, hi, h) {
+                    Some(x) => (h, x),
+                    None => (hi, bhi),
+                }
+            };
+            if sa != 0.0 && (across(&bh0) < 0.0) != (sa < 0.0) {
+                let (mut l, mut h, mut bl) = (lo, h0, blo);
+                for _ in 0..60 {
+                    let m = 0.5 * (l + h);
+                    let Some(bm) = ef.ball(b, m, Some([bl.q[0].uv, bl.q[1].uv])) else {
+                        break;
+                    };
+                    if (across(&bm) < 0.0) == (sa < 0.0) {
+                        (l, bl) = (m, bm);
+                    } else {
+                        h = m;
+                    }
+                }
+                (lo, blo) = (l, bl);
             }
             debug(|| {
                 format!(
@@ -4768,12 +4819,21 @@ fn plan(
             1 => {
                 let (i, j) = here[0];
                 let ef = &efs[i];
-                // An edge running on smoothly into one left as it is: the strip stops square.
+                // An edge running on smoothly into one left as it is, or into one between the
+                // same two faces (past a kink, where tangent propagation stops): the faces run on
+                // past the vertex, and the strip stops square.
                 let out = leaving(b, ef.e, v);
-                if all
-                    .iter()
-                    .any(|&o| o != ef.e && leaving(b, o, v).dot(&-out) > 1.0 - tol::ANGULAR)
-                {
+                let faces_of = |e: usize| {
+                    sides(b, e)
+                        .ok()
+                        .map(|[(f1, _), (f2, _)]| [f1.min(f2), f1.max(f2)])
+                };
+                let own = faces_of(ef.e);
+                if all.iter().any(|&o| {
+                    o != ef.e
+                        && (leaving(b, o, v).dot(&-out) > 1.0 - tol::ANGULAR
+                            || (own.is_some() && faces_of(o) == own))
+                }) {
                     ends[i][j] = Some(square_end(b, ef, j)?);
                     continue;
                 }
@@ -5732,6 +5792,58 @@ fn vertex_on_boundary(b: &mut Body, fi: usize, p: &P3, tol: f64) -> Option<usize
         }
     }
     Some(split_edge(b, e, t))
+}
+
+/// Where the plane through `o` square to `n` crosses an edge of face `fi` into a face at vertex
+/// v (fi not there: a strip rolled onto fi over that edge near its end at v): the face beyond
+/// and the point.
+fn plane_crossing(b: &Body, fi: usize, v: usize, o: &P3, n: &V3) -> Option<(usize, P3)> {
+    if b.faces[fi]
+        .loops
+        .iter()
+        .flatten()
+        .any(|c| b.edges[c.edge].v.contains(&v))
+    {
+        return None;
+    }
+    let at_v = |g: usize| {
+        b.faces[g]
+            .loops
+            .iter()
+            .flatten()
+            .any(|c| b.edges[c.edge].v.contains(&v))
+    };
+    for c in b.faces[fi].loops.iter().flatten() {
+        let x = &b.edges[c.edge];
+        let Some(g) = beyond(b, c.edge, fi).filter(|&g| g != fi && at_v(g)) else {
+            continue;
+        };
+        if x.degenerate {
+            continue;
+        }
+        let h = |t: f64| (x.point(t) - o).dot(n);
+        let m = 32;
+        for i in 0..m {
+            let (a, z) = (
+                x.t[0] + (x.t[1] - x.t[0]) * i as f64 / m as f64,
+                x.t[0] + (x.t[1] - x.t[0]) * (i + 1) as f64 / m as f64,
+            );
+            if (h(a) < 0.0) == (h(z) < 0.0) {
+                continue;
+            }
+            let (mut lo, mut hi) = (a, z);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if (h(mid) < 0.0) == (h(lo) < 0.0) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return Some((g, x.point(0.5 * (lo + hi))));
+        }
+    }
+    None
 }
 
 /// Whether point `p` lies on the boundary of face `fi`.
@@ -10366,6 +10478,7 @@ fn trim(
                     let v = b.edges[ef.e].v[j];
                     let vp = b.verts[v].p;
                     let mut sides = Vec::new();
+                    let mut over: Vec<usize> = Vec::new();
                     for k in 0..2 {
                         let fi = ef.faces[k];
                         let q = balls[k].q[k].p;
@@ -10384,18 +10497,46 @@ fn trim(
                                 e
                             }
                             // Else a cut across the face from the vertex to the rail's end, where
-                            // the plane meets it.
+                            // the plane meets it; from where it crosses the smooth edge the strip
+                            // rolled over near the end (the face not at the vertex), the rest of
+                            // the way on the edge's own face.
                             None => {
                                 let vq = nb.add_vertex(q);
                                 rv[j][k] = vq;
+                                let from = match plane_crossing(&nb, fi, v, &vp, n) {
+                                    Some((g, xp)) => {
+                                        let vx = vertex_on_boundary(&mut nb, fi, &xp, vtol)
+                                            .ok_or_else(|| {
+                                                failed(
+                                                    "end",
+                                                    "a square fillet end's cut misses its edge",
+                                                )
+                                            })?;
+                                        let e = section_cut(
+                                            &b.faces[g],
+                                            &vp,
+                                            &xp,
+                                            &vp,
+                                            n,
+                                            vtol,
+                                            v,
+                                            vx,
+                                            &mut nb,
+                                        );
+                                        out.cuts.entry(g).or_default().push(e);
+                                        over.push(e);
+                                        (xp, vx)
+                                    }
+                                    None => (vp, v),
+                                };
                                 let e = section_cut(
                                     &b.faces[fi],
-                                    &vp,
+                                    &from.0,
                                     &q,
                                     &vp,
                                     n,
                                     vtol,
-                                    v,
+                                    from.1,
                                     vq,
                                     &mut nb,
                                 );
@@ -10453,7 +10594,7 @@ fn trim(
                     let vi = super::blend::vertex_index(b, v);
                     out.new_faces.push(NewFace {
                         surf,
-                        edges: vec![across_e, sides[0], sides[1]],
+                        edges: [vec![across_e, sides[0], sides[1]], over].concat(),
                         src: FaceSrc::New(Origin::FromVertex {
                             body: input,
                             vertex: VertexId(vi as u64),
