@@ -22,6 +22,7 @@
 //!   it (parallel axes). The inertia is about the centre of mass with axes parallel to the Part
 //!   Studio's (Onshape's convention without a reference mate connector; see
 //!   `cadrs_core::parts::mass_report`).
+//! - Clicking a value copies it, with its unit, to the clipboard (#67).
 //! - ✕ (or Esc) closes it; ✓ stays greyed, as in Onshape (there is nothing to accept).
 //! - While it shows a mass, the **centre of mass** is marked in the view with the quartered
 //!   circle (P3.6, `ex4-step18.png`, `ex3-step10.png`).
@@ -78,7 +79,8 @@ impl Plugin for MassPropsPlugin {
         .add_observer(on_override)
         .add_observer(on_override_value)
         .add_observer(on_reference_activate)
-        .add_observer(on_reference_clear);
+        .add_observer(on_reference_clear)
+        .add_observer(on_value_click);
     }
 }
 
@@ -119,6 +121,7 @@ struct FacesField;
 
 /// A Face tab readout.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[require(Tooltip = Tooltip::new("Click to copy"))]
 enum FaceValue {
     Area,
     X,
@@ -200,6 +203,7 @@ struct MassDialog;
 
 /// A value cell of the panel.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+#[require(Tooltip = Tooltip::new("Click to copy"))]
 enum Value {
     Mass,
     Volume,
@@ -592,6 +596,36 @@ fn mass_keys(
             commands.remove_resource::<MassPanel>();
         }
     }
+}
+
+/// A click on a value copies its text ("0.337 kg") to the clipboard (#67).
+fn on_value_click(
+    click: On<Pointer<Click>>,
+    q: Query<&Text, Or<(With<Value>, With<FaceValue>)>>,
+    mut commands: Commands,
+) {
+    let Ok(text) = q.get(click.entity) else {
+        return;
+    };
+    if click.button != PointerButton::Primary || text.0.is_empty() {
+        return;
+    }
+    let value = text.0.clone();
+    commands.queue(move |world: &mut World| {
+        if let Some(mut clip) = world.get_resource_mut::<bevy::clipboard::Clipboard>()
+            && let Err(e) = clip.set_text(value.clone())
+        {
+            warn!("clipboard: {e:?}");
+        }
+        let theme = world.resource::<Theme>().clone();
+        let mut c = world.commands();
+        cadrs_ui::toast::show_notification(
+            &mut c,
+            &theme,
+            cadrs_ui::toast::Notification::info(format!("Copied {value}")).name("mass-toast"),
+        );
+        world.flush();
+    });
 }
 
 fn value_row(p: &mut ChildSpawner, t: &Theme, label: &str, label_color: Color, v: Option<Value>) {
