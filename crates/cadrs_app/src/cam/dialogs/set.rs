@@ -429,7 +429,8 @@ impl Draft {
                     .and_then(|i| usable_templates(ctx_cam, tk, machine).get(i).copied())
                 {
                     let ty = t.params.pattern.type_of();
-                    t.apply_to(p);
+                    let fallback = Tool::new(tk, 6.0);
+                    t.apply_to(p, tool.as_ref().unwrap_or(&fallback), machine);
                     // Picks of another kind of geometry don't carry over.
                     if ty != *kind {
                         p.drive = Default::default();
@@ -443,7 +444,8 @@ impl Draft {
             ("save-template", Value::Activate) => {
                 let name = op.name.clone();
                 let mut lib = ctx_cam.library.clone();
-                lib.save_template(Template::new(&name, p));
+                let fallback = Tool::new(tk, 6.0);
+                lib.save_template(Template::new(&name, p, tool.as_ref().unwrap_or(&fallback)));
                 edit(world, Edit::SetLibrary(Box::new(lib)));
                 toast(
                     world,

@@ -369,6 +369,8 @@ struct Writer<'a> {
     rpm: Option<f64>,
     /// Cutter compensation words (G41 D1, G40) for the next straight move.
     comp: Option<String>,
+    /// The operator has been told what the compensation register holds.
+    comp_noted: bool,
 }
 
 impl<'a> Writer<'a> {
@@ -387,6 +389,7 @@ impl<'a> Writer<'a> {
             beam_on: false,
             rpm: None,
             comp: None,
+            comp_noted: false,
         }
     }
 
@@ -646,7 +649,8 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
                 retract_home(&mut w, d);
             }
             w.number_next = true;
-            if machine.tool_changer {
+            // (GRBL has no M6: a manual change whatever the machine says.)
+            if machine.tool_changer && d != Dialect::Grbl {
                 w.block(&format!("T{} M6", op.tool_number));
             } else {
                 w.comment(&format!("Change to T{}: {}", op.tool_number, op.tool.name));
@@ -666,10 +670,13 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         } else {
             1
         };
+        // A new work offset: up to the first height before across, as after a tool change.
+        let mut z_first = false;
         if datum != Some(want) {
             if datum.is_some() && s.force_retract_on_plane_change {
                 retract_home(&mut w, d);
             }
+            z_first = machine.kind.is_milling();
             let code = d.datum(want).ok_or_else(|| {
                 PostError::NoDatum(format!(
                     "{}: {} has no work offset {want} (G54 is 1)",
@@ -727,6 +734,16 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
                 }
                 None => w.block(&format!("G43 H{}", op.tool_number)),
             }
+        } else if z_first
+            && let Some(z) = op.toolpath.steps.iter().find_map(|st| match st {
+                Step::Rapid(p) => Some(p[2]),
+                _ => None,
+            })
+        {
+            let line = format!("G0 Z{}", w.num(z));
+            w.block(&line);
+            w.at[2] = Some(z);
+            w.mode = Some(0);
         }
         post_moves(&mut w, op, machine, s, beam, &mut coolant);
     }
@@ -789,6 +806,18 @@ fn retract_home(w: &mut Writer, d: Dialect) {
     w.mode = None;
 }
 
+/// What the operator sets for wear compensation: the path is already the tool's centre, so the
+/// control's register holds the wear only.
+pub fn compensation_note(d: Dialect, tool: u32) -> String {
+    match d {
+        Dialect::LinuxCnc | Dialect::Mach3 => format!(
+            "Wear compensation: the tool table diameter of T{tool} holds twice the wear only \
+             (0 to start), not the tool's diameter"
+        ),
+        _ => format!("Wear compensation: D{tool} holds the wear only (0 to start), not the radius"),
+    }
+}
+
 fn spindle_word(rpm: f64, cw: bool) -> String {
     format!("S{} {}", rpm.round(), if cw { "M3" } else { "M4" })
 }
@@ -813,6 +842,8 @@ fn post_moves(
     let d = machine.dialect;
     let tool = &op.tool;
     let mut at: P3 = [f64::NAN; 3];
+    // (Told once for each operation that compensates: its tool's register.)
+    w.comp_noted = false;
     let max_s = machine.max_spindle.max(1.0);
     // Lines that follow a circle become arcs (when arcs are on); collect feed runs first.
     let steps = if s.output_arcs && s.arcs_xy {
@@ -949,6 +980,10 @@ fn post_moves(
                 post_drill(w, c, s, d, tool, &mut at);
             }
             Step::Compensation(side) => {
+                if side.is_some() && !w.comp_noted {
+                    w.comment(&compensation_note(d, op.tool_number));
+                    w.comp_noted = true;
+                }
                 w.comp = Some(match side {
                     Some(true) => format!("G41 D{}", op.tool_number),
                     Some(false) => format!("G42 D{}", op.tool_number),

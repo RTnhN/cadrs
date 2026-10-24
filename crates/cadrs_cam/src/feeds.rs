@@ -103,15 +103,21 @@ pub fn cutting_data(
         _ => tool.flutes.max(1) as f64,
     };
     let fz = (m.fz * d).clamp(0.005, 0.25);
-    let feed = if tool.kind == ToolKind::Tap {
-        rpm * tool.pitch.max(0.0)
+    // A tap's feed is its pitch a turn: slowed to the machine's feed, it turns slower too.
+    let (rpm, feed) = if tool.kind == ToolKind::Tap {
+        let pitch = tool.pitch.max(1e-6);
+        let rpm = rpm.min(max_feed.max(1.0) / pitch).floor().max(1.0);
+        (rpm, rpm * pitch)
     } else {
-        rpm * teeth * fz
-    }
-    .min(max_feed.max(1.0));
+        (rpm, (rpm * teeth * fz).min(max_feed.max(1.0)))
+    };
     CuttingData {
         spindle_rpm: rpm.round(),
-        feed: feed.round(),
+        feed: if tool.kind == ToolKind::Tap {
+            feed
+        } else {
+            feed.round()
+        },
         plunge_feed: (feed * m.plunge).round(),
         step_down: round2(m.ap * d),
         step_over: round2(m.ae * d),
@@ -148,5 +154,11 @@ mod tests {
         // The machine's feed limit.
         let capped = cutting_data(&t, WorkMaterial::Softwood, 24_000.0, 2_000.0);
         assert_eq!(capped.feed, 2_000.0);
+        // A tap stays at its pitch a turn, slowed to the machine's feed.
+        let mut tap = Tool::new(ToolKind::Tap, 8.0);
+        tap.pitch = 1.25;
+        let c = cutting_data(&tap, WorkMaterial::Softwood, 24_000.0, 1_000.0);
+        assert_eq!(c.spindle_rpm, 800.0);
+        assert!((c.feed - c.spindle_rpm * 1.25).abs() < 1e-9);
     }
 }

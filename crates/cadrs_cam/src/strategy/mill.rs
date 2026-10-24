@@ -590,7 +590,6 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         p.tabs
             .enabled
             .then_some((bottom + p.tabs.height, p.tabs.count, p.tabs.width + 2.0 * r));
-    let mut b = Builder::new(input);
     // Rough passes outward first, the finishing pass last.
     let pass_paths: Vec<Vec<Contour>> = (0..passes)
         .rev()
@@ -631,6 +630,7 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         &input.stock.footprint(),
     );
     let run = |b: &mut Builder, ci: usize, li: usize, z: f64, above: f64| {
+        b.contour = ci;
         // The band the pass before cut at this depth.
         let mut cut_before: Option<Region> = None;
         for (k, path) in paths_by_contour[ci].iter().enumerate() {
@@ -663,22 +663,54 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
             cut_before = Some(band);
         }
     };
-    if by_levels {
-        let mut above = top;
-        for (li, z) in levels.iter().enumerate() {
-            for &ci in &order {
-                run(&mut b, ci, li, *z, above);
-            }
-            above = *z;
-        }
-    } else {
-        for &ci in &order {
+    let build = |off: &std::collections::HashSet<usize>| {
+        let mut b = Builder::new(input);
+        b.comp_off = off.clone();
+        if by_levels {
             let mut above = top;
             for (li, z) in levels.iter().enumerate() {
-                run(&mut b, ci, li, *z, above);
+                for &ci in &order {
+                    run(&mut b, ci, li, *z, above);
+                }
                 above = *z;
             }
+        } else {
+            for &ci in &order {
+                let mut above = top;
+                for (li, z) in levels.iter().enumerate() {
+                    run(&mut b, ci, li, *z, above);
+                    above = *z;
+                }
+            }
         }
+        b
+    };
+    let b = build(&Default::default());
+    // Wear compensation at every depth of a contour or at none: a depth with no room for the
+    // lead-in it starts on leaves its contour uncompensated throughout.
+    let b = if b.comp_missed.is_empty() {
+        b
+    } else {
+        let missed = b.comp_missed.clone();
+        let mut b = build(&missed);
+        b.warnings.push(format!(
+            "Wear compensation needs room for a lead-in at every depth: {} contour{} cut without \
+             it (G41/G42) throughout",
+            missed.len(),
+            if missed.len() == 1 { " is" } else { "s are" }
+        ));
+        b
+    };
+    let mut b = b;
+    if p.compensation == super::Compensation::Wear
+        && p.side != Side::On
+        && p.links.lead_out == super::LeadKind::None
+    {
+        b.warnings.push(
+            "Wear compensation without a lead-out: G40 comes with the retract, not on a move \
+             off the wall (set a lead-out)"
+                .into(),
+        );
     }
     Ok(b.finish())
 }

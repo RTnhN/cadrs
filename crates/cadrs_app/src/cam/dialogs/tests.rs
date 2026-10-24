@@ -324,25 +324,28 @@ fn profile_compensation_field() {
     assert!(!has_key(&fields(&s, &pocket, 0), "comp"));
 }
 
-/// A toolpath started from a library template takes its settings and keeps its own picks;
-/// templates the tool can't run aren't offered.
+/// A toolpath started from a library template takes its settings and keeps its own picks; a
+/// template saved with a D12 scales its steps to the D6 it's used with and takes the D6's own
+/// speeds. Templates the tool can't run aren't offered.
 #[test]
 fn toolpath_from_a_template() {
     let em = Tool::new(ToolKind::EndMill, 6.0);
     let mut s = studio(mill(false), em.clone());
-    let mut saved = Params::new(Pattern::Profile2D, &em, MachineKind::Mill);
-    saved.step_down = 1.25;
+    let d12 = Tool::new(ToolKind::EndMill, 12.0);
+    let mut saved = Params::new(Pattern::Profile2D, &d12, MachineKind::Mill);
+    saved.step_down = 2.5;
+    saved.step_over = 4.8;
+    saved.speeds.feed = 5_000.0;
     saved.compensation = Compensation::Wear;
     saved.drive.edges = vec![Default::default()];
     s.cam
         .library
-        .save_template(Template::new("Finish wall", &saved));
-    let drill = Params::new(
-        Pattern::Drill,
-        &Tool::new(ToolKind::Drill, 5.0),
-        MachineKind::Mill,
-    );
-    s.cam.library.save_template(Template::new("Spot", &drill));
+        .save_template(Template::new("Finish wall", &saved, &d12));
+    let drill_tool = Tool::new(ToolKind::Drill, 5.0);
+    let drill = Params::new(Pattern::Drill, &drill_tool, MachineKind::Mill);
+    s.cam
+        .library
+        .save_template(Template::new("Spot", &drill, &drill_tool));
     // (Saved without what it machined.)
     assert!(s.cam.library.templates[0].params.drive.edges.is_empty());
     let mut d = toolpath(&s, Pattern::Profile2D, &em, MachineKind::Mill);
@@ -356,8 +359,9 @@ fn toolpath_from_a_template() {
     let mut world = World::new();
     d.set(&mut world, "template", &Value::Index(1), &s.cam);
     let p = params(&d);
-    assert_eq!(p.step_down, 1.25);
     assert_eq!(p.compensation, Compensation::Wear);
+    assert!((p.step_down - 1.25).abs() < 1e-9 && (p.step_over - 2.4).abs() < 1e-9);
+    assert_eq!(p.speeds.feed, em.cutting.feed);
     match &d {
         Draft::Toolpath { op, .. } => assert_eq!(op.name, "Finish wall"),
         _ => unreachable!(),

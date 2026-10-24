@@ -451,6 +451,20 @@ fn toolpaths_use_the_tool_and_work_plane_above() {
     // 5 mm round the 60 × 40 plate, in the setup's X and Y.
     assert!((cuts.max[0] - 35.0).abs() < 0.01, "{cuts:?}");
     assert!((cuts.max[1] - 25.0).abs() < 0.01, "{cuts:?}");
+    // As the program moves: the second (a new tool) from where the first ended, up clear, down
+    // to its first height and only then across.
+    let m = program::run_motions(&j.setups[0], j, &run, [0.0, 0.0, 40.0]);
+    let end = m[0].last().unwrap().to;
+    let entry = &m[1][..3];
+    assert_eq!(entry[0].from, end);
+    let same_xy = |s: &cadrs_cam::toolpath::Segment| {
+        (s.from[0] - s.to[0]).abs() < 1e-9 && (s.from[1] - s.to[1]).abs() < 1e-9
+    };
+    assert!(same_xy(&entry[0]) && same_xy(&entry[1]), "{entry:?}");
+    assert!(
+        (entry[2].from[2] - entry[2].to[2]).abs() < 1e-9,
+        "{entry:?}"
+    );
     // A Dynamic work plane can't be posted on a 3-axis machine.
     let mut dynamic = cam.operation(wid).unwrap().2.clone();
     if let OpKind::WorkPlane(w) = &mut dynamic.kind {

@@ -606,6 +606,7 @@ fn step(world: &mut World, r: &mut Running, parts: &[Part]) -> Option<Outcome> {
                 Some(Err(e)) => return Some(Err(e)),
                 None => {
                     // The kernel couldn't: the display meshes instead.
+                    warn!("cam: no model from the kernel; machining the display meshes");
                     let bodies: Vec<&Part> = parts
                         .iter()
                         .filter(|p| r.input.parts.contains(&p.id))

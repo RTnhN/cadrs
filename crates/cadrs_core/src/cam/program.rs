@@ -708,6 +708,81 @@ fn stock_before_voxels(
     Some(vox.height_map(frame, &stock_in(shape, frame).bounds, cell))
 }
 
+/// The motion of a setup's operations (in its coordinates) as the posted program makes it,
+/// from `start`: each operation from where the one before ended; where the program changes tool
+/// or work offset, up clear over where the tool was, down to the operation's first height and
+/// across at it (the post's Z-first entry), else straight to its first move.
+pub fn run_motions(
+    setup: &Setup,
+    job: &Job,
+    run: &SetupRun,
+    start: P3,
+) -> Vec<Vec<cadrs_cam::toolpath::Segment>> {
+    use cadrs_cam::toolpath::Segment;
+    let rapid_rate = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
+    let milling = job.machine.as_ref().is_some_and(|m| m.kind.is_milling());
+    // The work offsets the program gives the operations (as posted).
+    let datums: Option<Vec<u32>> = nc_program(setup, job, run)
+        .ok()
+        .map(|p| p.operations.iter().map(|o| o.datum).collect());
+    let rapid = |from: P3, to: P3| Segment {
+        from,
+        to,
+        feed: None,
+        kind: None,
+        beam: false,
+        minutes: cadrs_cam::geom::dist(from, to) / rapid_rate.max(1.0),
+    };
+    let mut at = start;
+    let mut tool: Option<u32> = None;
+    let mut datum: Option<u32> = None;
+    let mut out = Vec::with_capacity(run.ops.len());
+    for (k, o) in run.ops.iter().enumerate() {
+        let d = datums.as_ref().and_then(|v| v.get(k).copied());
+        let new_plane = k == 0 || o.plane != run.ops[k - 1].plane;
+        let entering = tool != Some(o.tool_number)
+            || o.posting.force_tool_change
+            || d != datum
+            || (new_plane && (d.is_none() || o.tilted));
+        let first = o.toolpath.steps.iter().find_map(|st| match st {
+            Step::Rapid(p) => Some(*p),
+            _ => None,
+        });
+        let mut segs = Vec::new();
+        if entering
+            && milling
+            && let Some(f) = first
+        {
+            let clear = at[2].max(f[2]).max(start[2]);
+            let over = [at[0], at[1], clear];
+            // Down its tool axis: the setup's Z, or a tilted plane's (3+2, entered from up
+            // clear along it, then across in it).
+            let down = match o.plane.as_ref().filter(|_| o.tilted) {
+                Some((wf, _, _)) => {
+                    let pf = run.frame.relative(wf);
+                    let (ol, fl) = (pf.to_local(over), pf.to_local(f));
+                    pf.to_world([ol[0], ol[1], fl[2]])
+                }
+                None => [at[0], at[1], f[2]],
+            };
+            for (a, b) in [(at, over), (over, down), (down, f)] {
+                if cadrs_cam::geom::dist(a, b) > 1e-9 {
+                    segs.push(rapid(a, b));
+                }
+            }
+            at = f;
+        }
+        segs.extend(o.toolpath.motion(at, rapid_rate));
+        if let Some(l) = segs.last() {
+            at = l.to;
+        }
+        tool = Some(o.tool_number);
+        datum = d;
+        out.push(segs);
+    }
+    out
+}
+
 /// What Verify found.
 pub enum SimResult {
     Mill(Box<MillResult>),
@@ -758,11 +833,11 @@ pub fn simulate(
     let shape = stock_shape(cam, job, parts).ok_or("The job has no bodies")?;
     let stock = stock_in(&shape, &run.frame);
     let model = super::geometry::model_from_parts(&job_bodies(cam, job, parts), &run.frame);
-    let start = [0.0, 0.0, stock.bounds.max[2] + 50.0];
+    let start = [0.0, 0.0, stock.bounds.max[2] + 30.0];
     let mut motions = Vec::new();
     let mut frames = Vec::new();
-    for o in &run.ops {
-        motions.push((o.tool, o.toolpath.motion(start, machine.rapid_rate)));
+    for (o, m) in run.ops.iter().zip(run_motions(setup, job, run, start)) {
+        motions.push((o.tool, m));
         frames.push(
             o.plane
                 .as_ref()

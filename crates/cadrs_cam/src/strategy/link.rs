@@ -49,6 +49,13 @@ pub struct Builder<'a> {
     /// The direction the tool last moved in across XY (unit).
     pub heading: Option<P2>,
     pub warnings: Vec<String>,
+    /// The contour being cut (a profile's), for wear compensation: a contour is compensated at
+    /// every depth or at none.
+    pub contour: usize,
+    /// Contours cut without compensation.
+    pub comp_off: std::collections::HashSet<usize>,
+    /// Contours with a depth that had no room for the lead-in compensation starts on.
+    pub comp_missed: std::collections::HashSet<usize>,
 }
 
 impl<'a> Builder<'a> {
@@ -60,6 +67,9 @@ impl<'a> Builder<'a> {
             at: None,
             heading: None,
             warnings: Vec::new(),
+            contour: 0,
+            comp_off: Default::default(),
+            comp_missed: Default::default(),
         };
         let p = input.params;
         if !p.posting.comment.is_empty() {
@@ -220,9 +230,10 @@ impl<'a> Builder<'a> {
         let tabs_here = cut.tabs.filter(|(top, _, _)| *top > z + 1e-9 && c.closed);
         // Wear compensation (G41/G42) on a profile: it starts on a straight move into the lead
         // and ends after the lead-out.
-        let comp = cut
+        let comp_wanted = cut
             .free_side
             .filter(|_| p.compensation == Compensation::Wear && p.pattern == Pattern::Profile2D);
+        let comp = comp_wanted.filter(|_| !self.comp_off.contains(&self.contour));
         // Leads (in the free side only).
         let lead_in = cut
             .free_side
@@ -265,6 +276,9 @@ impl<'a> Builder<'a> {
                 self.lead_clear(&path, cut)
                     .then_some((lead.0, lead.1, run_in))
             });
+        if comp_wanted.is_some() && lead_in.is_none() {
+            self.comp_missed.insert(self.contour);
+        }
         let start = walk[0];
         let entry_xy = lead_in.map_or(start, |(s, _, run_in)| run_in.unwrap_or(s));
         let at_depth = self.travel_to(entry_xy, z, cut);
@@ -311,15 +325,6 @@ impl<'a> Builder<'a> {
                     self.feed([s[0], s[1], z], FeedKind::LeadIn);
                 }
                 true
-            }
-            (Some(_), None) => {
-                let w = "Wear compensation needs room for a lead-in: contours without one were \
-                         cut without it"
-                    .to_string();
-                if !self.warnings.contains(&w) {
-                    self.warnings.push(w);
-                }
-                false
             }
             _ => false,
         };

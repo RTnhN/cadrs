@@ -329,8 +329,10 @@ pub fn open_for_selection(world: &mut World) {
     let stock = program::stock_in(&shape, &run.frame);
     let mut segments: Vec<Segment> = Vec::new();
     let mut spans = Vec::new();
-    let mut at: P3 = [0.0, 0.0, stock.bounds.max[2] + 30.0];
-    for o in &run.ops {
+    // As the program moves: from op to op, with the post's entries.
+    let start: P3 = [0.0, 0.0, stock.bounds.max[2] + 30.0];
+    let motions = program::run_motions(setup, job, &run, start);
+    for (o, m) in run.ops.iter().zip(motions) {
         spans.push(OpSpan {
             first: segments.len(),
             name: o.name.to_string(),
@@ -346,10 +348,6 @@ pub fn open_for_selection(world: &mut World) {
                 .as_ref()
                 .map_or([0.0, 0.0, 1.0], |(wf, _, _)| run.frame.dir_to_local(wf.z)),
         });
-        let m = o.toolpath.motion(at, machine.rapid_rate);
-        if let Some(l) = m.last() {
-            at = l.to;
-        }
         segments.extend(m);
     }
     // The model the toolpaths were calculated against (the kernel's: the finest of them),

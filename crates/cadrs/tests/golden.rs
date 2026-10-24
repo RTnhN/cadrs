@@ -129,6 +129,9 @@ fn render_and_compare(name: &str, extra: &[&std::ffi::OsStr]) -> Result<Option<P
     let out = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("golden")
         .join(name);
+    // From nothing: the last run's screenshots and its session cache (kernel results a
+    // different build left) would make a render depend on what ran before it.
+    let _ = std::fs::remove_dir_all(&out);
     let slot = JobSlot::take();
     let output = Command::new(env!("CARGO_BIN_EXE_cadrs"))
         .current_dir(workspace())

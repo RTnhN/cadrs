@@ -734,7 +734,8 @@ fn tilted_planes_post_as_g68_2() {
 fn grbl_goes_up_before_it_goes_across() {
     let mut m = machine(MachineKind::Mill, Dialect::Fanuc);
     m.dialect = Dialect::Grbl;
-    m.tool_changer = false;
+    // (Ticked, it's still a manual change: GRBL has no M6.)
+    m.tool_changer = true;
     let s = PostSettings::for_dialect(Dialect::Grbl, MachineKind::Mill);
     let mut op = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
     op.toolpath.steps[0] = Step::Rapid([30.0, 40.0, 5.0]);
@@ -752,7 +753,7 @@ fn grbl_goes_up_before_it_goes_across() {
         .find(|l| l.contains("G0") || l.contains('X'))
         .expect(&nc);
     assert!(first.contains("Z5") && !first.contains('X'), "{nc}");
-    assert!(!nc.contains("G43"), "{nc}");
+    assert!(!nc.contains("G43") && !nc.contains("M6"), "{nc}");
 }
 
 #[test]
@@ -867,6 +868,10 @@ fn wear_compensation_starts_on_a_straight_move() {
         );
     }
     assert!(!nc.contains("G42"), "{nc}");
+    // The operator told what D1 holds, once, before the first G41.
+    let note = nc.find("D1 holds the wear only").expect(&nc);
+    assert!(note < nc.find("G41").unwrap());
+    assert_eq!(nc.matches("holds the wear only").count(), 1);
     let mut grbl = machine(MachineKind::Mill, Dialect::Fanuc);
     grbl.dialect = Dialect::Grbl;
     let s = PostSettings::for_dialect(Dialect::Grbl, MachineKind::Mill);
@@ -874,4 +879,103 @@ fn wear_compensation_starts_on_a_straight_move() {
         post(&program, &grbl, &s),
         Err(PostError::NoCompensation(_))
     ));
+}
+
+/// A frame with a window, profiled with wear compensation at two depths: a contour is
+/// compensated at every depth or at none (never one depth and not the next), and the toolpath
+/// says which weren't.
+#[test]
+fn wear_compensation_is_all_or_nothing_per_contour() {
+    use crate::geom::Aabb;
+    use crate::model::{Model, box_triangles};
+    use crate::strategy::{Compensation, Input, Params, Pattern, Stock, generate};
+    let mut tris = Vec::new();
+    for (lo, hi) in [
+        ([0.0, 0.0], [15.0, 40.0]),
+        ([45.0, 0.0], [60.0, 40.0]),
+        ([15.0, 0.0], [45.0, 10.0]),
+        ([15.0, 30.0], [45.0, 40.0]),
+    ] {
+        tris.extend(box_triangles(&Aabb::new(
+            [lo[0], lo[1], 0.0],
+            [hi[0], hi[1], 10.0],
+        )));
+    }
+    let m = Model::from_triangles("frame", tris);
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let post_with = |stock: Stock| {
+        let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        p.step_down = 5.0;
+        p.compensation = Compensation::Wear;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        let tp = generate(&input).unwrap();
+        let mut op = square_op(tool.clone(), false);
+        op.toolpath = tp.clone();
+        let program = NcProgram {
+            name: "Frame".into(),
+            number: 1,
+            operations: vec![op],
+        };
+        let mc = machine(MachineKind::Mill, Dialect::Fanuc);
+        (tp, post(&program, &mc, &mc.post).unwrap())
+    };
+    // Cut to size: the outside has room for its leads at both depths, the window (stock inside
+    // it) at neither.
+    let (tp, nc) = post_with(Stock::block(Aabb::new([0.0; 3], [60.0, 40.0, 10.0])));
+    assert_eq!(nc.matches("G41").count(), 2, "{nc}");
+    assert!(
+        tp.warnings
+            .iter()
+            .any(|w| w.contains("1 contour is cut without")),
+        "{:?}",
+        tp.warnings
+    );
+    // 5 mm oversize: the outside's first depth has no room, so it isn't compensated at all.
+    let (tp, nc) = post_with(Stock::block(Aabb::new(
+        [-5.0, -5.0, 0.0],
+        [65.0, 45.0, 10.0],
+    )));
+    assert_eq!(nc.matches("G41").count(), 0, "{nc}");
+    assert!(
+        tp.warnings
+            .iter()
+            .any(|w| w.contains("2 contours are cut without")),
+        "{:?}",
+        tp.warnings
+    );
+}
+
+/// Onto another work offset with the same tool: up to the first height on its own before
+/// moving across (the offset's fixture may stand taller).
+#[test]
+fn a_new_work_offset_goes_up_before_across() {
+    let m = machine(MachineKind::Mill, Dialect::Fanuc);
+    let first = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+    let mut second = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+    second.datum = 2;
+    second.toolpath.steps[0] = Step::Rapid([30.0, 40.0, 25.0]);
+    let p = NcProgram {
+        name: "Two vises".into(),
+        number: 1,
+        operations: vec![first, second],
+    };
+    let nc = post(&p, &m, &m.post).unwrap();
+    let after = &nc[nc.find("G55").expect(&nc)..];
+    let first_move = after
+        .lines()
+        .skip(1)
+        .find(|l| l.contains('X') || l.contains('Y') || l.contains('Z'))
+        .expect(&nc);
+    assert!(
+        first_move.contains("Z25") && !first_move.contains('X') && !first_move.contains('Y'),
+        "{nc}"
+    );
 }

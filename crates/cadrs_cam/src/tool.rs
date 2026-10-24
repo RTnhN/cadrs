@@ -578,29 +578,52 @@ pub struct ToolLibrary {
     pub templates: Vec<Template>,
 }
 
-/// A toolpath's settings saved to start others from: everything but what it machines (its
-/// drive geometry, which belongs to its part).
+/// A toolpath's settings saved to start others from: everything but what belongs to its part
+/// (its drive geometry, its repeat pattern's places) and its tool (its speeds).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Template {
     pub name: String,
     pub params: crate::strategy::Params,
+    /// The diameter of the tool it was saved with (mm): its step over, step down and lead
+    /// radius scale to another tool's.
+    #[serde(default)]
+    pub diameter: f64,
 }
 
 impl Template {
-    pub fn new(name: &str, params: &crate::strategy::Params) -> Template {
+    pub fn new(name: &str, params: &crate::strategy::Params, tool: &Tool) -> Template {
         let mut params = params.clone();
         params.drive = Default::default();
+        params.repeat = Default::default();
+        params.posting.comment.clear();
         Template {
             name: name.to_string(),
             params,
+            diameter: tool.diameter,
         }
     }
 
-    /// `params` with this template's settings, keeping what they machine.
-    pub fn apply_to(&self, params: &mut crate::strategy::Params) {
+    /// `params` with this template's settings for `tool`, keeping what they machine: the
+    /// steps and leads scaled to its diameter, its own speeds.
+    pub fn apply_to(
+        &self,
+        params: &mut crate::strategy::Params,
+        tool: &Tool,
+        machine: crate::machine::MachineKind,
+    ) {
         let drive = std::mem::take(&mut params.drive);
+        let repeat = std::mem::take(&mut params.repeat);
         *params = self.params.clone();
         params.drive = drive;
+        params.repeat = repeat;
+        if self.diameter > 0.0 && tool.diameter > 0.0 {
+            let k = tool.diameter / self.diameter;
+            params.step_over *= k;
+            params.step_down *= k;
+            params.first_step_down *= k;
+            params.links.lead_radius *= k;
+        }
+        params.speeds = crate::strategy::Params::new(params.pattern, tool, machine).speeds;
     }
 }
 

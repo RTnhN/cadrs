@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use cadrs_cam::tool::fmt_mm;
-use cadrs_cam::{Frame, Step};
+use cadrs_cam::{Dialect, Frame, Step};
 
 use super::program::{SetupRun, stock_in, stock_shape};
 use super::{CamStudio, Job, Origin, Role, Setup, StockKind};
@@ -250,10 +250,11 @@ pub fn setup_sheet(
             .iter()
             .any(|s| matches!(s, Step::Compensation(Some(_))))
         {
+            let d = job.machine.as_ref().map_or(Dialect::Fanuc, |m| m.dialect);
             notes.push(format!(
-                "{}: wear compensation (G41/G42 D{}): set D{} to the wear only (0 to start), not \
-                 the tool's radius",
-                o.name, o.tool_number, o.tool_number
+                "{}: {}",
+                o.name,
+                cadrs_cam::post::compensation_note(d, o.tool_number)
             ));
         }
         if !o.posting.comment.is_empty() {
