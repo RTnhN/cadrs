@@ -181,7 +181,7 @@ fn box_colors(
     unavailable: bool,
 ) -> (BackgroundColor, BorderColor) {
     if disabled && unavailable {
-        let grey = Color::srgb_u8(0xa8, 0xa8, 0xa8);
+        let grey = t.checkbox_unavailable;
         return (BackgroundColor(grey), BorderColor::all(grey));
     }
     if disabled {

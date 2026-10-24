@@ -48,6 +48,8 @@ pub struct Segmented {
     name: Cow<'static, str>,
     options: Vec<(String, Option<&'static str>, String)>,
     selected: usize,
+    /// Segment height and icon size.
+    size: (f32, f32),
 }
 
 impl Segmented {
@@ -56,10 +58,11 @@ impl Segmented {
             name: name.into(),
             options: Vec::new(),
             selected: 0,
+            size: (18.0, 12.0),
         }
     }
 
-    /// A segment: its label, an icon (or none) and a tooltip.
+    /// A segment: its label (empty for an icon-only segment), an icon (or none) and a tooltip.
     pub fn option(
         mut self,
         label: impl Into<String>,
@@ -75,11 +78,18 @@ impl Segmented {
         self
     }
 
+    /// The segments' height and icon size (default 18 and 12 px).
+    pub fn size(mut self, height: f32, icon_size: f32) -> Self {
+        self.size = (height, icon_size);
+        self
+    }
+
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let t = theme.clone();
         let name = self.name.into_owned();
         let selected = self.selected;
         let options = self.options;
+        let (height, icon_size) = self.size;
         (
             Name::new(name.clone()),
             SegmentedState { selected },
@@ -96,19 +106,18 @@ impl Segmented {
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let row = p.target_entity();
                 for (i, (label, icon, tip)) in options.into_iter().enumerate() {
-                    let mut b = Button::new(format!("{name}-{i}"))
-                        .label(label)
-                        .small()
-                        .ghost()
-                        .selected(i == selected)
-                        .tooltip(tip);
+                    let mut b = Button::new(format!("{name}-{i}"));
+                    if !label.is_empty() {
+                        b = b.label(label);
+                    }
+                    let mut b = b.small().ghost().selected(i == selected).tooltip(tip);
                     if let Some(icon) = icon {
-                        b = b.icon(icon).icon_size(12.0);
+                        b = b.icon(icon).icon_size(icon_size);
                     }
                     p.spawn((b.build(&t), Segment { row, index: i }))
                         .entry::<Node>()
                         .and_modify(|mut n| {
-                            n.height = Val::Px(18.0);
+                            n.height = Val::Px(height);
                             n.border = UiRect::ZERO;
                             n.padding = UiRect::horizontal(Val::Px(6.0));
                         });

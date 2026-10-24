@@ -41,9 +41,25 @@ use crate::{ActiveDocument, AppState};
 
 pub struct SketchDiagnosticsPlugin;
 
+/// The Constraint manager's disabled Delete all: a pale red with a white label, in dark a deep
+/// red with a muted one.
+const DELETE_ALL_DISABLED: Color = Color::srgb_u8(0xe8, 0xa9, 0xa9);
+const DELETE_ALL_DISABLED_TEXT: Color = Color::srgb_u8(0xff, 0xf5, 0xf5);
+
+fn pair_delete_all_colors(mut map: ResMut<cadrs_ui::SchemeMap>) {
+    let (fill, text) = (
+        Color::srgb_u8(0x4a, 0x25, 0x26),
+        Color::srgb_u8(0xb0, 0x8a, 0x8a),
+    );
+    map.pair(cadrs_ui::ColorRole::Fill, DELETE_ALL_DISABLED, fill);
+    map.pair(cadrs_ui::ColorRole::Line, DELETE_ALL_DISABLED, fill);
+    map.pair(cadrs_ui::ColorRole::Ink, DELETE_ALL_DISABLED_TEXT, text);
+}
+
 impl Plugin for SketchDiagnosticsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DiagnosticsState>()
+        app.add_systems(Startup, pair_delete_all_colors)
+            .init_resource::<DiagnosticsState>()
             .init_resource::<DiagnosticHighlight>()
             .add_observer(on_diagnostics_button)
             .add_observer(on_menu_action)
@@ -897,13 +913,10 @@ fn manager_body(
     .with_children(|r| {
         let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Primary);
         let red = Color::srgb_u8(0xc6, 0x28, 0x28);
-        v.background = cadrs_ui::StateColors::new(
-            red,
-            red.darker(0.05),
-            red.darker(0.1),
-            Color::srgb_u8(0xe8, 0xa9, 0xa9),
-        );
+        v.background =
+            cadrs_ui::StateColors::new(red, red.darker(0.05), red.darker(0.1), DELETE_ALL_DISABLED);
         v.border = v.background;
+        v.foreground.disabled = DELETE_ALL_DISABLED_TEXT;
         r.spawn((
             cadrs_ui::Button::new("cm-delete-all")
                 .label("Delete all")

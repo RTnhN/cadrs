@@ -546,6 +546,10 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
         .with_children(|r| {
             let mut dark = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
             dark.foreground = cadrs_ui::StateColors::all(t.foreground);
+            // Light, dark or the system's scheme.
+            r.spawn(cadrs_ui::scheme_toggle(t))
+                .entry::<Node>()
+                .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
             // (Notifications and apps are left out until they do something: issue #13.)
             r.spawn(
                 Button::new("help")

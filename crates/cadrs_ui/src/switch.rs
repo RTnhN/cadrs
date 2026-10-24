@@ -128,6 +128,8 @@ impl Switch {
                         ..default()
                     },
                     BackgroundColor(Color::WHITE),
+                    // White in both schemes, like the toggles of macOS and iOS.
+                    crate::color_scheme::KeepFill,
                     Pickable::IGNORE,
                 ));
                 if !label.is_empty() {

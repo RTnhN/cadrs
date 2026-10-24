@@ -322,7 +322,12 @@ pub fn visuals_for(theme: &Theme, variant: ButtonVariant) -> Visuals {
                 theme.primary_disabled,
             )
             .with_selected(theme.primary_open_border),
-            foreground: StateColors::all(theme.primary_foreground),
+            foreground: StateColors::new(
+                theme.primary_foreground,
+                theme.primary_foreground,
+                theme.primary_foreground,
+                theme.primary_disabled_foreground,
+            ),
             focus_ring: theme.focus_ring,
         },
         ButtonVariant::Secondary => Visuals {

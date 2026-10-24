@@ -72,6 +72,10 @@ impl Plugin for ViewportPlugin {
             .add_systems(OnExit(AppState::Document), reset_viewport)
             .add_systems(
                 Update,
+                recolor_planes.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
+            )
+            .add_systems(
+                Update,
                 (
                     track_active_element,
                     fit_assembly_when_built,
@@ -693,7 +697,7 @@ fn no_light_clusters(add: On<Add, Camera3d>, mut commands: Commands) {
         .insert(bevy::light::cluster::ClusterConfig::None);
 }
 
-fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme: Res<Theme>) {
+fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>) {
     let view = ViewState::default();
     let projection = || ortho_projection(view.scale);
     let transform =
@@ -703,8 +707,9 @@ fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme:
         MainCamera,
         Camera3d::default(),
         surface.target.clone(),
+        // The `ClearColor` resource: the scheme's viewport background (`cadrs_ui::color_scheme`).
         Camera {
-            clear_color: ClearColorConfig::Custom(theme.viewport_background),
+            clear_color: ClearColorConfig::Default,
             ..default()
         },
         projection(),
@@ -761,8 +766,24 @@ pub fn isometric_transform() -> Transform {
 
 /// The plane fill: pale blue at low opacity. Chosen in linear space so one plane over white is
 /// `#f4f8fb` and two overlapping planes about `#e9eff5`, as measured in the reference.
+/// In dark, fainter, so the three planes don't tint the whole view.
 pub fn plane_fill() -> Color {
-    Color::LinearRgba(LinearRgba::new(0.047, 0.387, 0.647, 0.10))
+    cadrs_ui::by_scheme(
+        Color::LinearRgba(LinearRgba::new(0.047, 0.387, 0.647, 0.10)),
+        Color::LinearRgba(LinearRgba::new(0.16, 0.42, 0.78, 0.06)),
+    )
+}
+
+/// Gives the planes the scheme's fill.
+fn recolor_planes(
+    planes: Option<Res<PlaneMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if let Some(planes) = planes
+        && let Some(mut m) = materials.get_mut(&planes.normal)
+    {
+        m.base_color = plane_fill();
+    }
 }
 
 fn spawn_scene(

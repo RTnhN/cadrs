@@ -23,6 +23,7 @@ pub mod collapsible;
 pub mod color_editor;
 pub mod color_legend;
 pub mod color_picker;
+pub mod color_scheme;
 pub mod command_palette;
 pub mod cursor;
 pub mod dialog;
@@ -90,6 +91,10 @@ pub use color_editor::{
 pub use color_legend::{ColorLegend, color_map};
 pub use color_picker::{
     ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected,
+};
+pub use color_scheme::{
+    ActiveTheme, Appearance, ColorScheme, KeepColors, KeepFill, Mapped, RaisedSurface, SchemeMap,
+    SchemePreference, SchemeToggle, authored, by_scheme, dark_in_force, scheme_toggle,
 };
 pub use command_palette::{
     CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row,
@@ -164,7 +169,7 @@ pub use table::{
 pub use tabs::Tab;
 pub use tag::Tag;
 pub use text_dialog::{TextDialog, TextDialogState};
-pub use theme::Theme;
+pub use theme::{ColorRole, Theme};
 pub use timeline::{TimelineMarker, TimelineRow, TimelineRowState};
 pub use toast::{
     Notification, ToastHost, close_toasts, close_transient_toasts, show_notification, show_toast,
@@ -292,6 +297,7 @@ impl Plugin for CadrsUiPlugin {
                 splitter::SplitterPlugin,
                 selection_box::SelectionBoxPlugin,
                 color_editor::ColorEditorPlugin,
+                color_scheme::ColorSchemePlugin,
             ))
             .add_message::<ScriptCommand>();
     }

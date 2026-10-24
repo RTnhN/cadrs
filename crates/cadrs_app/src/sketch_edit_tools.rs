@@ -1249,12 +1249,16 @@ fn draw_offset_preview(
             tip - dir * 9.0 - side * 5.0,
         ];
         let to_w = |p: Vec2| map.to_sketch(p).map(|q| world(&frame, q));
+        let arrow = cadrs_ui::by_scheme(
+            Color::srgb_u8(0x33, 0x33, 0x33),
+            Color::srgb_u8(0xd0, 0xd3, 0xd8),
+        );
         if let (Some(a), Some(b)) = (to_w(base), to_w(tip)) {
-            gizmos.line(a, b, Color::srgb_u8(0x33, 0x33, 0x33));
+            gizmos.line(a, b, arrow);
         }
         let pts: Vec<Vec3> = head.iter().filter_map(|p| to_w(*p)).collect();
         if pts.len() == 3 {
-            gizmos.linestrip(pts, Color::srgb_u8(0x33, 0x33, 0x33));
+            gizmos.linestrip(pts, arrow);
         }
     }
 }

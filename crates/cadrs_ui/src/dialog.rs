@@ -157,6 +157,7 @@ impl Dialog {
                 let root = p.target_entity();
                 p.spawn((
                     Name::new("dialog-panel"),
+                    crate::color_scheme::RaisedSurface,
                     Node {
                         width: Val::Px(width),
                         margin: UiRect::top(Val::Px(24.0)),

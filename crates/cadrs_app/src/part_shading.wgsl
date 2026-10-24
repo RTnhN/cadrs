@@ -56,9 +56,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // A selected face's sides are less dark (`crate::parts::shade`).
     let k = select(b, 1.0 - (1.0 - b) * 0.6, in.uv.x > 0.5);
     var c = clamp(in.color.rgb * k, vec3(0.0), vec3(1.0));
-    // The hidden-line render modes: white faces (a selected face keeps its orange, flat).
+    // The hidden-line render modes: flat faces in the scheme's paper grey, `style.z` (white in
+    // light; a selected face keeps its orange, flat).
     if (params.style.x > 0.5) {
-        c = select(vec3(1.0), in.color.rgb, in.uv.x > 0.5);
+        c = select(vec3(params.style.z), in.color.rgb, in.uv.x > 0.5);
     }
     var lin = srgb_to_linear(c);
     // P3E.3b, the analysis tools' face colouring (`crate::analysis::ShadingAnalysis`): x the mode
