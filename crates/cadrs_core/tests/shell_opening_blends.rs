@@ -3,7 +3,8 @@
 //! outward with its back face, two top rounds and their corner taken away; Fillet 2 rounds the
 //! opening's seven rims, Chamfer 1 (tangent propagation) chamfers the rim round the back wall's
 //! cut end. The document rebuilds at a range of fillet radii and chamfer widths: every feature
-//! builds, and the chamfer takes material off, more the wider it is.
+//! builds, and the chamfer takes material off, more the wider it is, about as the square of
+//! its width.
 #![cfg(feature = "brep")]
 
 use cadrs_core::document::Document;
@@ -13,7 +14,7 @@ use cadrs_core::{
 
 /// The fillet radii the sweep tries (the document's own 2.8 among them).
 const RADII: [f64; 6] = [1.0, 2.0, 2.8, 3.25, 3.5, 4.0];
-/// The chamfer widths it tries at each (the document's own 1).
+/// The chamfer widths it tries at each (the document's own 2).
 const WIDTHS: [f64; 4] = [0.5, 1.0, 1.5, 2.0];
 
 struct Studio {
@@ -122,6 +123,7 @@ fn sweep(radii: &[f64], widths: &[f64]) -> Vec<String> {
             }
         };
         let mut last = 0.0;
+        let mut first: Option<(f64, f64)> = None;
         for &w in widths {
             s.set(r, w);
             match s.volume(true) {
@@ -131,6 +133,18 @@ fn sweep(radii: &[f64], widths: &[f64]) -> Vec<String> {
                         bad.push(format!(
                             "fillet {r}, chamfer {w}: takes off {removed:.4} mm³, no more than {last:.4} narrower"
                         ));
+                    }
+                    // A section of w²/2 or so along the rims: the narrowest's times (w/w₀)²,
+                    // a little more where corners and fans grow faster than that.
+                    if let Some((w0, v0)) = first {
+                        let ratio = removed / (v0 * (w / w0).powi(2));
+                        if !(0.9..1.15).contains(&ratio) {
+                            bad.push(format!(
+                                "fillet {r}, chamfer {w}: takes off {removed:.4} mm³, {ratio:.3} of (w/w₀)² times {v0:.4}"
+                            ));
+                        }
+                    } else {
+                        first = Some((w, removed));
                     }
                     last = removed;
                 }
@@ -143,7 +157,16 @@ fn sweep(radii: &[f64], widths: &[f64]) -> Vec<String> {
 
 #[test]
 fn the_documents_own_fillet_and_chamfer() {
-    let bad = sweep(&[2.8], &[1.0]);
+    let bad = sweep(&[2.8], &[2.0]);
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// Fillet 2 at 1 mm, the chamfer 0.5 and 2: wider than the rounds it runs round and down, it
+/// fans at those corners (the neighbours' rails meeting in a point short of them, a cone from
+/// there down to the corner's other rail).
+#[test]
+fn a_chamfer_wider_than_the_rounds_fans() {
+    let bad = sweep(&[1.0], &[0.5, 2.0]);
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
@@ -155,14 +178,36 @@ fn fillet_radii_and_chamfer_widths() {
     assert!(bad.is_empty(), "{} failed:\n{}", bad.len(), bad.join("\n"));
 }
 
-/// One radius and width from `CADRS_CASE=r,w` (with `CADRS_DUMP_DIR` for the kernel's inputs).
+/// Tangent propagation from Chamfer 1's seed on the opening's rim (the body after Fillet 2 at
+/// the document's 2.8 mm): the rim's sharp edges round the opening, not the smooth edges where
+/// the rounded body's faces meet tangentially (a chamfer's chain ran on along every one).
 #[test]
-#[ignore]
-fn one_case() {
-    let Ok(case) = std::env::var("CADRS_CASE") else {
-        return;
+fn the_chamfers_chain_skips_smooth_edges() {
+    let s = Studio::new();
+    let el = s.d.element(s.el).unwrap();
+    let mut features = el.active_features();
+    features.retain(|f| f.id != s.chamfer);
+    let b = rebuild::build(&features);
+    assert!(b.errors.is_empty(), "{:?}", b.errors);
+    let solid = &b.parts[0].solid;
+    let seed = [15.0, 1.4, 25.6];
+    let dist = |e: &cadrs_core::solid::SolidEdge| {
+        e.points
+            .iter()
+            .map(|p| (0..3).map(|i| (p[i] - seed[i]).powi(2)).sum::<f64>())
+            .fold(f64::MAX, f64::min)
     };
-    let v: Vec<f64> = case.split(',').map(|x| x.parse().unwrap()).collect();
-    let bad = sweep(&[v[0]], &[v[1]]);
-    assert!(bad.is_empty(), "{}", bad.join("\n"));
+    let start = solid
+        .edges
+        .iter()
+        .min_by(|a, c| dist(a).total_cmp(&dist(c)))
+        .unwrap();
+    let group = start.tangent_group;
+    // The rim's 16 edges (running on along the smooth ones too, 62).
+    let chain = solid
+        .edges
+        .iter()
+        .filter(|e| e.tangent_group == group)
+        .count();
+    assert_eq!(chain, 16);
 }

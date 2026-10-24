@@ -4270,7 +4270,8 @@ fn traced_roll(
             }
             // On the edge itself (the face test has its tolerance: a contact crossing at a
             // shallow angle flips it short of the edge): bisected on the contact's signed
-            // distance from the edge across the face (into it positive).
+            // distance from the edge across the face (signed by a side of the edge, the same
+            // all along it: only where it changes sign matters).
             let xe = &b.edges[x];
             let across = |bl: &Ball| {
                 let q = bl.q[k].p;
@@ -5407,18 +5408,34 @@ fn fan_corner(
     if !ef.flat || ef.closed {
         return None;
     }
-    // The edge's curvature at the strip's middle: the contact on a face past its centre.
-    let (p, _, dp, dtn) = ef.spine.at_d(ef.tm);
-    let kappa = dtn / dp.norm().max(tol::TINY);
-    let curv = kappa.norm();
-    if curv < tol::TINY {
-        return None;
-    }
-    let inward = kappa / curv;
+    // A contact on a face past the edge's centre of curvature, at the strip's middle or at any
+    // of a few stations along it (an edge whose turn tightens towards an end folds there).
     let tol = tol::REL_POINT * (1.0 + ef.r());
-    let kf = (0..2).find(|&k| (ef.mid.q[k].p - p).dot(&inward) > 1.0 / curv + tol)?;
-    let face = ef.faces[kf];
+    let past = |t: f64, ball: &Ball| -> Option<usize> {
+        let (p, _, dp, dtn) = ef.spine.at_d(t);
+        let kappa = dtn / dp.norm().max(tol::TINY);
+        let curv = kappa.norm();
+        if curv < tol::TINY {
+            return None;
+        }
+        let inward = kappa / curv;
+        (0..2).find(|&k| (ball.q[k].p - p).dot(&inward) > 1.0 / curv + tol)
+    };
     let ed = &b.edges[ef.e];
+    let kf = past(ef.tm, &ef.mid).or_else(|| {
+        let n = 8;
+        let mut cur = (ef.tm, ef.mid);
+        [ed.t[0], ed.t[1]].iter().find_map(|&te| {
+            cur = (ef.tm, ef.mid);
+            (1..n).find_map(|i| {
+                let t = ef.tm + (te - ef.tm) * i as f64 / n as f64;
+                let x = ef.ball_from(b, &cur.1, cur.0, t)?;
+                cur = (t, x);
+                past(t, &x)
+            })
+        })
+    })?;
+    let face = ef.faces[kf];
     // A piece's end j: its spine parameter (a roll's, or the edge's end) and its ball.
     let end_of = |m: usize, j: usize| -> Option<(f64, Ball)> {
         match &ends[m][j] {
@@ -5515,16 +5532,21 @@ fn fan_corner(
         let dx = (mm.transpose() * mm).lu().solve(&(-(mm.transpose() * r)))?;
         for i in 0..2 {
             ts[i] += dx[i];
-            // Past the piece's start: the piece before.
+            // Past the piece's start: the piece before; back past its end (the vertex's
+            // side): the piece after.
             loop {
                 let (m, jm) = chains[i][pick[i]];
                 let (te, _) = end_of(m, jm)?;
                 let start = end_of(m, 1 - jm).map(|x| x.0);
-                let past = start.is_some_and(|t0| (ts[i] - t0) * (te - t0) < 0.0);
-                if !past || pick[i] + 1 >= chains[i].len() {
+                let before = start.is_some_and(|t0| (ts[i] - t0) * (te - t0) < 0.0);
+                let after = pick[i] > 0 && start.is_some_and(|t0| (ts[i] - te) * (te - t0) > 0.0);
+                if before && pick[i] + 1 < chains[i].len() {
+                    pick[i] += 1;
+                } else if after {
+                    pick[i] -= 1;
+                } else {
                     break;
                 }
-                pick[i] += 1;
             }
             balls[i] = ball_at(&pick, i, ts[i])?;
         }
@@ -11263,6 +11285,9 @@ fn trim(
                     rt[j][kf] = st.rail_param(kf, &fan.apex, t[kf], t[kf]);
                     let q = balls[kw].q[kw].p;
                     let wf = ef.faces[kw];
+                    // (On the edge between this strip's wall and the next face round; or inside
+                    // the wall, where the fan's rim runs on along it from the strip's rail: a
+                    // neighbour's piece rolled onto the corner's wall.)
                     let wv = match out.contact_verts.get(&(v, wf)) {
                         Some(&x) => x,
                         None => {
@@ -13041,8 +13066,8 @@ fn assemble(
             let ce = &nb.edges[coedges[i].edge];
             let start_fwd = coedges[i].pc.point(ce.t[0]);
             let start_back = coedges[i].pc.point(ce.t[1]);
-            // (Round a surface periodic in u, a whole turn apart is no gap: [`align`] moves the
-            // p-curves so.)
+            // (Round a surface periodic in u or v, a whole turn apart is no gap: [`align`] moves
+            // the p-curves so.)
             let pu = if nf.surf.u_periodic() {
                 Some(TAU)
             } else {
@@ -13051,7 +13076,13 @@ fn assemble(
             let gap = |q: P3| {
                 let du = q.x - at.x;
                 let du = pu.map_or(du, |p| du - (du / p).round() * p);
-                V3::new(du, q.y - at.y, 0.0).norm()
+                let dv = q.y - at.y;
+                let dv = if nf.surf.v_periodic() {
+                    dv - (dv / TAU).round() * TAU
+                } else {
+                    dv
+                };
+                V3::new(du, dv, 0.0).norm()
             };
             coedges[i].fwd = gap(start_fwd) <= gap(start_back);
         }

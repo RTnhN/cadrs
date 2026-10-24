@@ -212,6 +212,32 @@ fn cross_hole_fillet() {
     assert!((1880.0..2040.0).contains(&removed), "{removed}");
 }
 
+/// Tangent propagation over the same opening (rounded all over: most of its edges are smooth,
+/// their faces tangent): a chain from a sharp edge runs on along sharp edges only. A smooth
+/// edge has nothing to blend; a chamfer's chain ran on from the opening's rim along every
+/// smooth edge of the rounded body (Onshape's stops there too).
+#[test]
+fn tangent_chains_skip_smooth_edges() {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(include_bytes!("data/docs/shell_opening_rounds.body")).unwrap());
+    let edges = k.edges(b).unwrap();
+    let smooth: Vec<EdgeId> = edges.iter().filter(|e| e.smooth).map(|e| e.id).collect();
+    assert!(smooth.len() > 50, "{} smooth edges", smooth.len());
+    for e in edges.iter().filter(|e| !e.smooth) {
+        let chain = k.tangent_chain(b, e.id).unwrap();
+        assert!(
+            chain.iter().all(|x| !smooth.contains(x)),
+            "{:?}'s chain {chain:?} runs onto a smooth edge",
+            e.id
+        );
+    }
+    // One rim's chain: it and its tangent neighbour.
+    assert_eq!(
+        k.tangent_chain(b, EdgeId(17)).unwrap(),
+        [EdgeId(17), EdgeId(18)]
+    );
+}
+
 /// The rims of an outward shell's opening filleted (a user's document: a 30 mm cube with every
 /// edge rounded 5, shelled 6.5 outward with its back, two top rounds and their corner taken
 /// away), from 0.5 to 4.5 mm. Five of the rounds run into the inside corners of the opening and
@@ -238,9 +264,15 @@ fn shell_opening_rounds() {
             .bodies[0];
         assert!(k.get(out).unwrap().check().is_empty(), "r {r}");
         // Five inside rounds add (1 − π/4)·r² a mm each, two outside ones take as much off:
-        // more the larger.
+        // (1 − π/4)·r²·L, L the net length, 19.5 mm or so (a little more the larger, by the
+        // ends); and more the larger.
         let added = k.mass_properties(out).unwrap().volume - v0;
         assert!(added > last, "r {r}: adds {added}, no more than {last}");
+        let l = added / ((1.0 - std::f64::consts::FRAC_PI_4) * r * r);
+        assert!(
+            (19.45..19.75).contains(&l),
+            "r {r}: adds {added}, a net length {l}"
+        );
         last = added;
         if r == 3.25 {
             assert!((44.3..44.5).contains(&added), "{added}");
