@@ -314,7 +314,13 @@ fn draw_curve_features(
         } else if selection.contains(p) {
             hl_gizmos.linestrip(pts, theme.selection_3d);
         } else {
-            gizmos.linestrip(pts, Color::srgb_u8(0x30, 0x30, 0x30));
+            gizmos.linestrip(
+                pts,
+                cadrs_ui::by_scheme(
+                    Color::srgb_u8(0x30, 0x30, 0x30),
+                    Color::srgb_u8(0xb8, 0xbc, 0xc2),
+                ),
+            );
         }
     }
 }

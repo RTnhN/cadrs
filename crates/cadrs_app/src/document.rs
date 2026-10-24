@@ -53,6 +53,10 @@ impl Plugin for DocumentPlugin {
             .add_observer(remember_feature_split)
             .init_resource::<crate::WorkspaceUnits>()
             .add_systems(OnEnter(AppState::Document), spawn_shell)
+            .add_systems(
+                Update,
+                back_viewport_tools.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
+            )
             .add_systems(OnExit(AppState::Document), save_on_exit)
             .add_systems(
                 Update,
@@ -778,16 +782,36 @@ fn right_strip(vp: &mut ChildSpawnerCommands, t: &Theme) {
     });
 }
 
+/// The bottom-right tools over the 3D view.
+#[derive(Component)]
+struct ViewportTools;
+
+/// Behind the bottom-right tools: nothing on white, a dark veil in dark, where the light icons
+/// would vanish over a light part.
+fn viewport_tools_backing() -> Color {
+    cadrs_ui::by_scheme(Color::NONE, Color::srgba(0.12, 0.13, 0.15, 0.72))
+}
+
+fn back_viewport_tools(mut q: Query<&mut BackgroundColor, With<ViewportTools>>) {
+    for mut bg in &mut q {
+        bg.0 = viewport_tools_backing();
+    }
+}
+
 fn bottom_right_tools(vp: &mut ChildSpawnerCommands, t: &Theme) {
     vp.spawn((
         Name::new("viewport-tools"),
+        ViewportTools,
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(6.0),
             bottom: Val::Px(2.0),
             column_gap: Val::Px(4.0),
+            border_radius: BorderRadius::all(Val::Px(t.radius)),
             ..default()
         },
+        BackgroundColor(viewport_tools_backing()),
+        cadrs_ui::KeepFill,
     ))
     .with_children(|s| {
         // "Area: … mm²" while a region is selected (`intro-to-sketching/ex1-step8.png`).

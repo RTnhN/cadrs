@@ -226,8 +226,21 @@ impl SchemeMap {
         }
     }
 
-    /// The dark-scheme color for `color` painted in `role`. Alpha is kept.
+    /// The dark-scheme color for `color` painted in `role`. Alpha is kept, except that a
+    /// barely see-through white panel (85% and up: a legend over the 3D view) is all but
+    /// opaque in dark, where what shows through would be light lines on a dark veil. (A fade
+    /// passes that band in a moment.)
     pub fn dark(&self, color: Color, role: ColorRole) -> Color {
+        let out = self.dark_keeping_alpha(color, role);
+        let c = color.to_srgba();
+        let frosted = role != ColorRole::Ink
+            && role != ColorRole::Line
+            && (0.85..0.99).contains(&c.alpha)
+            && Oklcha::from(c).lightness > 0.95;
+        if frosted { out.with_alpha(0.97) } else { out }
+    }
+
+    fn dark_keeping_alpha(&self, color: Color, role: ColorRole) -> Color {
         let c = color.to_srgba();
         if c.alpha == 0.0 {
             return color;
@@ -499,8 +512,8 @@ pub trait SchemeColors: Component<Mutability = bevy::ecs::component::Mutable> {
     const FILL: bool = false;
     fn get(&self) -> Self::Value;
     fn set(&mut self, v: Self::Value);
-    /// The value in the dark scheme, for a node on `surface`.
-    fn dark(v: Self::Value, map: &SchemeMap, surface: Surface) -> Self::Value;
+    /// The value in the dark scheme, for a node at `place`.
+    fn dark(v: Self::Value, map: &SchemeMap, place: Place) -> Self::Value;
     /// When `current` is the mapped `dark` value with only its alpha changed (code fading the
     /// color it read back), the light value with that alpha.
     fn refade(
@@ -512,10 +525,26 @@ pub trait SchemeColors: Component<Mutability = bevy::ecs::component::Mutable> {
     }
 }
 
+/// An opaque near-black grey (the colors [`SchemeMap::dark`] treats as ink).
+fn inky(c: Color) -> bool {
+    let c = c.to_srgba();
+    let o = Oklcha::from(c);
+    o.chroma < GREY && o.lightness < INKY && c.alpha > 0.99
+}
+
 /// `light` with `current`'s alpha, if `current` is `dark` with another alpha.
 fn refade(light: Color, dark: Color, current: Color) -> Option<Color> {
     let (d, c) = (dark.to_srgba(), current.to_srgba());
     (d.with_alpha(0.0) == c.with_alpha(0.0)).then(|| light.with_alpha(c.alpha))
+}
+
+/// Where a UI node is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Place {
+    pub surface: Surface,
+    /// A small node (at most 16 px each way: a dot, a ring, a knob), whose near-black fill is
+    /// ink like a line's.
+    pub marker: bool,
 }
 
 /// The surface a UI node is drawn on, the nearest of it and its ancestors that is raised or
@@ -542,8 +571,13 @@ impl SchemeColors for BackgroundColor {
     fn set(&mut self, v: Color) {
         self.0 = v;
     }
-    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
-        map.dark_on(v, ColorRole::Fill, surface)
+    fn dark(v: Color, map: &SchemeMap, place: Place) -> Color {
+        // A dark chip (a HUD bar with white text) stays dark; only a marker's near-black fill
+        // is ink.
+        if !place.marker && inky(v) {
+            return v;
+        }
+        map.dark_on(v, ColorRole::Fill, place.surface)
     }
 }
 
@@ -560,8 +594,8 @@ impl SchemeColors for BorderColor {
             left,
         };
     }
-    fn dark(v: [Color; 4], map: &SchemeMap, surface: Surface) -> [Color; 4] {
-        v.map(|c| map.dark_on(c, ColorRole::Line, surface))
+    fn dark(v: [Color; 4], map: &SchemeMap, place: Place) -> [Color; 4] {
+        v.map(|c| map.dark_on(c, ColorRole::Line, place.surface))
     }
 }
 
@@ -576,8 +610,8 @@ impl SchemeColors for Outline {
     fn set(&mut self, v: Color) {
         self.color = v;
     }
-    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
-        map.dark_on(v, ColorRole::Line, surface)
+    fn dark(v: Color, map: &SchemeMap, place: Place) -> Color {
+        map.dark_on(v, ColorRole::Line, place.surface)
     }
 }
 
@@ -592,8 +626,8 @@ impl SchemeColors for TextColor {
     fn set(&mut self, v: Color) {
         self.0 = v;
     }
-    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
-        map.dark_on(v, ColorRole::Ink, surface)
+    fn dark(v: Color, map: &SchemeMap, place: Place) -> Color {
+        map.dark_on(v, ColorRole::Ink, place.surface)
     }
 }
 
@@ -608,8 +642,8 @@ impl SchemeColors for ImageNode {
     fn set(&mut self, v: Color) {
         self.color = v;
     }
-    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
-        map.dark_on(v, ColorRole::Ink, surface)
+    fn dark(v: Color, map: &SchemeMap, place: Place) -> Color {
+        map.dark_on(v, ColorRole::Ink, place.surface)
     }
 }
 
@@ -622,8 +656,8 @@ impl SchemeColors for TextCursorStyle {
         self.color = color;
         self.selected_text_color = selected;
     }
-    fn dark((color, selected): Self::Value, map: &SchemeMap, surface: Surface) -> Self::Value {
-        (map.dark_on(color, ColorRole::Ink, surface), selected)
+    fn dark((color, selected): Self::Value, map: &SchemeMap, place: Place) -> Self::Value {
+        (map.dark_on(color, ColorRole::Ink, place.surface), selected)
     }
 }
 
@@ -638,7 +672,7 @@ impl SchemeColors for BoxShadow {
         }
     }
     /// A shadow on a dark page needs to be deeper to show.
-    fn dark(v: Vec<Color>, _: &SchemeMap, _: Surface) -> Vec<Color> {
+    fn dark(v: Vec<Color>, _: &SchemeMap, _: Place) -> Vec<Color> {
         v.into_iter()
             .map(|c| c.with_alpha((c.alpha() * 2.5).min(0.6)))
             .collect()
@@ -702,6 +736,7 @@ pub fn apply_scheme<T: SchemeColors>(
         Has<crate::dialog::DialogRoot>,
         Option<&ChildOf>,
     )>,
+    nodes: Query<&Node>,
     mut commands: Commands,
 ) {
     let scheme = appearance.scheme();
@@ -715,6 +750,16 @@ pub fn apply_scheme<T: SchemeColors>(
                 _ => return Surface::Page,
             }
         }
+    };
+    let marker = |e: Entity| {
+        let small = |v: Val| matches!(v, Val::Px(px) if px <= 16.0);
+        nodes
+            .get(e)
+            .is_ok_and(|n| small(n.width) && small(n.height))
+    };
+    let place = |e: Entity| Place {
+        surface: surface(e),
+        marker: marker(e),
     };
     let mut visit = |(e, mut c, mapped, (keep, keep_fill)): Item<T>| {
         if keep || (T::FILL && keep_fill) {
@@ -746,7 +791,7 @@ pub fn apply_scheme<T: SchemeColors>(
                 // Code that writes its light color every frame: the same dark one.
                 let dark = match &mapped {
                     Some(m) if m.light == light && !switched => m.dark.clone(),
-                    _ => T::dark(light.clone(), &map, surface(e)),
+                    _ => T::dark(light.clone(), &map, place(e)),
                 };
                 if current != dark {
                     c.set(dark.clone());

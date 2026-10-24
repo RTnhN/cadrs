@@ -407,7 +407,7 @@ impl Theme {
             warning_background: hex("#3d3517"),
             danger: hex("#f0605a"),
             success: hex("#4cc15c"),
-            tooltip_background: hex("#41454d"),
+            tooltip_background: hex("#4d515a"),
             tooltip_foreground: hex("#ececec"),
             toast_background: hex("#1c3545"),
             toast_border: hex("#2d5068"),
