@@ -212,6 +212,75 @@ fn cross_hole_fillet() {
     assert!((1880.0..2040.0).contains(&removed), "{removed}");
 }
 
+/// The same document's Chamfer 1 round the opening (its rim edges, by tangent propagation),
+/// on the body Fillet 2 left, chamfered 0.5 to 2 by the local chamfer alone: valid, each taking
+/// off about w²/2 a mm of rim (the narrowest's times (w/w₀)², a little more where corners grow
+/// faster), and as it does now (`want`).
+fn shell_opening_chamfer(data: &[u8], edges: &[u64], want: [f64; 4]) {
+    let mut k = NativeKernel::new();
+    let b = k.insert(bodyio::read(data).unwrap());
+    let v0 = k.mass_properties(b).unwrap().volume;
+    let edges: Vec<EdgeId> = edges.iter().map(|&e| EdgeId(e)).collect();
+    for (w, want) in [0.5, 1.0, 1.5, 2.0].into_iter().zip(want) {
+        let out = blend::chamfer_local(&mut k, b, &edges, w)
+            .unwrap_or_else(|e| panic!("w {w}: {e}"))
+            .bodies[0];
+        let issues = k.get(out).unwrap().check();
+        assert!(issues.is_empty(), "w {w}: {issues:?}");
+        let removed = v0 - k.mass_properties(out).unwrap().volume;
+        assert!(
+            (removed - want).abs() < 1e-6 * want,
+            "w {w}: takes off {removed}, want {want}"
+        );
+    }
+    // The ratios to the narrowest, against (w/w₀)².
+    for (i, w) in [1.0, 1.5, 2.0].into_iter().enumerate() {
+        let ratio = want[i + 1] / (want[0] * (w / 0.5f64).powi(2));
+        assert!((0.99..1.05).contains(&ratio), "w {w}: {ratio}");
+    }
+}
+
+/// At fillet 1 mm the chamfer runs round and down rounds as narrow as itself or narrower: at 1
+/// the corners' cones have their apexes on the top (a rail of no length); past it they fan (the
+/// neighbours' rails meeting in a point short of the corner, a cone from there to its other
+/// rail); rolls onto rounds and back the strips trace.
+#[test]
+fn shell_opening_chamfer_fillet1() {
+    shell_opening_chamfer(
+        include_bytes!("data/docs/shell_opening_fillet1.body"),
+        &[
+            0, 10, 18, 19, 34, 47, 48, 55, 64, 68, 75, 129, 131, 133, 135, 137, 2, 8, 16, 21, 49,
+            60, 70, 71, 78, 100, 111, 128, 130, 132, 134, 136,
+        ],
+        [
+            39.00744516247505,
+            156.56053346663975,
+            356.892814267776,
+            648.179111849131,
+        ],
+    );
+}
+
+/// At fillet 4 mm the chain ends where the rim runs on, past a 7° kink, into an edge between
+/// the same faces: square there, its cut crossing the round the strip rolled onto near its end;
+/// at 2 a roll by a corner of four tangent faces is traced onto the face it lands on.
+#[test]
+fn shell_opening_chamfer_fillet4() {
+    shell_opening_chamfer(
+        include_bytes!("data/docs/shell_opening_fillet4.body"),
+        &[
+            0, 10, 18, 19, 34, 47, 48, 55, 64, 68, 75, 128, 131, 135, 137, 139, 2, 8, 16, 21, 49,
+            60, 70, 71, 99, 110, 127, 129, 134, 136, 138,
+        ],
+        [
+            36.63395889811363,
+            147.10515071999544,
+            334.9092740553824,
+            607.2381007844815,
+        ],
+    );
+}
+
 /// Tangent propagation over the same opening (rounded all over: most of its edges are smooth,
 /// their faces tangent): a chain from a sharp edge runs on along sharp edges only. A smooth
 /// edge has nothing to blend; a chamfer's chain ran on from the opening's rim along every

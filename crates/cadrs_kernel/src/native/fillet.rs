@@ -4613,45 +4613,6 @@ fn pieces_of(
                 &b.faces[into],
                 geom::foot(&b.faces[into], &ball.q[k].p, None),
             );
-            // A contact running on along the smooth edge to the edge's end (the faces' sections
-            // the same there, a section plane through a round's axis): a rail beyond only a
-            // sliver along that edge, no strip; the ball runs on on its faces to the end.
-            let from = cur.faces[k];
-            let between: Vec<usize> = b.faces[into]
-                .loops
-                .iter()
-                .flatten()
-                .map(|c| c.edge)
-                .filter(|&x| beyond(b, x, into) == Some(from))
-                .collect();
-            let on_edge = |q: &P3| {
-                between.iter().any(|&x| {
-                    let xe = &b.edges[x];
-                    (xe.point(xe.curve.closest(q, xe.t[0], xe.t[1])) - q).norm()
-                        <= tol::REL_POINT * (1.0 + cur.r())
-                })
-            };
-            // (A roll a hair from the end, no sliver: the end's section there as it is.)
-            let mut along = (t, next.mid);
-            if cur.spine_len(t, te) > tol::REL_POINT * (1.0 + cur.r())
-                && (1..=4).all(|i| {
-                    let tw = t + (te - t) * i as f64 / 4.0;
-                    match next.ball_from(b, &along.1, along.0, tw) {
-                        Some(x) => {
-                            along = (tw, x);
-                            on_edge(&x.q[k].p)
-                        }
-                        None => false,
-                    }
-                })
-            {
-                debug(|| {
-                    format!(
-                        "edge {e} side {j}: the ball only runs along face {into}'s edge to the end"
-                    )
-                });
-                break;
-            }
             rolls.push(ball);
             let id = rolls.len() - 1;
             next.exact = if next.law.is_some() {
