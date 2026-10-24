@@ -34,7 +34,7 @@ use super::blend::FaceSrc;
 use super::curve::Curve;
 use super::fillet_geom::{self as geom, Ball, Boundary, Contact, Exact, Spine, Strip, StripKind};
 use super::math::*;
-use super::nurbs::NurbsCurve;
+use super::nurbs::{H, NurbsCurve, NurbsSurface, hom};
 use super::split::{Arc, split_face};
 use super::surface::Surface;
 use super::tol;
@@ -817,6 +817,15 @@ enum End {
     /// A set-back corner ([`Hole`] `c`): the strip stops at its section at spine parameter `t`
     /// (ball `ball`), which is part of the hole's rim.
     Hole { c: usize, t: f64, ball: Ball },
+    /// A chamfer ending at a fan ([`Fan`] `c`, the strip on its side `side`): its rail on the
+    /// fan's face stops short at the apex, its other rail at its section, and the strip by the
+    /// line between them (spine parameters `t`, balls `balls`).
+    Fan {
+        c: usize,
+        side: usize,
+        t: [f64; 2],
+        balls: [Ball; 2],
+    },
     /// The strip running on at a mixed corner ([`Knee`] `c`): its rail on the common face stops
     /// where it crosses the other strip's, its other rail where it crosses the edge left as it
     /// is (at spine parameters `t`, balls `balls`), and the strip by the curve across it
@@ -888,6 +897,8 @@ enum SectionKey {
     /// A strip's end at a mixed corner (vertex, edge): the section of the strip stopping
     /// there, or the curve across the one running on.
     Knee(usize, usize),
+    /// The line from a fan's apex down a strip running on into it (fan, side).
+    Fan(usize, usize),
 }
 
 impl SectionKey {
@@ -905,6 +916,7 @@ impl SectionKey {
             // Each strip end's own contacts (they meet only on the edge left as it is; a strip
             // with such corners at both ends has one at each).
             SectionKey::Tri(v, e) => usize::MAX / 4 + (e << 24) + v,
+            SectionKey::Fan(c, _) => usize::MAX / 8 + c,
         }
     }
 }
@@ -928,6 +940,28 @@ struct PatchCorner {
     v: usize,
     /// The strips ending there, in turn round the vertex.
     strips: Vec<usize>,
+}
+
+/// A chamfer round a turn tighter than its width on one of its faces (a rounded rectangle's
+/// top edges chamfered wider than its corners' rounds; a rim running down a round narrower
+/// than the chamfer): on that face the points `d` from the edges are the two neighbours'
+/// rails, crossing at a point short of their ends (the corner's own rail would run back on
+/// itself round the turn, past its centre of curvature). The corner's strip goes; the
+/// neighbours' rails on the face stop at that point, the apex, their other rails at their
+/// sections, each strip ending in the line between; and a ruled face from the apex to the
+/// corner's rail on its other face fills between (an oblique cone round a circular corner).
+struct Fan {
+    /// The corner's edge.
+    edge: usize,
+    /// The face the rails meet on.
+    face: usize,
+    apex: P3,
+    /// The rim: the corner's rail on its other faces (and those of the neighbours' pieces that
+    /// go), from the first neighbour's end to the second's; its parameters and points where it
+    /// passes from one of those faces (`walls`, in turn) to the next.
+    rim: (Curve, f64, f64),
+    breaks: Vec<(f64, P3)>,
+    walls: Vec<usize>,
 }
 
 /// The picked edges at each vertex: (index in the list, which end).
@@ -4023,6 +4057,7 @@ struct Plan {
     holes: Vec<Hole>,
     knees: Vec<Knee>,
     flushes: Vec<Flush>,
+    fans: Vec<Fan>,
     /// Whether some strips were mitred where a three-sided corner could go instead (convex
     /// strips round a concave edge's end, or the reverse).
     mixed_mitres: bool,
@@ -4791,9 +4826,43 @@ fn plan(
     let mut flushes: Vec<Flush> = Vec::new();
     let mut mixed_mitres = false;
     let at = ends_at(b, &efs);
+    // Fans first: their corners' vertices are theirs.
+    let mut fans: Vec<Fan> = Vec::new();
+    let mut fan_verts: Vec<usize> = Vec::new();
+    for s in 0..efs.len() {
+        if inside[s] || fan_verts.iter().any(|v| b.edges[efs[s].e].v.contains(v)) {
+            continue;
+        }
+        let Some((fan, nbrs, gone)) = fan_corner(b, &efs, &ends, &at, s) else {
+            continue;
+        };
+        debug(|| {
+            format!(
+                "edge {}: a fan, its rail on face {} running back round its turn; apex {:?}, rim on faces {:?}",
+                efs[s].e, fan.face, fan.apex, fan.walls
+            )
+        });
+        let c = fans.len();
+        for (side, (n, jn, end)) in nbrs.into_iter().enumerate() {
+            ends[n][jn] = Some(End::Fan {
+                c,
+                side,
+                t: end.0,
+                balls: end.1,
+            });
+        }
+        for g in gone {
+            inside[g] = true;
+        }
+        fan_verts.extend(b.edges[efs[s].e].v);
+        fans.push(fan);
+    }
     let mut verts: Vec<usize> = at.keys().copied().collect();
     verts.sort_unstable();
     for v in verts {
+        if fan_verts.contains(&v) {
+            continue;
+        }
         let here = &at[&v];
         debug(|| format!("vertex {v}: {} picked ends", here.len()));
         let all = vertex_edges(b, v);
@@ -5262,9 +5331,240 @@ fn plan(
         holes,
         knees,
         flushes,
+        fans,
         mixed_mitres,
         welds,
     })
+}
+
+/// The fan at strip s ([`Fan`]), if it is one: a chamfer whose contact on one face lies past
+/// its edge's centre of curvature (its rail there would run back on itself round the turn),
+/// between two chamfers on that face. The corner is its edge's whole strip (its pieces between
+/// rolls, `ends` as far as the rolls set them); each neighbour is the piece of the edge's strip
+/// at that vertex the apex lies on, the pieces past it to the vertex going with the corner's.
+/// With each neighbour's (strip, end, (spine parameters, balls)), and the strips that go.
+#[allow(clippy::type_complexity)]
+fn fan_corner(
+    b: &Body,
+    efs: &[EdgeFillet],
+    ends: &[[Option<End>; 2]],
+    at: &HashMap<usize, Vec<(usize, usize)>>,
+    s: usize,
+) -> Option<(Fan, Vec<(usize, usize, ([f64; 2], [Ball; 2]))>, Vec<usize>)> {
+    let ef = &efs[s];
+    if !ef.flat || ef.closed {
+        return None;
+    }
+    // The edge's curvature at the strip's middle: the contact on a face past its centre.
+    let (p, _, dp, dtn) = ef.spine.at_d(ef.tm);
+    let kappa = dtn / dp.norm().max(tol::TINY);
+    let curv = kappa.norm();
+    if curv < tol::TINY {
+        return None;
+    }
+    let inward = kappa / curv;
+    let tol = tol::REL_POINT * (1.0 + ef.r());
+    let kf = (0..2).find(|&k| (ef.mid.q[k].p - p).dot(&inward) > 1.0 / curv + tol)?;
+    let face = ef.faces[kf];
+    let ed = &b.edges[ef.e];
+    // A piece's end j: its spine parameter (a roll's, or the edge's end) and its ball.
+    let end_of = |m: usize, j: usize| -> Option<(f64, Ball)> {
+        match &ends[m][j] {
+            Some(End::Section {
+                ball,
+                t,
+                key: SectionKey::Roll(_),
+            }) => Some((*t, *ball)),
+            _ if efs[m].at_vertex[j] => Some((b.edges[efs[m].e].t[j], efs[m].end_ball(b, j).ok()?)),
+            _ => None,
+        }
+    };
+    // The piece of the same edge beyond piece m's end j (across its roll there).
+    let next = |m: usize, j: usize| -> Option<usize> {
+        if efs[m].at_vertex[j] {
+            return None;
+        }
+        let (t, _) = end_of(m, j)?;
+        (0..efs.len()).find(|&x| {
+            x != m
+                && efs[x].e == efs[m].e
+                && end_of(x, 1 - j)
+                    .is_some_and(|(tx, _)| (tx - t).abs() <= tol::REL_FINE * (1.0 + t.abs()))
+        })
+    };
+    // The corner's pieces from its first vertex to its second, all on the face.
+    let mut corner = vec![s];
+    while let Some(x) = next(corner[0], 0) {
+        corner.insert(0, x);
+    }
+    while let Some(x) = next(*corner.last()?, 1) {
+        corner.push(x);
+    }
+    let k_of = |m: usize| efs[m].faces.iter().position(|&g| g == face);
+    if corner.iter().any(|&m| k_of(m).is_none()) {
+        return None;
+    }
+    if !efs[corner[0]].at_vertex[0] || !efs[*corner.last()?].at_vertex[1] {
+        return None;
+    }
+    // Each side: the other strip at the vertex, and its edge's pieces from there back.
+    let mut chains: Vec<Vec<(usize, usize)>> = Vec::new();
+    for v in ed.v {
+        let here = at.get(&v)?;
+        if here.len() != 2 {
+            return None;
+        }
+        let &(n, jn) = here.iter().find(|&&(i, _)| efs[i].e != ef.e)?;
+        if !efs[n].flat {
+            return None;
+        }
+        let mut c = vec![(n, jn)];
+        while let Some(x) = next(c.last()?.0, 1 - c.last()?.1) {
+            c.push((x, jn));
+        }
+        chains.push(c);
+    }
+    // Their rails on the face cross at the apex, short of the vertex: Gauss–Newton on the two
+    // spine parameters, each piece's ball run on from its end's; where the parameter leaves a
+    // piece, the one before.
+    let mut pick = [0usize; 2];
+    let mut ts = [0.0; 2];
+    let mut balls = [dummy_ball(); 2];
+    for i in 0..2 {
+        let (m, jm) = chains[i][0];
+        let (t, bl) = end_of(m, jm)?;
+        ts[i] = t;
+        balls[i] = bl;
+    }
+    let ball_at = |pick: &[usize; 2], i: usize, t: f64| -> Option<Ball> {
+        let (m, jm) = chains[i][pick[i]];
+        let (te, end) = end_of(m, jm)?;
+        efs[m].ball_from(b, &end, te, t)
+    };
+    let mut found = false;
+    for _ in 0..60 {
+        let ks = [k_of(chains[0][pick[0]].0)?, k_of(chains[1][pick[1]].0)?];
+        let q = [balls[0].q[ks[0]].p, balls[1].q[ks[1]].p];
+        let r = q[0] - q[1];
+        if r.norm() <= tol {
+            found = true;
+            break;
+        }
+        let cols: Vec<V3> = (0..2)
+            .map(|i| {
+                let (m, jm) = chains[i][pick[i]];
+                let te = end_of(m, jm)?.0;
+                let h = 1e-6 * (1.0 + ts[i].abs()) * (te - efs[m].tm).signum();
+                let x = ball_at(&pick, i, ts[i] + h)?;
+                Some((x.q[ks[i]].p - q[i]) / h * if i == 0 { 1.0 } else { -1.0 })
+            })
+            .collect::<Option<_>>()?;
+        let mm = nalgebra::Matrix3x2::from_columns(&[cols[0], cols[1]]);
+        let dx = (mm.transpose() * mm).lu().solve(&(-(mm.transpose() * r)))?;
+        for i in 0..2 {
+            ts[i] += dx[i];
+            // Past the piece's start: the piece before.
+            loop {
+                let (m, jm) = chains[i][pick[i]];
+                let (te, _) = end_of(m, jm)?;
+                let start = end_of(m, 1 - jm).map(|x| x.0);
+                let past = start.is_some_and(|t0| (ts[i] - t0) * (te - t0) < 0.0);
+                if !past || pick[i] + 1 >= chains[i].len() {
+                    break;
+                }
+                pick[i] += 1;
+            }
+            balls[i] = ball_at(&pick, i, ts[i])?;
+        }
+    }
+    if !found {
+        return None;
+    }
+    let ks = [k_of(chains[0][pick[0]].0)?, k_of(chains[1][pick[1]].0)?];
+    let apex = P3::from((balls[0].q[ks[0]].p.coords + balls[1].q[ks[1]].p.coords) * 0.5);
+    // Short of each picked piece's end towards the vertex, on the piece.
+    let mut out = Vec::new();
+    let mut gone = corner.clone();
+    for i in 0..2 {
+        let (m, jm) = chains[i][pick[i]];
+        let en = &efs[m];
+        let (te, end) = end_of(m, jm)?;
+        if (ts[i] - te) * (te - en.tm) >= 0.0 || (ts[i] - en.tm) * (te - en.tm) <= 0.0 {
+            return None;
+        }
+        let mut t = [te; 2];
+        let mut bs = [end; 2];
+        t[ks[i]] = ts[i];
+        bs[ks[i]] = balls[i];
+        out.push((m, jm, (t, bs)));
+        gone.extend(chains[i][..pick[i]].iter().map(|x| x.0));
+    }
+    // The fan's rim: the other rails of the pieces that go and of the corner's, from the first
+    // picked piece's end to the second's: their contacts there (each with its face), fitted as
+    // one curve (exact at the ends), in pieces by face.
+    let mut pts: Vec<(P3, usize)> = Vec::new();
+    let mut walk = |m: usize, from: usize| -> Option<()> {
+        let wk = 1 - k_of(m)?;
+        let (t0, b0) = end_of(m, from)?;
+        let (t1, _) = end_of(m, 1 - from)?;
+        let n = 16;
+        let mut cur = b0;
+        let mut tc = t0;
+        for i in 0..=n {
+            let t = t0 + (t1 - t0) * i as f64 / n as f64;
+            cur = efs[m].ball_from(b, &cur, tc, t)?;
+            tc = t;
+            let q = cur.q[wk].p;
+            match pts.last() {
+                // (A roll's point once, on the face before.)
+                Some(l) if (l.0 - q).norm() <= tol => {}
+                _ => pts.push((q, efs[m].faces[wk])),
+            }
+        }
+        Some(())
+    };
+    for &(m, jm) in chains[0][..pick[0]].iter().rev() {
+        walk(m, 1 - jm)?;
+    }
+    for &m in &corner {
+        walk(m, 0)?;
+    }
+    for &(m, jm) in chains[1][..pick[1]].iter() {
+        walk(m, jm)?;
+    }
+    if pts.len() < 2 {
+        return None;
+    }
+    // (Exactly the picked pieces' wall contacts at their ends.)
+    let w0 = out[0].2.1[1 - ks[0]].q[1 - ks[0]].p;
+    let w1 = out[1].2.1[1 - ks[1]].q[1 - ks[1]].p;
+    let last = pts.len() - 1;
+    pts[0].0 = w0;
+    pts[last].0 = w1;
+    let xs: Vec<P3> = pts.iter().map(|x| x.0).collect();
+    let (rim, c0, c1) = fit_cut(&xs, None, [None, None]);
+    // Where the rim passes from one face to the next: its parameter there, and the faces.
+    let mut breaks: Vec<(f64, P3)> = Vec::new();
+    let mut walls = vec![pts[0].1];
+    for w in pts.windows(2) {
+        if w[1].1 != w[0].1 {
+            let c = rim.closest(&w[0].0, c0.min(c1), c0.max(c1));
+            breaks.push((c, rim.point(c)));
+            walls.push(w[1].1);
+        }
+    }
+    Some((
+        Fan {
+            face,
+            apex,
+            rim: (rim, c0, c1),
+            breaks,
+            walls,
+            edge: ef.e,
+        },
+        out,
+        gone,
+    ))
 }
 
 /// The set-back corner at vertex v where the strips `here` (index, end) end ([`hole_corner`]):
@@ -9914,6 +10214,7 @@ fn prepare(b: &Body, p: &Plan, fit_tol: f64) -> Vec<Option<Result<Pre>>> {
                 }
                 Some(End::Section { t, .. }) => cover.push(*t),
                 Some(End::Patch { t, .. }) => cover.extend(t.iter().copied()),
+                Some(End::Fan { t, .. }) => cover.extend(t.iter().copied()),
                 Some(End::Hole { t, .. }) => cover.push(*t),
                 Some(End::Knee { t, .. }) => cover.extend(t.iter().copied()),
                 Some(End::Flush { c, t, .. }) => {
@@ -10895,6 +11196,61 @@ fn trim(
                         across.push(x);
                     }
                 }
+                End::Fan { c, side, t, balls } => {
+                    let fan = &p.fans[*c];
+                    let kf = if ef.faces[0] == fan.face { 0 } else { 1 };
+                    let kw = 1 - kf;
+                    let v = b.edges[ef.e].v[j];
+                    // The apex, shared by both neighbours; the wall contact, on the edge
+                    // between this strip's wall and the corner's.
+                    let site = SectionKey::Fan(*c, 0).site();
+                    rv[j][kf] = *out
+                        .contact_verts
+                        .entry((site, fan.face))
+                        .or_insert_with(|| nb.add_vertex(fan.apex));
+                    rt[j][kf] = st.rail_param(kf, &fan.apex, t[kf], t[kf]);
+                    let q = balls[kw].q[kw].p;
+                    let wf = ef.faces[kw];
+                    let wv = match out.contact_verts.get(&(v, wf)) {
+                        Some(&x) => x,
+                        None => {
+                            let x = vertex_on_boundary(&mut nb, wf, &q, vtol)
+                                .unwrap_or_else(|| nb.add_vertex(q));
+                            out.contact_verts.insert((v, wf), x);
+                            x
+                        }
+                    };
+                    rv[j][kw] = wv;
+                    rt[j][kw] = st.rail_param(kw, &q, t[kw], t[kw]);
+                    // The strip's curve across from its wall contact to the apex (a line on a
+                    // flat strip; on a cone round a circle, the curve through the point a
+                    // fraction w across the section at the spine parameter a fraction w of the
+                    // way).
+                    let key = SectionKey::Fan(*c, *side);
+                    let line = match out.section_edges.get(&key) {
+                        Some(&x) => x,
+                        None => {
+                            let n = 16;
+                            let mut xs = vec![nb.verts[wv].p];
+                            let mut cur = (t[kw], balls[kw]);
+                            for i in 1..n {
+                                let w = i as f64 / n as f64;
+                                let tw = t[kw] + (t[kf] - t[kw]) * w;
+                                let x = ef.ball_from(b, &cur.1, cur.0, tw).ok_or_else(|| {
+                                    failed("corner", "a fan's neighbour loses its ball")
+                                })?;
+                                xs.push(x.arc_point(if kf == 1 { w } else { 1.0 - w }));
+                                cur = (tw, x);
+                            }
+                            xs.push(nb.verts[rv[j][kf]].p);
+                            let (lc, l0, l1) = fit_cut(&xs, None, [None, None]);
+                            let x = add_edge(&mut nb, lc, l0, l1, wv, rv[j][kf]);
+                            out.section_edges.insert(key, x);
+                            x
+                        }
+                    };
+                    across.push(line);
+                }
                 End::Section { ball, t, key } => {
                     let v = key.site();
                     for k in 0..2 {
@@ -11132,6 +11488,9 @@ fn trim(
             pcurves: Vec::new(),
         });
     }
+    for (c, fan) in p.fans.iter().enumerate() {
+        fan_face(&mut nb, fan, c, &mut out, input, vtol)?;
+    }
     // A face of a picked edge none of its strips runs on (a narrow face split off on its
     // neighbour's surface, the contact past it from the edge's middle on): wholly under the
     // strip, it goes.
@@ -11146,6 +11505,101 @@ fn trim(
     let picked: Vec<usize> = p.efs.iter().map(|ef| ef.e).collect();
     collapse(&mut nb, &mut out, vtol);
     assemble(nb, &out, &picked, size)
+}
+
+/// The face of fan `c` ([`Fan`]): ruled from its apex to the corner's rail on the wall, between
+/// the lines down its two neighbours' ends; the rail cuts the wall; at the apex a degenerate
+/// edge (the ruled surface's side there, a point).
+fn fan_face(
+    nb: &mut Body,
+    fan: &Fan,
+    c: usize,
+    out: &mut Pieces,
+    input: BodyId,
+    vtol: f64,
+) -> Result<()> {
+    let line = |side: usize| {
+        out.section_edges
+            .get(&SectionKey::Fan(c, side))
+            .copied()
+            .ok_or_else(|| failed("corner", "a fan's neighbour has no end"))
+    };
+    let (l0, l1) = (line(0)?, line(1)?);
+    // Each line runs from its wall contact to the apex.
+    let (w0, av) = (nb.edges[l0].v[0], nb.edges[l0].v[1]);
+    let w1 = nb.edges[l1].v[0];
+    let (rim, a0, a1) = fan.rim.clone();
+    // The rim in pieces by face, each cutting its face, between vertices on the edges between.
+    let mut rims = Vec::new();
+    let (mut from, mut tf) = (w0, a0);
+    for (i, &(t, q)) in fan.breaks.iter().enumerate() {
+        let vb = vertex_on_boundary(nb, fan.walls[i], &q, vtol)
+            .ok_or_else(|| failed("corner", "a fan's rim misses the edge between its faces"))?;
+        let e = add_edge(nb, rim.clone(), tf, t, from, vb);
+        out.cuts.entry(fan.walls[i]).or_default().push(e);
+        rims.push(e);
+        (from, tf) = (vb, t);
+    }
+    let e = add_edge(nb, rim.clone(), tf, a1, from, w1);
+    out.cuts
+        .entry(
+            *fan.walls
+                .last()
+                .ok_or_else(|| failed("corner", "a fan without a rim"))?,
+        )
+        .or_default()
+        .push(e);
+    rims.push(e);
+    // Ruled from the apex to the rim where the strips beside end in lines down to it (flat
+    // ones: an exact cone round a circle); else a Coons patch on those curves, the rim and the
+    // apex.
+    let straight = |e: usize| matches!(nb.edges[e].curve, Curve::Line { .. });
+    let (surf, deg) = if straight(l0) && straight(l1) {
+        let r = rim.to_nurbs(a0, a1);
+        let cps: Vec<Vec<H>> = r
+            .cps
+            .iter()
+            .map(|h| vec![hom(&fan.apex, h[3]), *h])
+            .collect();
+        let surf = Surface::Nurbs(std::sync::Arc::new(NurbsSurface {
+            du: r.degree,
+            dv: 1,
+            ku: r.knots.clone(),
+            kv: vec![0.0, 0.0, 1.0, 1.0],
+            cps,
+        }));
+        (surf, nb.add_degenerate(fan.apex, a0, a1, av))
+    } else {
+        // Each side from the apex up to the rim (its edge runs the other way).
+        let side = |e: usize| {
+            let ee = nb.edges[e].clone();
+            move |s: f64| ee.point(ee.t[1] + (ee.t[0] - ee.t[1]) * s)
+        };
+        let (left, right) = (side(l0), side(l1));
+        let top = |s: f64| rim.point(a0 + (a1 - a0) * s);
+        let apex = fan.apex;
+        let surf = coons(&|_| apex, &top, &left, &right)
+            .ok_or_else(|| failed("corner", "a fan's patch can't be fitted"))?;
+        (surf, nb.add_degenerate(fan.apex, 0.0, 1.0, av))
+    };
+    out.new_faces.push(NewFace {
+        surf,
+        edges: [vec![l0, l1, deg], rims].concat(),
+        src: FaceSrc::New(Origin::FromEdge {
+            body: input,
+            edge: EdgeId(fan.edge as u64),
+        }),
+        u_period: None,
+        beside: fan.face,
+        pcurves: vec![(
+            deg,
+            Curve::Line {
+                o: P3::origin(),
+                d: V3::x(),
+            },
+        )],
+    });
+    Ok(())
 }
 
 /// Folds up what strips meeting each other on a face leave there: a wall as thick as two radii
