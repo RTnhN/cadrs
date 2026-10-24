@@ -4051,6 +4051,13 @@ fn first_roll(
             };
             for (_, ball) in crossings(ef, f, ef.k_at(t0), k, &bd, &from.c, reach) {
                 let t = ef.spine.param_of(&ball.c, t0);
+                // Only a ball some section of the spine holds (a crossing on a far branch of
+                // the offsets, round a curved spine's end, has none: its parameter is where the
+                // search gave up).
+                let (p, d) = ef.spine.at(t);
+                if (ball.c - p).dot(&d).abs() > tol::REL_POINT * (1.0 + ef.r()) {
+                    continue;
+                }
                 // (Not the crossing the strip starts at, found again a hair off: where the rail
                 // runs nearly along the edge it rolled over.)
                 if !(t > lo + tol::REL * span && t < hi - tol::REL * span)
@@ -4060,7 +4067,6 @@ fn first_roll(
                 }
                 // Not a far branch: its contacts near the spine there (a ball on the far side of
                 // a cylinder the edge's face is part of crosses that face's far edges too).
-                let p = ef.spine.at(t).0;
                 if ball.q.iter().any(|q| (q.p - p).norm() > ef.reach) {
                     continue;
                 }

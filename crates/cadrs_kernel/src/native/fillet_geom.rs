@@ -558,18 +558,19 @@ impl Spine {
                 (t, best) = (s, d);
             }
         }
+        // Newton on g(t) = (c − p)·T, with the derivatives of the spine as `at` runs it (straight
+        // on past its ends: the curve's own there sent a step near an end cycling short of the
+        // root).
+        let g = |t: f64| {
+            let (p, d, d1, dd) = self.at_d(t);
+            ((c - p).dot(&d), -d1.dot(&d) + (c - p).dot(&dd))
+        };
         for _ in 0..50 {
-            let (p, d) = self.at(t);
-            let (_, d1, d2) = self.curve.d2(self.on_curve(t));
-            let speed = d1.norm().max(tol::TINY);
-            let g = (c - p).dot(&d);
-            // d/dt of (c − p)·T ≈ −|p'| + (c − p)·T' (T' = curvature normal · speed).
-            let tp = (d2 - d * d2.dot(&d)) / speed;
-            let dg = -speed + (c - p).dot(&tp);
+            let (gt, dg) = g(t);
             if dg.abs() < tol::TINY {
                 break;
             }
-            let dt = -g / dg;
+            let dt = -gt / dg;
             t += dt;
             if dt.abs() < 1e-14 * (1.0 + t.abs()) {
                 break;
