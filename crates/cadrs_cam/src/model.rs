@@ -192,15 +192,55 @@ impl Model {
     /// it through an upward-facing triangle above `z`, so the clipped upward triangles cover
     /// exactly that shadow.
     pub fn shadow_above(&self, z: f64) -> Region {
-        let rings = self.triangles.iter().filter_map(|t| {
-            let n = cross(sub(t[1], t[0]), sub(t[2], t[0]));
-            if n[2] <= 1e-12 {
-                return None;
+        self.shadows(&[z]).pop().unwrap_or_default()
+    }
+
+    /// [`Model::shadow_above`] at many heights at once, in their order. Worked out from the top
+    /// down: the triangles wholly above a height are merged into a running union once, and only
+    /// those crossing it are clipped, so many levels cost little more than one.
+    pub fn shadows(&self, zs: &[f64]) -> Vec<Region> {
+        // Upward triangles: (lowest z, highest z, index).
+        let mut ups: Vec<(f64, f64, usize)> = self
+            .triangles
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| cross(sub(t[1], t[0]), sub(t[2], t[0]))[2] > 1e-12)
+            .map(|(i, t)| {
+                let lo = t[0][2].min(t[1][2]).min(t[2][2]);
+                let hi = t[0][2].max(t[1][2]).max(t[2][2]);
+                (lo, hi, i)
+            })
+            .collect();
+        ups.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let flat =
+            |i: usize| -> Vec<P2> { self.triangles[i].iter().map(|p| [p[0], p[1]]).collect() };
+        let mut order: Vec<usize> = (0..zs.len()).collect();
+        order.sort_by(|a, b| zs[*b].total_cmp(&zs[*a]));
+        let mut out = vec![Vec::new(); zs.len()];
+        let mut acc: Region = Vec::new();
+        let mut next = 0;
+        for k in order {
+            let z = zs[k];
+            let mut batch = Vec::new();
+            while next < ups.len() && ups[next].0 >= z {
+                batch.push(flat(ups[next].2));
+                next += 1;
             }
-            let poly = clip_above(t, z);
-            (poly.len() >= 3).then(|| poly.iter().map(|p| [p[0], p[1]]).collect())
-        });
-        region::union_all(rings)
+            if !batch.is_empty() {
+                acc = region::union_regions([acc, region::union_all(batch)]);
+            }
+            let crossing = ups[next..].iter().filter(|u| u.1 > z).filter_map(|u| {
+                let poly = clip_above(&self.triangles[u.2], z);
+                (poly.len() >= 3).then(|| poly.iter().map(|p| [p[0], p[1]]).collect::<Vec<P2>>())
+            });
+            let cross = region::union_all(crossing);
+            out[k] = if cross.is_empty() {
+                acc.clone()
+            } else {
+                region::union(&acc, &cross)
+            };
+        }
+        out
     }
 
     /// The section at `z`: exact when the kernel worked it out, else the triangles cut there.

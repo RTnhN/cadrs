@@ -14,9 +14,7 @@ use crate::region::{self, Region};
 use crate::toolpath::{FeedKind, Step, Toolpath};
 
 use super::link::Builder;
-use super::path::{
-    Contour, chain, depth_in, hatch, inner_point, lead_arc, nearest_order, region_contours,
-};
+use super::path::{Contour, chain, hatch, inner_point, lead_arc, nearest_order, region_contours};
 use super::{CuttingMethod, Direction, Input, LeadKind, Side};
 
 /// Heights of a beam cut: the top of the sheet, travel, pierce and cut heights.

@@ -8,7 +8,7 @@ use crate::toolpath::{FeedKind, Toolpath};
 
 use super::Input;
 use super::link::{Builder, Cut};
-use super::mill::material_above;
+use super::mill::materials_above;
 use super::path::{Contour, hatch, nearest_order, region_contours};
 use super::{CuttingMethod, Direction};
 
@@ -152,25 +152,42 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
     Ok(b.finish())
 }
 
-/// The region the tool's centre can't enter with its tip at `z`: the material above, offset by
-/// the cutter's radius at each height up its flank (exact for a flat end mill; sampled up a
-/// ball or bull nose).
-fn keep_out(input: &Input, z: f64) -> Region {
+/// The heights up a cutter's tip its keep-out is sampled at: 0 alone for a flat end mill;
+/// for a ball, bull or cone, its profile's height split so the radius steps evenly.
+fn flank_heights(input: &Input) -> Vec<f64> {
     let t = input.tool;
-    let r = t.radius();
+    let top = t.height_at(t.radius()).unwrap_or(0.0);
+    if top <= 1e-9 {
+        return vec![0.0];
+    }
+    let n = 10;
+    (0..=n)
+        .map(|i| {
+            let a = std::f64::consts::FRAC_PI_2 * i as f64 / n as f64;
+            top * (1.0 - a.cos())
+        })
+        .collect()
+}
+
+/// The region the tool's centre can't enter with its tip at `z`, from the material above the
+/// heights `hs` up its flank (`solids[i]` at `z + hs[i]`). Each height's material is kept out
+/// by the cutter's radius at the next height up, so it errs on the safe side: the tool never
+/// cuts into the part, at the cost of a little more stock where the flank is sampled.
+fn keep_out(input: &Input, hs: &[f64], solids: &[Region]) -> Region {
+    let t = input.tool;
     let w = input.params.wall_stock;
-    let samples: Vec<f64> = match t.kind {
-        crate::tool::ToolKind::EndMill | crate::tool::ToolKind::FaceMill => vec![0.0],
-        _ => (0..=6).map(|i| r * i as f64 / 6.0).collect(),
-    };
     let mut out: Region = Vec::new();
-    for h in samples {
-        let solid = material_above(input, z + h);
+    for (i, solid) in solids.iter().enumerate() {
         if solid.is_empty() {
             continue;
         }
-        let o = region::offset(&solid, t.radius_at_height(h) + w);
-        out = region::union(&out, &o);
+        let up = hs.get(i + 1).copied().unwrap_or(hs[i]);
+        let r = if i + 1 < hs.len() {
+            t.radius_at_height(up)
+        } else {
+            t.radius()
+        };
+        out = region::union(&out, &region::offset(solid, r + w));
     }
     out
 }
@@ -188,9 +205,17 @@ pub fn constant_z(input: &Input) -> Result<Toolpath, String> {
     } else {
         -1.0
     };
+    // The material at every height the levels' flanks reach, worked out together.
+    let hs = flank_heights(input);
+    let zs: Vec<f64> = levels
+        .iter()
+        .flat_map(|z| hs.iter().map(move |h| z + h))
+        .collect();
+    let all = materials_above(input, &zs);
     let mut above = top;
-    for z in levels {
-        let ko = keep_out(input, z);
+    for (li, z) in levels.into_iter().enumerate() {
+        let solids = &all[li * hs.len()..(li + 1) * hs.len()];
+        let ko = keep_out(input, &hs, solids);
         if ko.is_empty() {
             above = z;
             continue;
@@ -318,6 +343,64 @@ mod tests {
         // 3 mm round the 20 × 20 boss.
         let maxx = at15.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max);
         assert!((maxx - 33.0).abs() < 0.01, "{maxx}");
+    }
+
+    /// A ball's waterlines never put its tip under the surface the exact drop-cutter allows
+    /// (the flank sampling errs on the safe side), on a part with slopes.
+    #[test]
+    fn constant_z_ball_never_gouges() {
+        // A pyramid frustum: sloped walls at 45° from a 40 × 40 base to a 10 × 10 top 15 up.
+        let (b, t, h) = (20.0, 5.0, 15.0);
+        let q = |s: f64, z: f64| [[-s, -s, z], [s, -s, z], [s, s, z], [-s, s, z]];
+        let (lo, hi) = (q(b, 0.0), q(t, h));
+        let mut tris = Vec::new();
+        for i in 0..4 {
+            let j = (i + 1) % 4;
+            tris.push([lo[i], lo[j], hi[j]]);
+            tris.push([lo[i], hi[j], hi[i]]);
+        }
+        tris.push([hi[0], hi[1], hi[2]]);
+        tris.push([hi[0], hi[2], hi[3]]);
+        tris.push([lo[0], lo[2], lo[1]]);
+        tris.push([lo[0], lo[3], lo[2]]);
+        let m = Model::from_triangles("frustum", tris);
+        let stock = Stock::block(Aabb::new([-25.0, -25.0, 0.0], [25.0, 25.0, 16.0]));
+        let tool = Tool::new(ToolKind::BallMill, 6.0);
+        let mut p = Params::new(Pattern::ConstantZ, &tool, MachineKind::Mill);
+        p.step_down = 1.0;
+        p.links.lead_in = crate::strategy::LeadKind::None;
+        p.links.lead_out = crate::strategy::LeadKind::None;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        let tp = generate(&input).unwrap();
+        let idx = TriIndex::new(&m.triangles);
+        let mut scratch = Vec::new();
+        let mut n = 0;
+        for s in &tp.steps {
+            if let Step::Feed {
+                to,
+                kind: FeedKind::Cut,
+                ..
+            } = s
+            {
+                let lowest = crate::dropcutter::drop_point(
+                    &tool,
+                    &idx,
+                    [to[0], to[1]],
+                    -100.0,
+                    &mut scratch,
+                );
+                assert!(to[2] >= lowest - 1e-6, "{to:?} below {lowest}");
+                n += 1;
+            }
+        }
+        assert!(n > 100);
     }
 
     #[test]

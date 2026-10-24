@@ -20,21 +20,40 @@ use super::{CuttingMethod, Direction, Input, MachineBy, Side, SubPattern};
 
 /// The material at or above `z` seen from above.
 pub fn material_above(input: &Input, z: f64) -> Region {
-    let shadow = input.model.shadow_above(z);
-    match input.model.sections.get(z) {
-        Some(exact) => region::union(&shadow, exact),
-        None => shadow,
-    }
+    materials_above(input, &[z]).pop().unwrap_or_default()
+}
+
+/// [`material_above`] at many heights at once (the shadows worked out together).
+pub fn materials_above(input: &Input, zs: &[f64]) -> Vec<Region> {
+    input
+        .model
+        .shadows(zs)
+        .into_iter()
+        .zip(zs)
+        .map(|(shadow, z)| match input.model.sections.get(*z) {
+            Some(exact) => region::union(&shadow, exact),
+            None => shadow,
+        })
+        .collect()
+}
+
+/// The height whose material keeps the tool out at depth `z` (the floor stock above floors).
+fn keep_out_z(input: &Input, z: f64) -> f64 {
+    z - input.params.floor_stock + 1e-4
 }
 
 /// Where the tool's centre may go at depth `z` without touching the model (keeping the wall
-/// and floor stock), within `limit`.
-fn free_centres(input: &Input, z: f64, limit: &Region) -> Region {
+/// and floor stock), within `limit`; `solid` is the material at [`keep_out_z`].
+fn free_centres_in(input: &Input, solid: &Region, limit: &Region) -> Region {
     let p = input.params;
     let r = input.tool.radius();
-    let solid = material_above(input, z - p.floor_stock + 1e-4);
-    let keep_out = region::offset(&solid, r + p.wall_stock);
+    let keep_out = region::offset(solid, r + p.wall_stock);
     region::difference(limit, &keep_out)
+}
+
+fn free_centres(input: &Input, z: f64, limit: &Region) -> Region {
+    let solid = material_above(input, keep_out_z(input, z));
+    free_centres_in(input, &solid, limit)
 }
 
 /// The stock's footprint grown so the tool clears its edges (centres up to just inside the
@@ -272,11 +291,14 @@ pub fn rough(input: &Input, three_d: bool) -> Result<Toolpath, String> {
     let bottom = bottom.max(mb.min[2] - 1e3);
     let levels = input.levels(top, bottom, true);
     let mut b = Builder::new(input);
+    // The material above every level, worked out together.
+    let zs: Vec<f64> = levels.iter().map(|z| keep_out_z(input, *z)).collect();
+    let solids = materials_above(input, &zs);
     // Each level's faces, with the level above's z (the material's top there).
     let mut per_level: Vec<(f64, f64, Vec<Face>)> = Vec::new();
     let mut prev = top;
-    for z in levels {
-        let mut free = free_centres(input, z, &limit);
+    for (z, solid) in levels.into_iter().zip(&solids) {
+        let mut free = free_centres_in(input, solid, &limit);
         if p.smooth_corners > 0.0 {
             free = smooth(&free, p.smooth_corners);
         }

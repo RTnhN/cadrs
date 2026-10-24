@@ -412,13 +412,7 @@ enum Started {
 }
 
 /// Starts calculating `op` of `cam` (see [`Started`]).
-fn start(
-    world: &mut World,
-    cam: Arc<CamStudio>,
-    op: CamId,
-    key: u64,
-    parts: &[Part],
-) -> Started {
+fn start(world: &mut World, cam: Arc<CamStudio>, op: CamId, key: u64, parts: &[Part]) -> Started {
     if let Some(r) = world.resource::<Computed>().by_key.get(&key).cloned() {
         return Started::Known(r);
     }
