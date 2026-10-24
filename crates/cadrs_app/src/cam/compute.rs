@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use cadrs_core::cam::cadrs_cam::Frame;
 use cadrs_core::cam::cadrs_cam::heightmap::HeightMap;
 use cadrs_core::cam::cadrs_cam::model::Model;
-use cadrs_core::cam::cadrs_cam::toolpath::{Segment, Stats, Toolpath};
+use cadrs_core::cam::cadrs_cam::toolpath::{Stats, Toolpath};
 use cadrs_core::cam::program::{self, OpInput};
 use cadrs_core::cam::{CamId, CamStudio, OpKind, geometry};
 use cadrs_core::{ElementId, Part};
