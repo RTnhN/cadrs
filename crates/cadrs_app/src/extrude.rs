@@ -339,6 +339,67 @@ fn preselected(world: &World) -> Option<Preselected> {
     Some(out)
 }
 
+/// Whether switching the open extrude to `to` should flip its direction (#72): a Remove cuts
+/// into material and an Add or New grows away from it. Switching to Remove flips when there is
+/// no material ahead of the profiles but some behind them (the parts on screen are the ones
+/// before an Add or New, whose body is the separate preview); back to New or Add, when there is
+/// none behind them (what a Remove cuts ahead is gone from the parts on screen; what is behind
+/// is as it was).
+pub(crate) fn op_flips(world: &World, e: &ExtrudeFeature, to: BooleanOp) -> bool {
+    let grows = |op| matches!(op, BooleanOp::New | BooleanOp::Add);
+    let (cuts_now, cuts_next) = (e.op == BooleanOp::Remove, to == BooleanOp::Remove);
+    if !((grows(e.op) && cuts_next) || (cuts_now && grows(to))) {
+        return false;
+    }
+    let (Some(s), Some(cache)) = (
+        world.get_resource::<ExtrudeSession>(),
+        world.get_resource::<PartCache>(),
+    ) else {
+        return false;
+    };
+    let doc = world.get_resource::<ActiveDocument>();
+    let v = |p: [f64; 3]| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
+    // A point on each profile.
+    let mut points: Vec<Vec3> = e.faces.iter().map(|f| v(f.seed)).collect();
+    for r in &e.regions {
+        if let Some(sr) = cache.sketch_regions(r.sketch) {
+            points.push(v(sr.frame.to_world(r.seed)));
+        }
+    }
+    for k in &e.sketches {
+        if let Some(sr) = cache.sketch_regions(*k) {
+            points.extend(
+                sr.regions
+                    .iter()
+                    .map(|r| v(sr.frame.to_world(RegionRef::new(*k, r).seed))),
+            );
+        }
+    }
+    let base = extrude_direction(doc, cache, s, e);
+    let dir = if e.flip { -base } else { base };
+    let solid = |at: Vec3| {
+        cache
+            .parts
+            .iter()
+            .filter(|q| {
+                q.kind == cadrs_core::PartKind::Solid && q.solid.faces.len() <= HUGE_PART_FACES
+            })
+            .any(|q| inside(&q.solid, at))
+    };
+    // Material somewhere along the way: 0.05 mm out, doubling to about 3 m.
+    let along = |d: Vec3| {
+        points
+            .iter()
+            .any(|p| (0..16).any(|i| solid(*p + d * (0.05 * 2f32.powi(i)))))
+    };
+    let behind = along(-dir);
+    if cuts_next {
+        behind && !along(dir)
+    } else {
+        !behind
+    }
+}
+
 /// True if `p` is inside the closed mesh of `s`: an odd number of its triangles across a ray
 /// from `p` (in a slanted direction, so it doesn't graze edges).
 fn inside(s: &cadrs_core::Solid, p: Vec3) -> bool {
