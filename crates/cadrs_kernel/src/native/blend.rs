@@ -2772,7 +2772,7 @@ pub fn chamfer(
         }
     }
     // The other specs and measures: by local trimming too, each edge with its distances along
-    // its two faces (tangent ones as chords where a face curves across the edge, as below). Two
+    // its two faces (tangent ones converted once the edge's rule is chosen, as below). Two
     // distances that differ only along straight edges between flat faces; equal ones wherever
     // the faces meet at one angle (as the equal-distance chamfer above).
     if !matches!(
@@ -2786,26 +2786,11 @@ pub fn chamfer(
                 let ei = e.0 as usize;
                 let ed = b.edges.get(ei)?;
                 let sides = edge_sides(&b, ei).ok()?;
-                let chord = |side: usize, d: f64| -> f64 {
-                    if opts.measurement != ChamferMeasure::Tangent {
-                        return d;
-                    }
-                    let across = match (&b.faces[sides[side].0].surf, &ed.curve) {
-                        (Surface::Cylinder { f: fr, r }, Curve::Line { d: dl, .. })
-                            if dl.normalize().cross(&fr.z).norm() < tol::ANGULAR =>
-                        {
-                            Some(*r)
-                        }
-                        (Surface::Sphere { r, .. }, _) => Some(*r),
-                        _ => None,
-                    };
-                    across.map_or(d, |r| 2.0 * r * ((d / r).atan() / 2.0).sin())
-                };
                 let flip = opts.flip != opts.flipped.contains(&e);
                 let (s0, s1) = if flip { (1, 0) } else { (0, 1) };
                 let (d1, d2) = match spec {
-                    ChamferSpec::EqualDistance(d) => (chord(s0, d), chord(s1, d)),
-                    ChamferSpec::TwoDistances(a, c) => (chord(s0, a), chord(s1, c)),
+                    ChamferSpec::EqualDistance(d) => (d, d),
+                    ChamferSpec::TwoDistances(a, c) => (a, c),
                     ChamferSpec::DistanceAngle { distance, angle } => {
                         // As the blend tool's section: d₂ = d sin(a) / sin(π − a − θ).
                         let theta = super::fillet::chamfer_angle(&b, ei)?;
@@ -2832,16 +2817,19 @@ pub fn chamfer(
             })
             .collect();
         if let Some(dists) = dists {
-            let local = super::fillet::chamfer_edges(&b, body, &dists).and_then(|(out, src)| {
-                // (The local result's edges are merged and its tolerances fitted already.)
-                match local_problem(&b, &out) {
-                    Some(e) => Err(KernelError::InvalidResult {
-                        op: "chamfer",
-                        why: format!("the local chamfer isn't valid: {e}"),
-                    }),
-                    None => Ok((out, src)),
-                }
-            });
+            let tangent = opts.measurement == ChamferMeasure::Tangent;
+            let local = super::fillet::chamfer_edges_measured(&b, body, &dists, tangent).and_then(
+                |(out, src)| {
+                    // (The local result's edges are merged and its tolerances fitted already.)
+                    match local_problem(&b, &out) {
+                        Some(e) => Err(KernelError::InvalidResult {
+                            op: "chamfer",
+                            why: format!("the local chamfer isn't valid: {e}"),
+                        }),
+                        None => Ok((out, src)),
+                    }
+                },
+            );
             match local {
                 Ok((out, src)) => return Ok(Tracked { body: out, src }.into_result(k, body)),
                 Err(e) => {
@@ -2860,7 +2848,8 @@ pub fn chamfer(
         let flip = opts.flip != opts.flipped.contains(&e);
         let ei = e.0 as usize;
         // Tangent measurement: a face curving across the edge (a cylinder along a straight edge,
-        // a sphere) takes the chord of the tangent distance on that side.
+        // a sphere) of radius R takes the arc R·atan(d/R) round it on that side (its chord
+        // 2R sin(atan(d/R)/2)).
         let chord = |side: usize, d: f64| -> f64 {
             if opts.measurement != ChamferMeasure::Tangent {
                 return d;
@@ -2879,8 +2868,9 @@ pub fn chamfer(
                 (Surface::Sphere { r, .. }, _) => Some(*r),
                 _ => None,
             };
+            // (The section's distance is along the face: the arc to the chord's end.)
             match across {
-                Some(r) => 2.0 * r * ((d / r).atan() / 2.0).sin(),
+                Some(r) => r * (d / r).atan(),
                 None => d,
             }
         };

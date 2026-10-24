@@ -2199,23 +2199,26 @@ fn chamfer_corner_of_two_planes_and_a_cone() {
     assert!((v - want).abs() < 1e-8 * want, "volume {v}, want {want}");
 }
 
-/// A cylinder of radius 10 with a slice off its side at x = −6 (a D-shaped prism), chamfered 1
-/// up the two edges where the cut meets the cylinder: the contacts lie 1 from each edge along
-/// the flat face and 1 round the cylinder (Offset measures along the faces; the ball whose
-/// contacts on the faces' tangent planes are 1 away, of radius tan(θ/2) = 2 here, would touch
-/// the flat face 1.07 from the edge and the cylinder 1.20 round it). Each section takes off the
-/// triangle between the edge and the two contacts and the circular segment over its curved
-/// side: (1/2)·1·|E − Q|·sin(∠PEQ) + R²/2·(α − sin α), α = 1/R, over the height 10.
-#[test]
-fn chamfer_plane_to_cylinder_measures_round_the_cylinder() {
-    let mut k = NativeKernel::new();
-    let (r, d, h) = (10.0_f64, 1.0_f64, 10.0);
-    let c = k.pcylinder(r, h).unwrap();
+/// The D-shaped prism's chamfer section (a cylinder of radius `r` cut at x = −6, the edge at
+/// (−6, 8)), its contacts `along` down the flat face and `alpha` (radians) round the cylinder:
+/// the triangle between the edge and the contacts and the circular segment over its curved side.
+fn d_prism_section(r: f64, along: f64, alpha: f64) -> f64 {
+    let (ex, ey) = (-6.0_f64, 8.0_f64);
+    let (px, py) = (ex, ey - along);
+    let q = ey.atan2(ex) - alpha;
+    let (qx, qy) = (r * q.cos(), r * q.sin());
+    let triangle = ((px - ex) * (qy - ey) - (qx - ex) * (py - ey)).abs() / 2.0;
+    triangle + r * r / 2.0 * (alpha - alpha.sin())
+}
+
+/// A cylinder of radius 10 cut at x = −6 (a D-shaped prism) and its two edges where the cut
+/// meets the cylinder.
+fn d_prism(k: &mut NativeKernel) -> (BodyId, Vec<EdgeId>) {
+    let c = k.pcylinder(10.0, 10.0).unwrap();
     let bx = k.box_at(-20.0, -20.0, -1.0, 14.0, 40.0, 12.0).unwrap();
     let draw::Shape::Body(b) = k.bcut(&c, &bx).unwrap() else {
         panic!("not a body")
     };
-    let before = k.mass_properties(b).unwrap().volume;
     let edges: Vec<EdgeId> = k
         .edges(b)
         .unwrap()
@@ -2224,17 +2227,44 @@ fn chamfer_plane_to_cylinder_measures_round_the_cylinder() {
         .map(|e| e.id)
         .collect();
     assert_eq!(edges.len(), 2, "{edges:?}");
-    let (_, v, _) = local_chamfer(&mut k, b, &edges, d);
-    // Upper edge E = (−6, 8): P down the flat face, Q round the arc towards +x.
-    let (ex, ey) = (-6.0_f64, 8.0_f64);
-    let (px, py) = (ex, ey - d);
-    let alpha = d / r;
-    let q = ey.atan2(ex) - alpha;
-    let (qx, qy) = (r * q.cos(), r * q.sin());
-    let triangle = ((px - ex) * (qy - ey) - (qx - ex) * (py - ey)).abs() / 2.0;
-    let segment = r * r / 2.0 * (alpha - alpha.sin());
-    let want = before - 2.0 * h * (triangle + segment);
-    assert!((v - want).abs() < 1e-8 * want, "volume {v}, want {want}");
+    (b, edges)
+}
+
+/// The D-shaped prism ([`d_prism`]) chamfered 1 up its two edges: the contacts lie 1 from each
+/// edge along the flat face and 1 round the cylinder (Offset measures along the faces; the ball
+/// whose contacts on the faces' tangent planes are 1 away, of radius tan(θ/2) = 2 here, would
+/// touch the flat face 1.07 from the edge and the cylinder 1.20 round it). Each section takes
+/// off [`d_prism_section`] with α = 1/R, over the height 10.
+#[test]
+fn chamfer_plane_to_cylinder_measures_round_the_cylinder() {
+    let mut k = NativeKernel::new();
+    let (b, edges) = d_prism(&mut k);
+    let before = k.mass_properties(b).unwrap().volume;
+    let (_, v, _) = local_chamfer(&mut k, b, &edges, 1.0);
+    let want = before - 2.0 * 10.0 * d_prism_section(10.0, 1.0, 0.1);
+    assert!((v - want).abs() < 1e-9 * want, "volume {v}, want {want}");
+}
+
+/// The D-shaped prism ([`d_prism`]) chamfered 2 up its two edges measured along the faces'
+/// tangent planes: 2 down the flat face, and round the cylinder to the chord's end of the
+/// tangent distance, the angle atan(2/R).
+#[test]
+fn chamfer_plane_to_cylinder_tangent_measure() {
+    let mut k = NativeKernel::new();
+    let (b, edges) = d_prism(&mut k);
+    let before = k.mass_properties(b).unwrap().volume;
+    let opts = ChamferOpts {
+        measurement: ChamferMeasure::Tangent,
+        ..ChamferOpts::new(ChamferSpec::EqualDistance(2.0))
+    };
+    let out = blend::chamfer(&mut k, b, &edges, &opts).unwrap().bodies[0];
+    assert_eq!(
+        k.get(out).unwrap().check_with(topo::CheckLevel::Full),
+        Vec::<String>::new()
+    );
+    let v = k.mass_properties(out).unwrap().volume;
+    let want = before - 2.0 * 10.0 * d_prism_section(10.0, 2.0, (0.2_f64).atan());
+    assert!((v - want).abs() < 1e-9 * want, "volume {v}, want {want}");
 }
 
 /// remote sentry, Chamfer 1 (its input outside the repo): 0.5 mm chamfers round a plate's

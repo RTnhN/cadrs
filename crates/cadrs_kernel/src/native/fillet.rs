@@ -9570,8 +9570,8 @@ pub fn chamfer_offsets_along(b: &Body, e: usize, d: [f64; 2]) -> Option<[f64; 2]
             .try_normalize(tol::DEGENERATE)
     };
     let q = [
-        super::blend::along_face(&b.faces[f1], &p, &tan, &into(f1, tan)?, d[0]),
-        super::blend::along_face(&b.faces[f2], &p, &tan, &into(f2, -tan)?, d[1]),
+        along_section(&b.faces[f1], &p, &tan, &into(f1, tan)?, d[0]),
+        along_section(&b.faces[f2], &p, &tan, &into(f2, -tan)?, d[1]),
     ];
     let n: [V3; 2] = std::array::from_fn(|k| {
         let f = &b.faces[[f1, f2][k]];
@@ -9586,6 +9586,26 @@ pub fn chamfer_offsets_along(b: &Body, e: usize, d: [f64; 2]) -> Option<[f64; 2]
     let miss = (q[0] + n[0] * x.x - q[1] - n[1] * x.y).norm();
     (x.x * x.y > 0.0 && miss < tol::REL * (1.0 + p.coords.abs().max()))
         .then(|| [x.x.abs(), x.y.abs()])
+}
+
+/// The point `dist` along face f from `p` in the plane square to `t`, starting along `w`: on a
+/// plane `dist` along `w`; on a cylinder whose axis runs along `t`, `p` turned dist/R about the
+/// axis towards `w`; else marched ([`super::blend::along_face`]).
+fn along_section(f: &Face, p: &P3, t: &V3, w: &V3, dist: f64) -> P3 {
+    match &f.surf {
+        Surface::Plane { .. } => p + w * dist,
+        Surface::Cylinder { f: fr, r } if fr.z.cross(t).norm() < tol::ANGULAR => {
+            let z = fr.z.normalize();
+            let rel = p - fr.o;
+            let foot = fr.o + z * rel.dot(&z);
+            let out = p - foot;
+            // (`w` is square to the radius and the axis: the arc's start.)
+            let side = (w - z * w.dot(&z) - out * (w.dot(&out) / out.norm_squared())).normalize();
+            let phi = dist / r;
+            foot + out * phi.cos() + side * (out.norm() * phi.sin())
+        }
+        _ => super::blend::along_face(f, p, t, w, dist),
+    }
 }
 
 /// The angle between edge e's faces' directions away from it, a fraction `s` along it.
@@ -9627,11 +9647,33 @@ pub fn chamfer_edges(
     input: BodyId,
     edges: &[(usize, [f64; 2])],
 ) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
+    chamfer_edges_measured(b, input, edges, false)
+}
+
+/// [`chamfer_edges`], the distances measured along the faces' tangent planes where `tangent`
+/// (ChamferMeasure::Tangent): the ball's offsets put its contacts on the tangent planes that far
+/// ([`chamfer_offsets`]), and measured round a cylinder along the edge, the arc R·atan(d/R) to
+/// where the tangent distance's chord ends on it.
+pub fn chamfer_edges_measured(
+    b: &Body,
+    input: BodyId,
+    edges: &[(usize, [f64; 2])],
+    tangent: bool,
+) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
     let ids: Vec<usize> = edges.iter().map(|&(e, _)| e).collect();
-    let along = along_chains(b, &ids, |e| {
-        let d = edges.iter().find(|x| x.0 == e)?.1;
+    let round = |e: usize| -> Option<[f64; 2]> {
+        let mut d = edges.iter().find(|x| x.0 == e)?.1;
+        if tangent {
+            let s = sides(b, e).ok()?;
+            for k in 0..2 {
+                if let Surface::Cylinder { r, .. } = &b.faces[s[k].0].surf {
+                    d[k] = r * (d[k] / r).atan();
+                }
+            }
+        }
         chamfer_offsets_along(b, e, d)
-    });
+    };
+    let along = along_chains(b, &ids, round);
     let mut laws = Vec::new();
     let mut ratios = Vec::new();
     for (&(e, d), along) in edges.iter().zip(along) {
@@ -9684,7 +9726,8 @@ pub fn chamfer_equal_edges(
 /// Each edge's chamfer offsets measured round a face curving across it (`round`, as
 /// [`chamfer_offsets_along`]), where it has one; `None` between planes (the ball rule is exact
 /// there) and on a tangent chain with an edge that has none: a chain is measured one way all
-/// along, so its sections meet where its edges do.
+/// along, so its sections meet where its edges do (edges tangent within
+/// [`crate::TANGENT_ANGLE`] at a vertex, as tangent chains are picked).
 fn along_chains(
     b: &Body,
     edges: &[usize],
@@ -9708,7 +9751,7 @@ fn along_chains(
         ends(e).iter().any(|(v, t)| {
             ends(f)
                 .iter()
-                .any(|(w, u)| v == w && t.dot(u).abs() > 1.0 - tol::ANGULAR)
+                .any(|(w, u)| v == w && t.angle(u).min(PI - t.angle(u)) < crate::TANGENT_ANGLE)
         })
     };
     let mut changed = true;

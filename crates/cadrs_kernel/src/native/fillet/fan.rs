@@ -103,20 +103,31 @@ fn folds(b: &Body, ef: &EdgeFillet) -> Option<usize> {
     if let Some(k) = past(ef.tm, &ef.mid) {
         return Some(k);
     }
-    // Only where the edge turns somewhere tighter than the contacts lie from it (half again as
-    // far as at the middle, for their wandering) are the stations' balls worth solving.
-    let p = ef.spine.at(ef.tm).0;
-    let reach = 1.5
-        * ef.mid
-            .q
-            .iter()
-            .map(|q| (q.p - p).norm())
-            .fold(0.0, f64::max);
+    // Only where the edge turns somewhere tighter than the contacts can lie from it are the
+    // stations' balls worth solving. In the section a ball of offsets k₀, k₁ between faces at
+    // the angle θ touches their tangent planes d₀ = (k₁ + k₀ cos θ) / sin θ and
+    // d₁ = (k₀ + k₁ cos θ) / sin θ from the edge, its centre √(d₀² + k₀²) from it, and no
+    // contact on the ball lies farther than that and its larger offset (exact between planes;
+    // on curved faces the ball sits near where their tangent planes put it, and the offset is
+    // the margin). Unknown angles count as tight.
     let n = FOLD_STATIONS;
     let tight = (0..=n).any(|i| {
-        let t = ed.t[0] + (ed.t[1] - ed.t[0]) * i as f64 / n as f64;
+        let s = i as f64 / n as f64;
+        let t = ed.t[0] + (ed.t[1] - ed.t[0]) * s;
         let (_, _, dp, dtn) = ef.spine.at_d(t);
-        dtn.norm() * reach > dp.norm()
+        let k0 = ef.radius_at(t).abs();
+        let k1 = k0 * ef.ratio;
+        let Some(th) = angle_at(b, ef.e, s.clamp(tol::REL_POINT, 1.0 - tol::REL_POINT)) else {
+            return true;
+        };
+        let (sn, cs) = th.sin_cos();
+        if sn < tol::ANGULAR {
+            return true;
+        }
+        let d0 = (k1 + k0 * cs) / sn;
+        let d1 = (k0 + k1 * cs) / sn;
+        let centre = d0.hypot(k0).max(d1.hypot(k1));
+        dtn.norm() * (centre + k0.max(k1)) > dp.norm()
     });
     if !tight {
         return None;
