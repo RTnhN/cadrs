@@ -1,8 +1,8 @@
 //! Frame rate: the real time between frames over the last couple of seconds ([`FrameStats`]),
 //! shown at the bottom left of the 3D view with where the frame's time goes
 //! ([`crate::frame_profile`]): the main thread's schedules as one bar, the slowest systems and
-//! the slowest GPU passes as bars of the frame. F12 steps through the whole panel, the
-//! "60 fps · 16.7 ms" line alone, and nothing. The MCP tool `get_frame_stats` ([`crate::mcp`])
+//! the slowest GPU passes as bars of the frame. F12 steps through the "60 fps · 16.7 ms" line
+//! alone (to start, with the key's hint), the whole panel, and nothing (#69). The MCP tool `get_frame_stats` ([`crate::mcp`])
 //! returns the same, so a slow view can be measured at any time.
 
 use std::collections::VecDeque;
@@ -46,20 +46,28 @@ impl Plugin for FrameStatsPlugin {
 /// What the panel shows; F12 steps to the next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PanelMode {
-    /// The frame rate and where the frame's time goes.
-    #[default]
-    Profile,
     /// The frame rate line alone.
+    #[default]
     Fps,
+    /// The frame rate and where the frame's time goes.
+    Profile,
     Hidden,
 }
 
 impl PanelMode {
     fn next(self) -> Self {
         match self {
-            PanelMode::Profile => PanelMode::Fps,
-            PanelMode::Fps => PanelMode::Hidden,
-            PanelMode::Hidden => PanelMode::Profile,
+            PanelMode::Fps => PanelMode::Profile,
+            PanelMode::Profile => PanelMode::Hidden,
+            PanelMode::Hidden => PanelMode::Fps,
+        }
+    }
+
+    /// What F12 does next, after the frame rate.
+    fn hint(self) -> &'static str {
+        match self {
+            PanelMode::Fps => "F12: details",
+            _ => "F12: hide",
         }
     }
 }
@@ -140,6 +148,10 @@ struct FrameStatsPanel;
 #[derive(Component)]
 struct FrameStatsText;
 
+/// What F12 does next, beside the frame rate.
+#[derive(Component)]
+struct FrameStatsHint;
+
 /// The bars under the frame rate, rebuilt as they change.
 #[derive(Component)]
 struct FrameProfileRows;
@@ -158,6 +170,8 @@ pub fn spawn_frame_stats(p: &mut ChildSpawnerCommands, t: &Theme) {
             padding: UiRect::axes(Val::Px(t.space[2]), Val::Px(t.space[1])),
             border_radius: BorderRadius::all(Val::Px(t.radius_lg)),
             max_width: Val::Px(BAR_PX + 2.0 * t.space[2]),
+            // Long system names are cut at the panel's edge (#69).
+            overflow: Overflow::clip(),
             display: Display::None,
             ..default()
         },
@@ -165,11 +179,26 @@ pub fn spawn_frame_stats(p: &mut ChildSpawnerCommands, t: &Theme) {
         Pickable::IGNORE,
     ))
     .with_children(|panel| {
-        panel.spawn((
-            FrameStatsText,
-            t.text("", t.font_sm, FontWeight::NORMAL, t.foreground),
-            Pickable::IGNORE,
-        ));
+        panel
+            .spawn((
+                Node {
+                    column_gap: Val::Px(t.space[2]),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|line| {
+                line.spawn((
+                    FrameStatsText,
+                    t.text("", t.font_sm, FontWeight::NORMAL, t.foreground),
+                    Pickable::IGNORE,
+                ));
+                line.spawn((
+                    FrameStatsHint,
+                    t.text("", t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                    Pickable::IGNORE,
+                ));
+            });
         panel.spawn((
             Name::new("frame-profile"),
             FrameProfileRows,
@@ -221,7 +250,8 @@ fn sync_panel(
     mut last: Local<(f32, Option<PanelMode>)>,
     mut commands: Commands,
     mut q_panel: Query<&mut Node, With<FrameStatsPanel>>,
-    mut q_text: Query<&mut Text, With<FrameStatsText>>,
+    mut q_text: Query<&mut Text, (With<FrameStatsText>, Without<FrameStatsHint>)>,
+    mut q_hint: Query<&mut Text, With<FrameStatsHint>>,
     q_rows: Query<Entity, With<FrameProfileRows>>,
 ) {
     let display = if stats.mode == PanelMode::Hidden {
@@ -242,6 +272,11 @@ fn sync_panel(
     *last = (now, Some(stats.mode));
     for mut text in &mut q_text {
         text.0 = stats.label();
+    }
+    for mut text in &mut q_hint {
+        if text.0 != stats.mode.hint() {
+            text.0 = stats.mode.hint().into();
+        }
     }
     let t = &*theme;
     for rows in &q_rows {
