@@ -8,6 +8,7 @@ members = ["crates/*"]
 # unambiguous: `cargo test -r -p cadrs_onshape`.
 default-members = [
     "crates/cadrs",
+    "crates/cadrs_cam",
     "crates/cadrs_core",
     "crates/cadrs_drawing",
     "crates/cadrs_eda",
@@ -90,6 +91,7 @@ tokio-util = "0.7"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 
 cadrs_core = { path = "crates/cadrs_core" }
+cadrs_cam = { path = "crates/cadrs_cam" }
 cadrs_sketch = { path = "crates/cadrs_sketch" }
 cadrs_ui = { path = "crates/cadrs_ui" }
 cadrs_app = { path = "crates/cadrs_app" }

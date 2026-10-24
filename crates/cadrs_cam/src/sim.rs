@@ -1,0 +1,361 @@
+//! Verify: the stock as the toolpaths leave it, and what went wrong on the way.
+//!
+//! - **Mills and routers** ([`simulate_mill`]): the stock is a height map lowered under each
+//!   cutter along its feed moves. Rapids that would run into material, cuts deeper than the
+//!   tool's flutes (the holder or shank rubbing) and cells cut below the part (gouges) are
+//!   reported, with the material left over the part (excess).
+//! - **Beam machines** ([`simulate_sheet`]): the kerf is the area swept by the beam along its
+//!   cuts; the sheet minus the kerf falls into pieces. Kerf over the part is damage; pieces that
+//!   are parts come free.
+
+use serde::{Deserialize, Serialize};
+
+use crate::geom::{P2, P3, dist2};
+use crate::heightmap::{EMPTY, HeightMap};
+use crate::model::Model;
+use crate::region::{self, Region};
+use crate::strategy::Stock;
+use crate::tool::Tool;
+use crate::toolpath::Segment;
+
+/// What a mill simulation found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MillResult {
+    /// The in-process stock after the operations.
+    pub stock: HeightMap,
+    /// Volume removed (mm³).
+    pub removed: f64,
+    /// Where cuts went under the part (up to [`MAX_REPORTED`]), and how many cells.
+    pub gouges: Vec<P3>,
+    pub gouge_cells: usize,
+    /// The deepest gouge (mm).
+    pub gouge_depth: f64,
+    /// Rapids into material: (operation, where).
+    pub rapid_hits: Vec<(usize, P3)>,
+    /// Cuts with more material over the tip than the flutes are long: (operation, where).
+    pub holder_hits: Vec<(usize, P3)>,
+    /// The most material left on the part (mm).
+    pub excess: f64,
+}
+
+pub const MAX_REPORTED: usize = 200;
+
+/// One operation to simulate: its tool and its motion.
+pub struct SimOp<'a> {
+    pub tool: &'a Tool,
+    pub segments: &'a [Segment],
+}
+
+/// The cell size a simulation of this stock uses for a `quality` from 0 (fast) to 1 (fine).
+pub fn sim_cell(stock: &Stock, quality: f64) -> f64 {
+    let s = stock.bounds.size();
+    let area = (s[0] * s[1]).max(1.0);
+    // From about 250k cells to about 2.5M.
+    let cells = 250_000.0 + 2_250_000.0 * quality.clamp(0.0, 1.0);
+    (area / cells).sqrt().max(0.02)
+}
+
+/// The highest stock in a disc (the tool's footprint).
+fn max_in_disc(map: &HeightMap, c: P2, r: f64) -> f32 {
+    let n = (r / map.cell).ceil() as isize;
+    let Some((ci, cj)) = map.cell_of(c) else {
+        return EMPTY;
+    };
+    let mut m = EMPTY;
+    for dj in -n..=n {
+        for di in -n..=n {
+            if ((di * di + dj * dj) as f64).sqrt() * map.cell > r {
+                continue;
+            }
+            let (i, j) = (ci as isize + di, cj as isize + dj);
+            if i < 0 || j < 0 || i >= map.nx as isize || j >= map.ny as isize {
+                continue;
+            }
+            m = m.max(map.at(i as usize, j as usize));
+        }
+    }
+    m
+}
+
+/// Runs the operations over the stock (see the module docs).
+pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> MillResult {
+    let mut map = stock.height_map(cell);
+    let part = HeightMap::of_triangles(
+        &model.triangles,
+        map.origin,
+        [
+            map.origin[0] + (map.nx - 1) as f64 * map.cell,
+            map.origin[1] + (map.ny - 1) as f64 * map.cell,
+        ],
+        map.cell,
+    );
+    let mut removed = 0.0;
+    let mut rapid_hits = Vec::new();
+    let mut holder_hits = Vec::new();
+    for (k, op) in ops.iter().enumerate() {
+        let r = op.tool.radius();
+        let flutes = op.tool.cutting_length.max(0.1);
+        for s in op.segments {
+            let len =
+                dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]).max((s.to[2] - s.from[2]).abs());
+            let n = ((len / map.cell).ceil() as usize).clamp(1, 100_000);
+            if s.is_rapid() {
+                // Material over the tip anywhere along it.
+                for i in 0..=n {
+                    let t = i as f64 / n as f64;
+                    let p = crate::geom::lerp(s.from, s.to, t);
+                    let top = max_in_disc(&map, [p[0], p[1]], r * 0.95);
+                    if top != EMPTY && top as f64 > p[2] + 0.01 {
+                        if rapid_hits.len() < MAX_REPORTED {
+                            rapid_hits.push((k, p));
+                        }
+                        break;
+                    }
+                }
+                continue;
+            }
+            // The flutes must reach over the material the cut leaves standing.
+            let step = (n / 8).max(1);
+            for i in (0..=n).step_by(step) {
+                let t = i as f64 / n as f64;
+                let p = crate::geom::lerp(s.from, s.to, t);
+                let top = max_in_disc(&map, [p[0], p[1]], r * 0.95);
+                if top != EMPTY && top as f64 - p[2] > flutes + 0.01 {
+                    if holder_hits.len() < MAX_REPORTED {
+                        holder_hits.push((k, p));
+                    }
+                    break;
+                }
+            }
+            removed += map.cut(op.tool, s.from, s.to);
+        }
+    }
+    // Gouges and excess against the part.
+    let mut gouges = Vec::new();
+    let mut gouge_cells = 0;
+    let mut gouge_depth = 0.0f64;
+    let mut excess = 0.0f64;
+    let tol = (map.cell * 0.5).max(0.01) as f32;
+    for j in 0..map.ny {
+        for i in 0..map.nx {
+            let (s, p) = (map.at(i, j), part.at(i, j));
+            if p == EMPTY || s == EMPTY {
+                continue;
+            }
+            if s < p - tol {
+                gouge_cells += 1;
+                gouge_depth = gouge_depth.max((p - s) as f64);
+                if gouges.len() < MAX_REPORTED {
+                    let q = map.point(i, j);
+                    gouges.push([q[0], q[1], s as f64]);
+                }
+            } else {
+                excess = excess.max((s - p) as f64);
+            }
+        }
+    }
+    MillResult {
+        stock: map,
+        removed,
+        gouges,
+        gouge_cells,
+        gouge_depth,
+        rapid_hits,
+        holder_hits,
+        excess,
+    }
+}
+
+/// What a sheet simulation found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetResult {
+    /// The area the beam burned or blasted away.
+    pub kerf: Region,
+    /// The sheet's pieces after cutting.
+    pub pieces: Vec<region::Face>,
+    /// Area of the part the kerf took (mm²): cuts into the part.
+    pub damage: f64,
+    /// Pieces that are a part (inside its outline), cut free.
+    pub parts_free: usize,
+    /// Total cut length (mm).
+    pub cut_length: f64,
+}
+
+/// Runs beam cuts over a sheet (see the module docs).
+pub fn simulate_sheet(stock: &Stock, model: &Model, ops: &[SimOp]) -> SheetResult {
+    let mut strokes: Vec<Region> = Vec::new();
+    let mut cut_length = 0.0;
+    for op in ops {
+        let w = op.tool.diameter;
+        let mut run: Vec<P2> = Vec::new();
+        let flush = |run: &mut Vec<P2>, strokes: &mut Vec<Region>| {
+            if run.len() >= 2 {
+                strokes.push(region::stroke(run, w));
+            }
+            run.clear();
+        };
+        for s in op.segments {
+            if s.cuts(true) {
+                let a = [s.from[0], s.from[1]];
+                if run.last().is_none_or(|l| dist2(*l, a) > 1e-9) {
+                    flush(&mut run, &mut strokes);
+                    run.push(a);
+                }
+                run.push([s.to[0], s.to[1]]);
+                cut_length += dist2(a, [s.to[0], s.to[1]]);
+            } else {
+                flush(&mut run, &mut strokes);
+            }
+        }
+        flush(&mut run, &mut strokes);
+    }
+    let kerf = region::union_regions(strokes);
+    let sheet = stock.footprint();
+    let left = region::difference(&sheet, &kerf);
+    let pieces = region::faces(&left);
+    let sil = model.silhouette();
+    let damage = region::area(&region::intersection(&kerf, &sil));
+    // A part piece lies within the part's outline (allowing for the arc tolerance).
+    let grown = region::offset(&sil, 0.05);
+    let parts_free = pieces
+        .iter()
+        .filter(|f| {
+            let inside = region::area(&region::intersection(&f.rings(), &grown));
+            (inside - f.area()).abs() < f.area() * 1e-3 + 1e-3
+        })
+        .count();
+    SheetResult {
+        kerf,
+        pieces,
+        damage,
+        parts_free,
+        cut_length,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::Aabb;
+    use crate::machine::MachineKind;
+    use crate::model::box_triangles;
+    use crate::strategy::{Input, Params, Pattern, generate};
+    use crate::tool::ToolKind;
+
+    #[test]
+    fn mill_roughing_leaves_stock_and_no_gouges() {
+        let m = crate::strategy::testing::pocket_block();
+        let stock = crate::strategy::testing::stock_for(&m, 3.0, 1.0);
+        let tool = Tool::new(ToolKind::EndMill, 6.0);
+        let mut p = Params::new(Pattern::Rough3D, &tool, MachineKind::Mill);
+        p.step_down = 3.0;
+        p.wall_stock = 0.3;
+        p.floor_stock = 0.3;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        let tp = generate(&input).unwrap();
+        let segs = tp.motion([0.0, 0.0, 40.0], 5000.0);
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+            0.25,
+        );
+        assert_eq!(r.gouge_cells, 0, "{:?}", &r.gouges[..r.gouges.len().min(5)]);
+        assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
+        assert!(r.removed > 1000.0);
+        // The pocket is roughed to about the floor stock.
+        let s = r.stock.sample([30.0, 20.0]);
+        assert!((s - 12.3).abs() < 0.35, "{s}");
+    }
+
+    #[test]
+    fn a_plunge_through_the_part_gouges() {
+        let m = Model::from_triangles(
+            "b",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [20.0, 20.0, 10.0])),
+        );
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [20.0, 20.0, 12.0]));
+        let tool = Tool::new(ToolKind::EndMill, 4.0);
+        let segs = vec![
+            Segment {
+                from: [10.0, 10.0, 20.0],
+                to: [10.0, 10.0, 15.0],
+                feed: None,
+                kind: None,
+                beam: false,
+                minutes: 0.0,
+            },
+            Segment {
+                from: [10.0, 10.0, 15.0],
+                to: [10.0, 10.0, 5.0],
+                feed: Some(100.0),
+                kind: None,
+                beam: false,
+                minutes: 0.1,
+            },
+            Segment {
+                from: [10.0, 10.0, 5.0],
+                to: [15.0, 15.0, 3.0],
+                feed: None,
+                kind: None,
+                beam: false,
+                minutes: 0.0,
+            },
+        ];
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+            0.2,
+        );
+        assert!(r.gouge_cells > 0);
+        assert!((r.gouge_depth - 5.0).abs() < 0.05);
+        assert_eq!(r.rapid_hits.len(), 1);
+    }
+
+    #[test]
+    fn sheet_cut_frees_the_part() {
+        let m = Model::from_triangles(
+            "p",
+            box_triangles(&Aabb::new([10.0, 10.0, 0.0], [50.0, 30.0, 2.0])),
+        );
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 2.0]));
+        let tool = Tool::new(ToolKind::Laser, 0.2);
+        let p = Params::new(Pattern::Cut, &tool, MachineKind::Laser);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Laser,
+            params: &p,
+            rest: None,
+        };
+        let tp = generate(&input).unwrap();
+        let segs = tp.motion([0.0, 0.0, 0.0], 5000.0);
+        let r = simulate_sheet(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+        );
+        assert!(r.damage < 0.05, "{}", r.damage);
+        assert_eq!(r.parts_free, 1);
+        assert_eq!(r.pieces.len(), 2);
+        assert!((r.cut_length - 120.0).abs() < 8.0, "{}", r.cut_length);
+    }
+}

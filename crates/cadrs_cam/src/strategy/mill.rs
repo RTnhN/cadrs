@@ -1,0 +1,933 @@
+//! 2.5-axis milling and roughing: Face, 2-axis rough, Rough (3D), 2-axis profile, 2-axis
+//! chamfer, Engrave and Flatlands.
+//!
+//! Everything works on regions at depths. The material at or above a depth is the model's
+//! shadow from above there ([`crate::model::Model::shadow_above`]) together with its exact
+//! section (the kernel's, when the studio worked it out); the tool's centre must stay its
+//! radius plus the wall stock away from it. Roughing clears what's left inside the stock with
+//! rings offset by the step over (or parallel passes), from the inside out so the tool enters
+//! where it has room.
+
+use crate::geom::{P2, ring_area2, ring_contains};
+use crate::heightmap::{EMPTY, HeightMap};
+use crate::model::Surface;
+use crate::region::{self, Face, Region};
+use crate::toolpath::Toolpath;
+
+use super::link::{Builder, Cut};
+use super::path::{Contour, chain, hatch, nearest_order, region_contours};
+use super::{CuttingMethod, Direction, Input, MachineBy, Side, SubPattern};
+
+/// The material at or above `z` seen from above.
+pub fn material_above(input: &Input, z: f64) -> Region {
+    let shadow = input.model.shadow_above(z);
+    match input.model.sections.get(z) {
+        Some(exact) => region::union(&shadow, exact),
+        None => shadow,
+    }
+}
+
+/// Where the tool's centre may go at depth `z` without touching the model (keeping the wall
+/// and floor stock), within `limit`.
+fn free_centres(input: &Input, z: f64, limit: &Region) -> Region {
+    let p = input.params;
+    let r = input.tool.radius();
+    let solid = material_above(input, z - p.floor_stock + 1e-4);
+    let keep_out = region::offset(&solid, r + p.wall_stock);
+    region::difference(limit, &keep_out)
+}
+
+/// The stock's footprint grown so the tool clears its edges (centres up to just inside the
+/// radius past them).
+fn stock_limit(input: &Input) -> Region {
+    let r = input.tool.radius();
+    let grow = (r - (input.params.step_over * 0.5).min(r * 0.5)).max(0.0);
+    region::offset(&input.stock.footprint(), grow)
+}
+
+/// Where the in-process stock still has material above `z`, as a region (cell runs).
+pub fn material_left(map: &HeightMap, z: f64) -> Region {
+    let mut rects = Vec::new();
+    let h = map.cell * 0.5;
+    for j in 0..map.ny {
+        let mut i = 0;
+        while i < map.nx {
+            let v = map.at(i, j);
+            if v != EMPTY && v as f64 > z + 0.01 {
+                let i0 = i;
+                while i < map.nx && {
+                    let v = map.at(i, j);
+                    v != EMPTY && v as f64 > z + 0.01
+                } {
+                    i += 1;
+                }
+                let a = map.point(i0, j);
+                let b = map.point(i - 1, j);
+                rects.push(region::rect([a[0] - h, a[1] - h], [b[0] + h, b[1] + h]));
+            } else {
+                i += 1;
+            }
+        }
+    }
+    region::union_all(rects)
+}
+
+/// Contours ordered for climb or conventional milling: `material_inside` when the material is
+/// on the inside of the region's rings (a profile), else outside (a pocket).
+fn orient(cs: Vec<Contour>, dir: Direction, material_inside: bool) -> Vec<Contour> {
+    // Region rings are counter-clockwise outside, clockwise for holes: the region on the left.
+    // Climb keeps the material on the right.
+    let keep = (dir == Direction::Climb) != material_inside;
+    cs.into_iter()
+        .map(|c| if keep { c } else { c.reversed() })
+        .collect()
+}
+
+/// The free side (for leads) of contours oriented by [`orient`]: the material's opposite.
+fn free_side(dir: Direction) -> f64 {
+    // Climb: material on the right, so free on the left.
+    if dir == Direction::Climb { 1.0 } else { -1.0 }
+}
+
+/// Rings to clear a face, innermost first.
+fn offset_rings(face: &Face, step: f64, dir: Direction) -> Vec<Vec<Contour>> {
+    let mut rings = Vec::new();
+    let mut cur = face.rings();
+    for _ in 0..10_000 {
+        if cur.is_empty() {
+            break;
+        }
+        rings.push(orient(region_contours(&cur), dir, false));
+        cur = region::offset(&cur, -step);
+    }
+    rings.reverse();
+    rings
+}
+
+/// Smooths a region's sharp convex corners by `radius` (an opening).
+fn smooth(r: &Region, radius: f64) -> Region {
+    if radius <= 0.0 {
+        return r.clone();
+    }
+    region::offset(&region::offset(r, -radius), radius)
+}
+
+/// Clears one face of free centres at `z`.
+fn clear_face(b: &mut Builder, face: &Face, z: f64, material_top: f64) {
+    let p = b.input.params;
+    let dir = p.direction;
+    match p.sub_pattern {
+        SubPattern::Offset => {
+            let rings = offset_rings(face, p.step_over, dir);
+            let mut first = true;
+            for level in rings {
+                let start = b.at.map_or([0.0, 0.0], |a| [a[0], a[1]]);
+                for c in nearest_order(level, start) {
+                    let cut = Cut {
+                        material_top,
+                        // Between rings the tool crosses what the inner rings cleared.
+                        direct_ok: !first,
+                        free_side: None,
+                        tabs: None,
+                        ramp: true,
+                    };
+                    b.cut(&c, z, &cut);
+                    first = false;
+                }
+            }
+        }
+        SubPattern::Parallel => {
+            // Passes inside the area the final ring leaves, then the ring.
+            let inner = region::offset(&face.rings(), -p.step_over * 0.5);
+            let zig = p.cutting_method == CuttingMethod::Zigzag;
+            let lines = hatch(&inner, p.angle, p.step_over, zig);
+            let mut first = true;
+            for l in lines {
+                let c = Contour::open(l);
+                let cut = Cut {
+                    material_top,
+                    direct_ok: !first && zig,
+                    free_side: None,
+                    tabs: None,
+                    ramp: true,
+                };
+                b.cut(&c, z, &cut);
+                first = false;
+            }
+            let start = b.at.map_or([0.0, 0.0], |a| [a[0], a[1]]);
+            for c in nearest_order(orient(region_contours(&face.rings()), dir, false), start) {
+                let cut = Cut {
+                    material_top,
+                    direct_ok: false,
+                    free_side: None,
+                    tabs: None,
+                    ramp: true,
+                };
+                b.cut(&c, z, &cut);
+            }
+        }
+    }
+}
+
+/// The selected faces' regions (planar faces' outlines), with their heights.
+fn selected_faces(input: &Input) -> Vec<(Region, f64)> {
+    input
+        .params
+        .drive
+        .faces
+        .iter()
+        .filter_map(|n| input.model.face(n))
+        .filter_map(|f| {
+            let z = f.z().or_else(|| {
+                let pts: Vec<f64> = f.loops.iter().flatten().map(|p| p[2]).collect();
+                pts.iter().copied().reduce(f64::min)
+            })?;
+            let rings: Vec<Vec<P2>> = f
+                .loops
+                .iter()
+                .map(|l| l.iter().map(|p| [p[0], p[1]]).collect())
+                .collect();
+            // Outer ring counter-clockwise, holes clockwise.
+            let mut norm: Region = Vec::new();
+            for (i, mut r) in rings.into_iter().enumerate() {
+                let ccw = ring_area2(&r) > 0.0;
+                if (i == 0) != ccw {
+                    r.reverse();
+                }
+                norm.push(r);
+            }
+            Some((region::normalize(&norm), z))
+        })
+        .collect()
+}
+
+/// Face: flat passes over the stock's top (or the selected faces), down to the bottom height.
+pub fn face(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let r = input.tool.radius();
+    let areas: Region = {
+        let sel = selected_faces(input);
+        if sel.is_empty() {
+            input.stock.footprint()
+        } else {
+            sel.into_iter().flat_map(|(r, _)| r).collect()
+        }
+    };
+    let top = input.top();
+    let bottom = input.bottom() + p.floor_stock;
+    let levels = input.levels(top, bottom, false);
+    let zig = p.cutting_method == CuttingMethod::Zigzag;
+    let mut b = Builder::new(input);
+    let covered = region::offset(&areas, (r - p.step_over * 0.5).max(0.0));
+    let mut material_top = top;
+    for z in levels {
+        let lines = hatch(&covered, p.angle, p.step_over, zig);
+        let mut first = true;
+        for l in lines {
+            // Run on and off by the radius plus a little so the face is cut clean.
+            let (a, e) = (l[0], l[l.len() - 1]);
+            let d = super::path::unit([e[0] - a[0], e[1] - a[1]]);
+            let ext = r + 2.0;
+            let a = [a[0] - d[0] * ext, a[1] - d[1] * ext];
+            let e = [e[0] + d[0] * ext, e[1] + d[1] * ext];
+            let cut = Cut {
+                material_top,
+                direct_ok: zig && !first,
+                free_side: None,
+                tabs: None,
+                ramp: false,
+            };
+            // Entries are off the stock: plunge.
+            b.cut(&Contour::open(vec![a, e]), z, &cut);
+            first = false;
+        }
+        material_top = z;
+    }
+    Ok(b.finish())
+}
+
+/// 2-axis rough and Rough (3D): clears the stock around the model level by level.
+pub fn rough(input: &Input, three_d: bool) -> Result<Toolpath, String> {
+    let p = input.params;
+    let r = input.tool.radius();
+    let mb = input.model.bounds();
+    let stock_top = input.stock.bounds.max[2];
+    let top = input.top().min(stock_top);
+    let mut limit = stock_limit(input);
+    let mut bottom = input.bottom();
+    // 2-axis rough with picked faces: clear above those floors only.
+    let sel = selected_faces(input);
+    if !three_d && !sel.is_empty() {
+        let areas: Region = sel.iter().flat_map(|(r, _)| r.clone()).collect();
+        limit = region::intersection(&limit, &region::offset(&areas, r));
+        bottom = sel.iter().map(|(_, z)| *z).fold(f64::INFINITY, f64::min) + p.floor_stock;
+    }
+    if limit.is_empty() {
+        return Err("The stock has no area to clear".into());
+    }
+    let bottom = bottom.max(mb.min[2] - 1e3);
+    let levels = input.levels(top, bottom, true);
+    let mut b = Builder::new(input);
+    // Each level's faces, with the level above's z (the material's top there).
+    let mut per_level: Vec<(f64, f64, Vec<Face>)> = Vec::new();
+    let mut prev = top;
+    for z in levels {
+        let mut free = free_centres(input, z, &limit);
+        if p.smooth_corners > 0.0 {
+            free = smooth(&free, p.smooth_corners);
+        }
+        if let Some(rest) = input.rest.filter(|_| p.rest || three_d) {
+            let left = region::offset(&material_left(rest, z), r);
+            free = region::intersection(&free, &left);
+        }
+        // Too small to fit the tool's centre path: drop (dust from the offsets).
+        let faces: Vec<Face> = region::faces(&free)
+            .into_iter()
+            .filter(|f| f.area() > 1e-4)
+            .collect();
+        per_level.push((z, prev, faces));
+        prev = z;
+    }
+    match p.machine_by {
+        MachineBy::Levels => {
+            for (z, above, faces) in &per_level {
+                let start = b.at.map_or([mb.min[0], mb.min[1]], |a| [a[0], a[1]]);
+                for f in order_faces(faces.clone(), start) {
+                    clear_face(&mut b, &f, *z, *above);
+                }
+            }
+        }
+        MachineBy::Regions => {
+            // Depth first: a face, then the faces under it, level by level.
+            let mut done: Vec<Vec<bool>> = per_level
+                .iter()
+                .map(|(_, _, f)| vec![false; f.len()])
+                .collect();
+            for i in 0..per_level.first().map_or(0, |l| l.2.len()) {
+                region_down(&mut b, &per_level, &mut done, 0, i);
+            }
+            // Faces not under any face above (islands appearing lower).
+            for li in 0..per_level.len() {
+                for fi in 0..per_level[li].2.len() {
+                    if !done[li][fi] {
+                        region_down(&mut b, &per_level, &mut done, li, fi);
+                    }
+                }
+            }
+        }
+    }
+    if !b.moved() {
+        return Err("Nothing is left to clear at these heights".into());
+    }
+    Ok(b.finish())
+}
+
+fn region_down(
+    b: &mut Builder,
+    levels: &[(f64, f64, Vec<Face>)],
+    done: &mut [Vec<bool>],
+    li: usize,
+    fi: usize,
+) {
+    if done[li][fi] {
+        return;
+    }
+    done[li][fi] = true;
+    let (z, above, faces) = &levels[li];
+    clear_face(b, &faces[fi], *z, *above);
+    if li + 1 >= levels.len() {
+        return;
+    }
+    let outer = &faces[fi].outer;
+    for (k, f) in levels[li + 1].2.iter().enumerate() {
+        if !done[li + 1][k] && f.outer.iter().any(|p| ring_contains(outer, *p)) {
+            region_down(b, levels, done, li + 1, k);
+        }
+    }
+}
+
+/// Faces in nearest-first order from `from`.
+fn order_faces(mut faces: Vec<Face>, mut from: P2) -> Vec<Face> {
+    let mut out = Vec::new();
+    while !faces.is_empty() {
+        let (i, _) = faces
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let d = f
+                    .outer
+                    .iter()
+                    .map(|p| (p[0] - from[0]).hypot(p[1] - from[1]))
+                    .fold(f64::INFINITY, f64::min);
+                (i, d)
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        let f = faces.swap_remove(i);
+        from = f.outer[0];
+        out.push(f);
+    }
+    out
+}
+
+/// The part's outline contours for a profile: picked edges (chained), else the outline of the
+/// model from above. Each with whether it's closed and its height.
+fn drive_contours(input: &Input) -> (Vec<(Contour, f64)>, bool) {
+    let d = &input.params.drive;
+    if !d.edges.is_empty() {
+        let polys: Vec<Vec<crate::geom::P3>> = d
+            .edges
+            .iter()
+            .filter_map(|n| input.model.edge(n))
+            .map(|e| e.points.clone())
+            .collect();
+        let zs: Vec<f64> = polys.iter().flatten().map(|p| p[2]).collect();
+        let z = zs.iter().copied().fold(f64::INFINITY, f64::min);
+        let mut cs: Vec<(Contour, f64)> = chain(&polys, 1e-3).into_iter().map(|c| (c, z)).collect();
+        if d.reverse {
+            cs = cs.into_iter().map(|(c, z)| (c.reversed(), z)).collect();
+        }
+        return (cs, true);
+    }
+    let z = input.model.bounds().min[2];
+    (
+        region_contours(&input.model.silhouette())
+            .into_iter()
+            .map(|c| (c, z))
+            .collect(),
+        false,
+    )
+}
+
+/// The centre paths of a profile round the contours: picked loops offset to their side (Auto:
+/// outside when the part is inside the loop), the outline outside, holes inside; each with
+/// whether the material is inside its ring.
+fn profile_paths(input: &Input, dist: f64) -> Vec<Contour> {
+    let p = input.params;
+    let (cs, picked) = drive_contours(input);
+    let mut out = Vec::new();
+    if !picked {
+        // The model's outline: outside the part, inside its through holes.
+        let sil = input.model.silhouette();
+        let off = match p.side {
+            Side::Inside => region::offset(&sil, -dist),
+            Side::On => sil,
+            _ => region::offset(&sil, dist),
+        };
+        let mut cs = region_contours(&off);
+        if p.side != Side::On {
+            cs = orient(cs, p.direction, true);
+        }
+        return cs;
+    }
+    for (c, z) in cs {
+        if !c.closed || p.side == Side::On {
+            out.push(c);
+            continue;
+        }
+        let part_inside = input.part_inside(&c, z);
+        let mut ring = c.pts.clone();
+        if ring_area2(&ring) < 0.0 {
+            ring.reverse();
+        }
+        let outside = match p.side {
+            Side::Outside => true,
+            Side::Inside => false,
+            _ => part_inside,
+        };
+        let r = vec![ring];
+        let off = if outside {
+            region::offset(&r, dist)
+        } else {
+            region::offset(&r, -dist)
+        };
+        // Material inside the ring for an outside cut; outside it for an inside cut.
+        out.extend(orient(region_contours(&off), p.direction, outside));
+    }
+    out
+}
+
+/// 2-axis profile: round the outline (or the picked edges) at depth passes, with finishing
+/// passes, leads and tabs.
+pub fn profile(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let r = input.tool.radius();
+    let top = input.top();
+    let bottom = input.bottom() + p.floor_stock;
+    if bottom >= top {
+        return Err("The bottom height is above the top".into());
+    }
+    let levels = input.levels(top, bottom, false);
+    let passes = p.passes.max(1);
+    let tabs =
+        p.tabs
+            .enabled
+            .then_some((bottom + p.tabs.height, p.tabs.count, p.tabs.width + 2.0 * r));
+    let mut b = Builder::new(input);
+    // Rough passes outward first, the finishing pass last.
+    let pass_paths: Vec<Vec<Contour>> = (0..passes)
+        .rev()
+        .map(|k| {
+            let extra = if p.side == Side::On {
+                0.0
+            } else {
+                r + p.wall_stock
+            };
+            profile_paths(input, extra + k as f64 * p.step_over)
+        })
+        .collect();
+    if pass_paths.iter().all(|c| c.is_empty()) {
+        return Err("No contour to profile".into());
+    }
+    let side = (p.side != Side::On).then_some(free_side(p.direction));
+    let mut paths_by_contour: Vec<Vec<Contour>> = Vec::new();
+    let n = pass_paths.iter().map(|v| v.len()).max().unwrap_or(0);
+    for i in 0..n {
+        paths_by_contour.push(
+            pass_paths
+                .iter()
+                .filter_map(|v| v.get(i).cloned())
+                .collect(),
+        );
+    }
+    let by_levels = p.machine_by == MachineBy::Levels;
+    let start = [input.model.bounds().min[0], input.model.bounds().min[1]];
+    let order: Vec<usize> = {
+        let firsts: Vec<Contour> = paths_by_contour
+            .iter()
+            .map(|v| v.last().cloned().unwrap_or(Contour::open(vec![[0.0, 0.0]])))
+            .collect();
+        let ordered = nearest_order(firsts.clone(), start);
+        ordered
+            .iter()
+            .filter_map(|o| {
+                firsts
+                    .iter()
+                    .position(|f| f.pts.iter().any(|p| o.pts.contains(p)))
+            })
+            .collect()
+    };
+    let run = |b: &mut Builder, ci: usize, li: usize, z: f64, above: f64| {
+        for (k, path) in paths_by_contour[ci].iter().enumerate() {
+            let near = b.at.map_or(path.pts[0], |a| [a[0], a[1]]);
+            let path = if path.closed {
+                path.starting_near(near)
+            } else {
+                path.clone()
+            };
+            let cut = Cut {
+                material_top: above,
+                direct_ok: k > 0,
+                free_side: side,
+                tabs,
+                ramp: li > 0 || side.is_none(),
+            };
+            b.cut(&path, z, &cut);
+        }
+    };
+    if by_levels {
+        let mut above = top;
+        for (li, z) in levels.iter().enumerate() {
+            for &ci in &order {
+                run(&mut b, ci, li, *z, above);
+            }
+            above = *z;
+        }
+    } else {
+        for &ci in &order {
+            let mut above = top;
+            for (li, z) in levels.iter().enumerate() {
+                run(&mut b, ci, li, *z, above);
+                above = *z;
+            }
+        }
+    }
+    Ok(b.finish())
+}
+
+/// 2-axis chamfer: a chamfer mill along the top edges (picked, else the top faces' outlines),
+/// cutting a chamfer `depth` wide.
+pub fn chamfer(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let t = input.tool;
+    let half = (t.angle.clamp(1.0, 179.0) / 2.0).to_radians();
+    let width = p.depth.max(0.0);
+    let depth = width / half.tan() + p.tip_offset;
+    // The tip's distance from the edge so the flank cuts `width` into it.
+    let off = t.tip_diameter / 2.0 + p.tip_offset * half.tan();
+    if t.radius_at_height(depth) < off + width - 1e-9 {
+        return Err("The chamfer is wider than the tool can cut".into());
+    }
+    // Each loop with its height and whether the part is inside it.
+    let mut contours: Vec<(Contour, f64, bool)> = Vec::new();
+    if !p.drive.edges.is_empty() {
+        let (cs, _) = drive_contours(input);
+        let edge_z = input.selection_z().unwrap_or(input.model.bounds().max[2]);
+        for (c, _) in cs {
+            let inside = c.closed && input.part_inside(&c, edge_z);
+            contours.push((c, edge_z, inside));
+        }
+    } else {
+        // The outlines of the upward faces at the model's top: a face's first loop has the
+        // face inside it, the others are its holes.
+        let top = input.model.bounds().max[2];
+        for f in &input.model.faces {
+            if f.faces_up() && f.z().is_some_and(|z| (z - top).abs() < 1e-3) {
+                for (i, l) in f.loops.iter().enumerate() {
+                    let c = Contour::closed(l.iter().map(|q| [q[0], q[1]]).collect());
+                    contours.push((c, top, i == 0));
+                }
+            }
+        }
+        if contours.is_empty() {
+            for c in region_contours(&input.model.shadow_above(top - 1e-3)) {
+                let inside = c.ccw();
+                contours.push((c, top, inside));
+            }
+        }
+    }
+    let mut b = Builder::new(input);
+    let mut paths = Vec::new();
+    for (c, z, part_inside) in contours {
+        if !c.closed {
+            paths.push((Contour::open(super::path::offset_open(&c.pts, -off)), z));
+            continue;
+        }
+        let mut ring = c.pts.clone();
+        if ring_area2(&ring) < 0.0 {
+            ring.reverse();
+        }
+        // Outside the part's outline, inside its holes: away from the material at the edge.
+        let r = vec![ring];
+        let off_r = if part_inside {
+            region::offset(&r, off)
+        } else {
+            region::offset(&r, -off)
+        };
+        for cc in orient(region_contours(&off_r), p.direction, part_inside) {
+            paths.push((cc, z));
+        }
+    }
+    let start = [input.model.bounds().min[0], input.model.bounds().min[1]];
+    let zs: Vec<f64> = paths.iter().map(|(_, z)| *z).collect();
+    let cs: Vec<Contour> = paths.into_iter().map(|(c, _)| c).collect();
+    let ordered = nearest_order(cs.clone(), start);
+    for c in ordered {
+        let i = cs
+            .iter()
+            .position(|x| x.pts.iter().any(|p| c.pts.contains(p)))
+            .unwrap_or(0);
+        let z = zs[i] - depth;
+        let cut = Cut {
+            material_top: zs[i],
+            direct_ok: false,
+            free_side: Some(free_side(p.direction)),
+            tabs: None,
+            ramp: false,
+        };
+        b.cut(&c, z, &cut);
+    }
+    if !b.moved() {
+        return Err("No edges to chamfer".into());
+    }
+    Ok(b.finish())
+}
+
+/// Engrave: along the picked edges at a depth below them, in step downs.
+pub fn engrave(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    if p.drive.edges.is_empty() {
+        return Err("Pick the edges to engrave".into());
+    }
+    let (cs, _) = drive_contours(input);
+    let z_edge = input.selection_z().unwrap_or(input.model.bounds().max[2]);
+    let bottom = z_edge - p.depth.max(0.0);
+    let levels = input.levels(z_edge, bottom, false);
+    let mut b = Builder::new(input);
+    let start = [input.model.bounds().min[0], input.model.bounds().min[1]];
+    let ordered = nearest_order(cs.into_iter().map(|(c, _)| c).collect(), start);
+    for c in ordered {
+        let mut above = z_edge;
+        for z in &levels {
+            let cut = Cut {
+                material_top: above,
+                direct_ok: false,
+                free_side: None,
+                tabs: None,
+                ramp: true,
+            };
+            b.cut(&c, *z, &cut);
+            above = *z;
+        }
+    }
+    Ok(b.finish())
+}
+
+/// Flatlands: finishes the model's flat floors (or the picked ones) with rings offset inward.
+pub fn flatlands(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let r = input.tool.radius();
+    let top = input.top();
+    let bottom = input.bottom();
+    let mut floors: Vec<(Region, f64)> = selected_faces(input);
+    if floors.is_empty() {
+        floors = input
+            .model
+            .faces
+            .iter()
+            .filter(|f| f.faces_up() && matches!(f.surface, Surface::Plane { .. }))
+            .filter_map(|f| {
+                let z = f.z()?;
+                let rings: Region = f
+                    .loops
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| {
+                        let mut r: Vec<P2> = l.iter().map(|q| [q[0], q[1]]).collect();
+                        let ccw = ring_area2(&r) > 0.0;
+                        if (i == 0) != ccw {
+                            r.reverse();
+                        }
+                        r
+                    })
+                    .collect();
+                Some((region::normalize(&rings), z))
+            })
+            .filter(|(_, z)| *z <= top + 1e-6 && *z >= bottom - 1e-6)
+            .collect();
+    }
+    if floors.is_empty() {
+        return Err("The model has no flat floors between the heights".into());
+    }
+    floors.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let mut b = Builder::new(input);
+    let limit = stock_limit(input);
+    for (area, z) in floors {
+        let zc = z + p.floor_stock;
+        let reach = region::intersection(&region::offset(&area, r * 0.95), &limit);
+        let free = free_centres(input, zc, &reach);
+        let start = b.at.map_or([0.0, 0.0], |a| [a[0], a[1]]);
+        for f in order_faces(region::faces(&free), start) {
+            if f.area() < 1e-4 {
+                continue;
+            }
+            clear_face(&mut b, &f, zc, zc + p.links.feed_distance);
+        }
+    }
+    if !b.moved() {
+        b.warnings
+            .push("The tool doesn't fit on any of the floors".into());
+    }
+    Ok(b.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::MachineKind;
+    use crate::strategy::testing::{pocket_block, stock_for};
+    use crate::strategy::{Params, Pattern, generate};
+    use crate::tool::{Tool, ToolKind};
+    use crate::toolpath::Step;
+
+    fn run(pattern: Pattern, tool: Tool, f: impl FnOnce(&mut Params)) -> Toolpath {
+        let m = pocket_block();
+        let stock = stock_for(&m, 5.0, 2.0);
+        let mut p = Params::new(pattern, &tool, MachineKind::Mill);
+        f(&mut p);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        generate(&input).unwrap()
+    }
+
+    fn feeds(tp: &Toolpath) -> Vec<[f64; 3]> {
+        tp.steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed { to, .. } | Step::Arc { to, .. } => Some(*to),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// No feed move's tool centre is within the radius of the model's material above the tool
+    /// tip (a flat end mill).
+    fn assert_no_gouge(tp: &Toolpath, r: f64) {
+        let m = pocket_block();
+        for p in feeds(tp) {
+            // Inside the pocket's walls when below the top.
+            if p[2] < 20.0 - 1e-6 {
+                let in_pocket = p[0] >= 15.0 + r - 1e-3
+                    && p[0] <= 45.0 - r + 1e-3
+                    && p[1] >= 10.0 + r - 1e-3
+                    && p[1] <= 30.0 - r + 1e-3;
+                // At least the radius from the block's outline.
+                let dx = (-p[0]).max(p[0] - 60.0).max(0.0);
+                let dy = (-p[1]).max(p[1] - 40.0).max(0.0);
+                let outside = dx.hypot(dy) >= r - 0.01;
+                assert!(in_pocket || outside || p[2] >= 20.0, "gouge at {p:?}");
+                if in_pocket {
+                    assert!(p[2] >= 12.0 - 1e-6, "below the floor at {p:?}");
+                }
+            }
+            let _ = &m;
+        }
+    }
+
+    #[test]
+    fn rough_clears_the_pocket_without_gouging() {
+        let tp = run(Pattern::Rough3D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.wall_stock = 0.0;
+            p.floor_stock = 0.0;
+            p.step_down = 4.0;
+            p.heights.bottom = super::super::Height::new(super::super::HeightRef::ModelTop, -8.0);
+        });
+        assert_no_gouge(&tp, 3.0);
+        // It reaches the pocket floor.
+        let pts = feeds(&tp);
+        assert!(
+            pts.iter()
+                .any(|p| (p[2] - 12.0).abs() < 1e-6 && p[0] > 20.0 && p[0] < 40.0)
+        );
+    }
+
+    #[test]
+    fn rough_by_regions_covers_the_same_levels() {
+        let a = run(Pattern::Rough2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.step_down = 4.0;
+            p.heights.bottom = super::super::Height::new(super::super::HeightRef::ModelTop, -8.0);
+        });
+        let b = run(Pattern::Rough2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.step_down = 4.0;
+            p.machine_by = MachineBy::Regions;
+            p.heights.bottom = super::super::Height::new(super::super::HeightRef::ModelTop, -8.0);
+        });
+        let la = a.stats([0.0, 0.0, 50.0], 5000.0).feed_length;
+        let lb = b.stats([0.0, 0.0, 50.0], 5000.0).feed_length;
+        assert!((la - lb).abs() / la < 0.2, "{la} {lb}");
+    }
+
+    #[test]
+    fn rough_with_picked_floor_stays_in_pocket() {
+        let tp = run(Pattern::Rough2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.drive.faces = vec!["floor".into()];
+            p.wall_stock = 0.0;
+            p.floor_stock = 0.0;
+        });
+        for q in feeds(&tp) {
+            if q[2] < 20.0 {
+                assert!(
+                    q[0] > 15.0 && q[0] < 45.0 && q[1] > 10.0 && q[1] < 30.0,
+                    "{q:?}"
+                );
+            }
+        }
+        assert!(feeds(&tp).iter().any(|q| (q[2] - 12.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn profile_runs_outside_with_tabs() {
+        let tp = run(Pattern::Profile2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.step_down = 10.0;
+            p.tabs.enabled = true;
+            p.heights.bottom = super::super::Height::new(super::super::HeightRef::ModelBottom, 0.0);
+        });
+        let pts = feeds(&tp);
+        // Cut at the bottom, 3 mm off the outline, with tabs lifted to 1.5.
+        assert!(
+            pts.iter()
+                .any(|p| p[2].abs() < 1e-6 && (p[1] + 3.0).abs() < 1e-3)
+        );
+        assert!(pts.iter().any(|p| (p[2] - 1.5).abs() < 1e-6));
+        for p in &pts {
+            let inside = p[0] > 0.0 && p[0] < 60.0 && p[1] > 0.0 && p[1] < 40.0;
+            assert!(!inside, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn climb_profile_runs_clockwise_round_the_outline() {
+        let tp = run(Pattern::Profile2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.step_down = 30.0;
+            p.links.lead_in = super::super::LeadKind::None;
+            p.links.lead_out = super::super::LeadKind::None;
+        });
+        let pts: Vec<P2> = feeds(&tp)
+            .iter()
+            .filter(|p| p[2].abs() < 1e-6)
+            .map(|p| [p[0], p[1]])
+            .collect();
+        assert!(ring_area2(&pts) < 0.0);
+    }
+
+    #[test]
+    fn flatlands_finishes_the_pocket_floor() {
+        let tp = run(
+            Pattern::Flatlands,
+            Tool::new(ToolKind::EndMill, 6.0),
+            |_| {},
+        );
+        let pts = feeds(&tp);
+        let floor: Vec<_> = pts.iter().filter(|p| (p[2] - 12.0).abs() < 1e-6).collect();
+        assert!(!floor.is_empty());
+        for p in floor {
+            assert!(p[0] >= 18.0 - 1e-3 && p[0] <= 42.0 + 1e-3, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn face_covers_the_stock() {
+        let tp = run(Pattern::Face, Tool::new(ToolKind::FaceMill, 50.0), |p| {
+            p.step_down = 1.0;
+        });
+        let pts = feeds(&tp);
+        let lowest = pts.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
+        assert!((lowest - 20.0).abs() < 1e-6);
+        let minx = pts.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min);
+        assert!(minx < -5.0 - 25.0);
+    }
+
+    #[test]
+    fn chamfer_follows_top_edges() {
+        let tp = run(
+            Pattern::Chamfer2D,
+            Tool::new(ToolKind::ChamferMill, 6.0),
+            |p| {
+                p.depth = 0.5;
+                p.tip_offset = 0.5;
+            },
+        );
+        let pts = feeds(&tp);
+        // 90° tool: tip 1 mm under the top, 0.5 mm off the edge.
+        assert!(pts.iter().all(|p| (p[2] - 19.0).abs() < 1e-6));
+        assert!(pts.iter().any(|p| (p[1] + 0.5).abs() < 1e-3));
+        // Inside the pocket too (the top face's inner loop).
+        assert!(
+            pts.iter()
+                .any(|p| (p[1] - 10.5).abs() < 1e-3 && p[0] > 20.0)
+        );
+    }
+
+    #[test]
+    fn engrave_needs_edges() {
+        let m = pocket_block();
+        let stock = stock_for(&m, 5.0, 2.0);
+        let tool = Tool::new(ToolKind::ChamferMill, 6.0);
+        let p = Params::new(Pattern::Engrave, &tool, MachineKind::Mill);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        assert!(generate(&input).is_err());
+    }
+}

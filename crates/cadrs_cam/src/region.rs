@@ -1,0 +1,292 @@
+//! 2D areas as rings (Clipper2 on integers of 0.1 µm): offsets, booleans and the split into
+//! faces with their holes.
+//!
+//! A [`Region`] is a list of closed rings filled by the non-zero rule. The functions here
+//! return normalised regions: outer rings counter-clockwise, holes clockwise, no overlaps.
+
+use clipper2_rust::{
+    ClipType, EndType, FillRule, JoinType, Path64, Paths64, Point64, PolyTree64,
+    boolean_op_tree_64, difference_64, inflate_paths_64, intersect_64, simplify_paths,
+    union_subjects_64,
+};
+
+use crate::geom::{P2, ring_area2};
+
+pub type Ring = Vec<P2>;
+pub type Region = Vec<Ring>;
+
+/// Integer units per mm.
+const SCALE: f64 = 10_000.0;
+/// How far an offset's round corners may stray from the true arc (mm).
+pub const ARC_TOLERANCE: f64 = 0.002;
+
+fn p64(p: P2) -> Point64 {
+    Point64 {
+        x: (p[0] * SCALE).round() as i64,
+        y: (p[1] * SCALE).round() as i64,
+    }
+}
+
+fn to_paths(r: &[Ring]) -> Paths64 {
+    r.iter()
+        .filter(|ring| ring.len() >= 3)
+        .map(|ring| ring.iter().map(|p| p64(*p)).collect::<Path64>())
+        .collect()
+}
+
+fn from_path(p: &Path64) -> Ring {
+    p.iter()
+        .map(|q| [q.x as f64 / SCALE, q.y as f64 / SCALE])
+        .collect()
+}
+
+fn from_paths(p: &Paths64) -> Region {
+    p.iter().map(from_path).filter(|r| r.len() >= 3).collect()
+}
+
+/// The rings merged into a clean region (non-zero fill).
+pub fn normalize(r: &[Ring]) -> Region {
+    from_paths(&union_subjects_64(&to_paths(r), FillRule::NonZero))
+}
+
+/// The union of two regions.
+pub fn union(a: &[Ring], b: &[Ring]) -> Region {
+    let mut all = to_paths(a);
+    all.extend(to_paths(b));
+    from_paths(&union_subjects_64(&all, FillRule::NonZero))
+}
+
+/// The union of many rings, each a filled area (whatever its orientation): projected triangles,
+/// faces' outlines.
+pub fn union_all(rings: impl IntoIterator<Item = Ring>) -> Region {
+    let paths: Paths64 = rings
+        .into_iter()
+        .filter(|r| r.len() >= 3)
+        .map(|mut r| {
+            if ring_area2(&r) < 0.0 {
+                r.reverse();
+            }
+            r.iter().map(|p| p64(*p)).collect::<Path64>()
+        })
+        .collect();
+    from_paths(&union_subjects_64(&paths, FillRule::NonZero))
+}
+
+/// The union of regions, each already normalised (outer rings counter-clockwise, holes
+/// clockwise): unlike [`union_all`], holes stay holes.
+pub fn union_regions(regions: impl IntoIterator<Item = Region>) -> Region {
+    let paths: Paths64 = regions.into_iter().flat_map(|r| to_paths(&r)).collect();
+    from_paths(&union_subjects_64(&paths, FillRule::NonZero))
+}
+
+/// `a` without `b`.
+pub fn difference(a: &[Ring], b: &[Ring]) -> Region {
+    from_paths(&difference_64(
+        &to_paths(a),
+        &to_paths(b),
+        FillRule::NonZero,
+    ))
+}
+
+/// Where `a` and `b` overlap.
+pub fn intersection(a: &[Ring], b: &[Ring]) -> Region {
+    from_paths(&intersect_64(&to_paths(a), &to_paths(b), FillRule::NonZero))
+}
+
+/// The region grown by `delta` (shrunk when negative), with round corners.
+pub fn offset(r: &[Ring], delta: f64) -> Region {
+    if delta == 0.0 {
+        return normalize(r);
+    }
+    from_paths(&inflate_paths_64(
+        &to_paths(r),
+        delta * SCALE,
+        JoinType::Round,
+        EndType::Polygon,
+        2.0,
+        ARC_TOLERANCE * SCALE,
+    ))
+}
+
+/// The region grown by `delta` with sharp (mitred) corners, for a stock outline.
+pub fn offset_miter(r: &[Ring], delta: f64) -> Region {
+    from_paths(&inflate_paths_64(
+        &to_paths(r),
+        delta * SCALE,
+        JoinType::Miter,
+        EndType::Polygon,
+        4.0,
+        ARC_TOLERANCE * SCALE,
+    ))
+}
+
+/// The area swept by a round pen of `width` along an open polyline.
+pub fn stroke(line: &[P2], width: f64) -> Region {
+    if line.is_empty() || width <= 0.0 {
+        return Vec::new();
+    }
+    let mut path: Path64 = line.iter().map(|p| p64(*p)).collect();
+    if path.len() == 1 {
+        path.push(path[0]);
+    }
+    from_paths(&inflate_paths_64(
+        &vec![path],
+        width * SCALE / 2.0,
+        JoinType::Round,
+        EndType::Round,
+        2.0,
+        ARC_TOLERANCE * SCALE,
+    ))
+}
+
+/// Points closer than `epsilon` to the line through their neighbours dropped.
+pub fn simplify(r: &[Ring], epsilon: f64) -> Region {
+    from_paths(&simplify_paths(&to_paths(r), epsilon * SCALE, true))
+}
+
+/// The region's area (mm²).
+pub fn area(r: &[Ring]) -> f64 {
+    r.iter().map(|ring| ring_area2(ring) / 2.0).sum()
+}
+
+/// A connected piece of a region: its outer ring (counter-clockwise) and its holes
+/// (clockwise). Islands inside the holes are faces of their own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Face {
+    pub outer: Ring,
+    pub holes: Vec<Ring>,
+}
+
+impl Face {
+    /// Its rings, outer first.
+    pub fn rings(&self) -> Region {
+        let mut v = vec![self.outer.clone()];
+        v.extend(self.holes.iter().cloned());
+        v
+    }
+
+    pub fn area(&self) -> f64 {
+        area(&self.rings())
+    }
+}
+
+/// The region split into faces.
+pub fn faces(r: &[Ring]) -> Vec<Face> {
+    let mut tree = PolyTree64::new();
+    boolean_op_tree_64(
+        ClipType::Union,
+        FillRule::NonZero,
+        &to_paths(r),
+        &Paths64::new(),
+        &mut tree,
+    );
+    let mut out = Vec::new();
+    collect_faces(&tree, 0, &mut out);
+    out
+}
+
+fn collect_faces(tree: &PolyTree64, node: usize, out: &mut Vec<Face>) {
+    for &child in tree.nodes[node].children() {
+        if tree.is_hole(child) {
+            collect_faces(tree, child, out);
+            continue;
+        }
+        let outer = from_path(tree.nodes[child].polygon());
+        let holes = tree.nodes[child]
+            .children()
+            .iter()
+            .filter(|&&h| tree.is_hole(h))
+            .map(|&h| from_path(tree.nodes[h].polygon()))
+            .filter(|h| h.len() >= 3)
+            .collect();
+        if outer.len() >= 3 {
+            out.push(Face { outer, holes });
+        }
+        for &h in tree.nodes[child].children() {
+            collect_faces(tree, h, out);
+        }
+    }
+}
+
+/// A rectangle as a counter-clockwise ring.
+pub fn rect(min: P2, max: P2) -> Ring {
+    vec![
+        [min[0], min[1]],
+        [max[0], min[1]],
+        [max[0], max[1]],
+        [min[0], max[1]],
+    ]
+}
+
+/// A circle as a counter-clockwise ring within [`ARC_TOLERANCE`].
+pub fn circle(center: P2, radius: f64) -> Ring {
+    let n = segments_for(radius, std::f64::consts::TAU);
+    (0..n)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / n as f64;
+            [center[0] + radius * a.cos(), center[1] + radius * a.sin()]
+        })
+        .collect()
+}
+
+/// How many chords keep an arc of `radius` and `sweep` (radians) within [`ARC_TOLERANCE`].
+pub fn segments_for(radius: f64, sweep: f64) -> usize {
+    if radius <= ARC_TOLERANCE {
+        return 4;
+    }
+    let step = 2.0 * (1.0 - ARC_TOLERANCE / radius).clamp(-1.0, 1.0).acos();
+    ((sweep.abs() / step.max(1e-3)).ceil() as usize).clamp(4, 720)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offset_square_out_and_in() {
+        let sq = vec![rect([0.0, 0.0], [10.0, 10.0])];
+        let grown = offset(&sq, 1.0);
+        // 12 × 12 minus the four corners' squares plus quarter circles.
+        let expect = 144.0 - 4.0 + std::f64::consts::PI;
+        assert!((area(&grown) - expect).abs() < 0.05, "{}", area(&grown));
+        let shrunk = offset(&sq, -2.0);
+        assert!((area(&shrunk) - 36.0).abs() < 1e-6);
+        assert!(offset(&sq, -6.0).is_empty());
+    }
+
+    #[test]
+    fn faces_split_holes_and_islands() {
+        let outer = rect([0.0, 0.0], [30.0, 30.0]);
+        let mut hole = rect([5.0, 5.0], [25.0, 25.0]);
+        hole.reverse();
+        let island = rect([10.0, 10.0], [20.0, 20.0]);
+        let f = faces(&[outer, hole, island]);
+        assert_eq!(f.len(), 2);
+        let big = f.iter().find(|f| f.holes.len() == 1).unwrap();
+        assert!((big.area() - 500.0).abs() < 1e-6);
+        assert!(ring_area2(&big.holes[0]) < 0.0);
+    }
+
+    #[test]
+    fn union_all_ignores_orientation() {
+        let a = rect([0.0, 0.0], [10.0, 10.0]);
+        let mut b = rect([5.0, 0.0], [15.0, 10.0]);
+        b.reverse();
+        let u = union_all([a, b]);
+        assert!((area(&u) - 150.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stroke_area() {
+        let s = stroke(&[[0.0, 0.0], [10.0, 0.0]], 2.0);
+        let expect = 20.0 + std::f64::consts::PI;
+        assert!((area(&s) - expect).abs() < 0.02);
+    }
+
+    #[test]
+    fn circle_area() {
+        let c = circle([1.0, 2.0], 5.0);
+        let a = ring_area2(&c) / 2.0;
+        assert!((a - std::f64::consts::PI * 25.0).abs() < 0.1);
+    }
+}
