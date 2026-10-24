@@ -6,7 +6,8 @@
 //!   press–drag–release draws one segment. Esc ends the chain; a second Esc leaves the tool.
 //!   While chaining, Shift+A makes the next segment a tangent arc (then it switches back).
 //! - **Corner rectangle (G), center-point rectangle (Rectangle ▾):** two clicks (or a drag).
-//!   Placing one opens the quick-dimension box on its width, then on its height.
+//!   Placing one opens the quick-dimension box on its width, then on its height. Holding Alt
+//!   makes it a square (#54).
 //! - **Circle (C):** center, then a point on the circle; the diameter box opens.
 //! - **3-point arc (A):** start, end, then a point on the arc; **tangent arc (Arc ▾):** click
 //!   the end of a line or arc, then the arc's end.
@@ -568,6 +569,8 @@ pub struct SketchDraw {
     /// What a box selection in progress would select, drawn as selected while it is dragged
     /// (the Mirror tool's: the curves it would mirror).
     pub box_preview: Vec<SketchEntity>,
+    /// Alt is held while a corner or center-point rectangle is drawn: it is a square (#54).
+    pub square: bool,
 }
 
 /// A spline's end handle (its tangent there, [`cadrs_sketch::spline`]).
@@ -994,6 +997,7 @@ pub(crate) fn sketch_pointer(
     ]);
     // Shift suppresses inference (`inference.md`).
     let suppress = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     let infers = places_points(tool.tool);
     let constraint_tool = match tool.tool {
         SketchTool::Constrain(k) => Some(k),
@@ -1354,6 +1358,11 @@ pub(crate) fn sketch_pointer(
                 };
                 let drag = press.began && moved;
                 let placed = snap.map(|c| c.constraints).unwrap_or_default();
+                draw.square = alt && matches!(draw.state, DrawState::Rect { .. });
+                let (p, placed) = match square_corner(draw.state, p).filter(|_| draw.square) {
+                    Some(q) => (q, Vec::new()),
+                    None => (p, placed),
+                };
                 complete(
                     &mut draw,
                     &mut commands,
@@ -1554,6 +1563,15 @@ pub(crate) fn sketch_pointer(
             draw.inference = None;
         }
     } else {
+        draw.inference = None;
+    }
+    draw.square = alt && matches!(draw.state, DrawState::Rect { .. });
+    if over
+        && draw.square
+        && let Some(q) = draw.cursor.and_then(|p| square_corner(draw.state, p))
+    {
+        // The square's corner infers nothing: what it snapped to is off the corner now.
+        draw.cursor = Some(q);
         draw.inference = None;
     }
     // Woken points that were deleted (undo) go.
@@ -1880,6 +1898,10 @@ fn complete(
             }
             draw.state = DrawState::Idle;
             let mut specs = rectangle_constraints(corners);
+            if draw.square {
+                let side = |i: usize| CurveSpec::Between(corners[i], corners[i + 1]);
+                specs.push(ConstraintOf::Equal(side(0), side(1)));
+            }
             specs.extend(take_pending(draw, sketch));
             specs.extend(placed_specs(sketch, p, &placed, None, false));
             let op = if centered {
@@ -1898,6 +1920,7 @@ fn complete(
             };
             execute_with(commands, target, op, specs);
             let anchor = if centered { first } else { corners[0] };
+            let square = draw.square;
             commands.queue(move |world: &mut World| {
                 let Some(ids) = find_points(world, &corners) else {
                     return;
@@ -1907,14 +1930,12 @@ fn complete(
                     anchor,
                     centered,
                 };
-                open_quick_dims(
-                    world,
-                    [
-                        QuickDimTarget::RectWidth(rect),
-                        QuickDimTarget::RectHeight(rect),
-                    ]
-                    .into(),
-                );
+                // A square's height follows its width.
+                let mut dims = vec![QuickDimTarget::RectWidth(rect)];
+                if !square {
+                    dims.push(QuickDimTarget::RectHeight(rect));
+                }
+                open_quick_dims(world, dims.into());
             });
         }
         DrawState::TextBox { first } => {
@@ -2526,6 +2547,17 @@ pub fn rect_corners(first: SVec2, p: SVec2, centered: bool) -> [SVec2; 4] {
         (first, p)
     };
     [a, SVec2::new(c.x, a.y), c, SVec2::new(a.x, c.y)]
+}
+
+/// The corner of a square drawn from `first` (a corner, or the center) towards the cursor `p`:
+/// its sides as long as the rectangle's longer side (#54). `None` unless a rectangle is drawn.
+pub fn square_corner(state: DrawState, p: SVec2) -> Option<SVec2> {
+    let DrawState::Rect { first, .. } = state else {
+        return None;
+    };
+    let d = p - first;
+    let side = d.x.abs().max(d.y.abs());
+    Some(first + SVec2::new(side.copysign(d.x), side.copysign(d.y)))
 }
 
 fn arc_op(arc: ArcGeom, construction: bool) -> SketchOp {
@@ -3757,6 +3789,20 @@ mod tests {
             xs.iter()
                 .all(|x| (*x - 0.0).abs() < 1e-9 || (*x - 10.0).abs() < 1e-9)
         );
+    }
+
+    #[test]
+    fn alt_squares_the_rectangle_towards_the_cursor() {
+        let rect = |first, centered| DrawState::Rect { first, centered };
+        let o = SVec2::new(1.0, 1.0);
+        let corner = |p| square_corner(rect(o, false), p).unwrap();
+        assert_eq!(corner(SVec2::new(4.0, 2.0)), SVec2::new(4.0, 4.0));
+        assert_eq!(corner(SVec2::new(0.0, -4.0)), SVec2::new(-4.0, -4.0));
+        assert_eq!(corner(SVec2::new(-1.0, 1.5)), SVec2::new(-1.0, 3.0));
+        // About the center, the cursor's corner moves out the same way.
+        let c = square_corner(rect(o, true), SVec2::new(2.0, -2.0)).unwrap();
+        assert_eq!(c, SVec2::new(4.0, -2.0));
+        assert_eq!(square_corner(DrawState::Idle, o), None);
     }
 
     #[test]
