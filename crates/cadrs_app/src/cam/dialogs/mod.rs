@@ -38,8 +38,10 @@ mod fields;
 mod set;
 #[cfg(test)]
 mod tests;
+mod toolpath_fields;
 use fields::*;
 use set::*;
+use toolpath_fields::*;
 
 pub struct DialogsPlugin;
 
