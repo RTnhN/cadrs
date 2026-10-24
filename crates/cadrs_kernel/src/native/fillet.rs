@@ -4183,7 +4183,18 @@ fn first_roll(
             }
         }
     }
-    if best.is_none() && ef.flat {
+    // (Only a strip with a smooth edge on one of its faces has one to roll over.)
+    let smooth_edge = || {
+        ef.faces.iter().any(|&fi| {
+            b.faces[fi].loops.iter().flatten().any(|c| {
+                c.edge != ef.e
+                    && !b.edges[c.edge].degenerate
+                    && !is_seam(b, fi, c.edge)
+                    && super::blend::smooth_within(b, c.edge, crate::TANGENT_ANGLE)
+            })
+        })
+    };
+    if best.is_none() && ef.flat && smooth_edge() {
         return Ok(traced_roll(b, ef, from, t0, t1));
     }
     Ok(best.map(|x| x.1))
@@ -4972,8 +4983,9 @@ fn plan(
                     }
                 } else if exits[0].into != exits[1].into && exits.iter().all(|x| x.ext.is_none()) {
                     // Crossing the edges round the vertex; else, where the faces it leaves into
-                    // only touch there, capped (the cut traced on them would only reach the
-                    // other's exit roughly); else the cut traced.
+                    // only touch there (only then has [`cap_end`] a cap), capped: the cut traced
+                    // on them would only reach the other's exit roughly (the shell opening's
+                    // rounds, blend_regressions::shell_opening_rounds); else the cut traced.
                     match end_chain(b, ef, j, &exits) {
                         Ok(links) => End::Chain { links, exits },
                         Err(e) => match cap_end(b, ef, j, &exits) {
@@ -5230,20 +5242,7 @@ fn plan(
                             eb.spine.at(b.edges[eb.e].t[jb]).0
                         )
                     });
-                    // (A face curving away from its tangent neighbour across the joint: a
-                    // chamfer's sections there differ by its sag.) Set back, each strip ending
-                    // at its own section and a patch filling between.
-                    if let Err(e) = set_back(b, &efs, &mut ends, &mut inside, here, v, &mut holes) {
-                        debug(|| format!("vertex {v}: no set-back corner: {e}"));
-                        return Err(unsupported("tangent fillets whose sections don't meet"));
-                    }
-                    debug(|| {
-                        format!(
-                            "vertex {v}: set back where edges {} and {} meet",
-                            ea.e, eb.e
-                        )
-                    });
-                    continue;
+                    return Err(unsupported("tangent fillets whose sections don't meet"));
                 }
                 let key = SectionKey::Junction(v);
                 ends[ia][ja] = Some(End::Section {
