@@ -1513,7 +1513,7 @@ mod tests {
         let out = lines.iter().rposition(|l| l.contains("Z2")).expect(&nc);
         assert!(bottom < rev && rev < out, "{nc}");
         // Turning forward again after.
-        assert!(lines[out..].iter().any(|l| *l == "S500 M3"), "{nc}");
+        assert!(lines[out..].contains(&"S500 M3"), "{nc}");
     }
 
     #[test]

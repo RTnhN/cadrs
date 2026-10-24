@@ -47,7 +47,7 @@ bytemuck = "1"
 slotmap = { version = "1", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 resvg = "0.45"
-icon-rs = "0.3.12"
+icon-rs = "0.4.5"
 directories = "6"
 # Wayland file drops (`cadrs_app::file_drop`): winit has no Wayland drag-and-drop, so the app
 # reads drops off winit's own Wayland connection. The versions winit already pulls in.
@@ -132,3 +132,6 @@ opt-level = 3
 inherits = "release"
 incremental = true
 codegen-units = 64
+
+[patch.crates-io]
+icon-rs = { path = "../icon-rs" }
