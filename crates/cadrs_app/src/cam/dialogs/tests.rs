@@ -265,3 +265,101 @@ fn misc_tab_repeats_the_toolpath() {
     let f = fields(&s, &d, misc);
     assert!(has_key(&f, "rep-cx") && !has_key(&f, "rep-dx"));
 }
+
+/// Cutting data worked out for a material: within the machine's spindle, again when the tool
+/// changes size, and the operator's own once a value is typed over.
+#[test]
+fn tool_cutting_data_for_a_material() {
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let s = studio(mill(false), tool);
+    let op = s.cam.operation(s.tool_op).unwrap().2.clone();
+    let mut d = Draft::Tool {
+        setup: s.setup,
+        after: None,
+        op: Box::new(op),
+        is_new: false,
+        library: false,
+        filter: None,
+    };
+    let mut world = World::new();
+    let cutting = |d: &Draft| match d {
+        Draft::Tool { op, .. } => match &op.kind {
+            OpKind::Tool(t) => t.tool.cutting,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+    assert!(has_key(&fields(&s, &d, 0), "work-material"));
+    d.set(&mut world, "work-material", &Value::Index(1), &s.cam);
+    let alu = cutting(&d);
+    assert_eq!(alu.material, Some(WorkMaterial::Aluminium));
+    let max = mill(false).max_spindle;
+    assert!(alu.spindle_rpm <= max && alu.spindle_rpm > 0.0);
+    assert_eq!(alu.step_down, 3.0);
+    // A 10 mm tool: half the depth again.
+    d.set(&mut world, "diameter", &Value::Number(10.0), &s.cam);
+    assert_eq!(cutting(&d).step_down, 5.0);
+    // Typed over: by hand from then on.
+    d.set(&mut world, "feed", &Value::Number(900.0), &s.cam);
+    let own = cutting(&d);
+    assert_eq!((own.feed, own.material), (900.0, None));
+    d.set(&mut world, "diameter", &Value::Number(8.0), &s.cam);
+    assert_eq!(cutting(&d).feed, 900.0);
+}
+
+/// A profile's compensation: offered off the line only, and set on its params.
+#[test]
+fn profile_compensation_field() {
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let s = studio(mill(false), em.clone());
+    let mut d = toolpath(&s, Pattern::Profile2D, &em, MachineKind::Mill);
+    let mut world = World::new();
+    assert!(has_key(&fields(&s, &d, 0), "comp"));
+    d.set(&mut world, "comp", &Value::Index(1), &s.cam);
+    assert_eq!(params(&d).compensation, Compensation::Wear);
+    d.set(&mut world, "side", &Value::Index(3), &s.cam);
+    assert!(!has_key(&fields(&s, &d, 0), "comp"));
+    // Not on a pocket.
+    let pocket = toolpath(&s, Pattern::Rough2D, &em, MachineKind::Mill);
+    assert!(!has_key(&fields(&s, &pocket, 0), "comp"));
+}
+
+/// A toolpath started from a library template takes its settings and keeps its own picks;
+/// templates the tool can't run aren't offered.
+#[test]
+fn toolpath_from_a_template() {
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let mut s = studio(mill(false), em.clone());
+    let mut saved = Params::new(Pattern::Profile2D, &em, MachineKind::Mill);
+    saved.step_down = 1.25;
+    saved.compensation = Compensation::Wear;
+    saved.drive.edges = vec![Default::default()];
+    s.cam
+        .library
+        .save_template(Template::new("Finish wall", &saved));
+    let drill = Params::new(
+        Pattern::Drill,
+        &Tool::new(ToolKind::Drill, 5.0),
+        MachineKind::Mill,
+    );
+    s.cam.library.save_template(Template::new("Spot", &drill));
+    // (Saved without what it machined.)
+    assert!(s.cam.library.templates[0].params.drive.edges.is_empty());
+    let mut d = toolpath(&s, Pattern::Profile2D, &em, MachineKind::Mill);
+    let f = fields(&s, &d, 0);
+    let options = f.iter().find_map(|x| match x {
+        Field::Select { key, options, .. } if key == "template" => Some(options.clone()),
+        _ => None,
+    });
+    // An end mill can't drill: only the profile template.
+    assert_eq!(options.unwrap().len(), 2);
+    let mut world = World::new();
+    d.set(&mut world, "template", &Value::Index(1), &s.cam);
+    let p = params(&d);
+    assert_eq!(p.step_down, 1.25);
+    assert_eq!(p.compensation, Compensation::Wear);
+    match &d {
+        Draft::Toolpath { op, .. } => assert_eq!(op.name, "Finish wall"),
+        _ => unreachable!(),
+    }
+}

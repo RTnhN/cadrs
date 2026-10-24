@@ -231,6 +231,27 @@ impl Side {
     }
 }
 
+/// Where a profile's tool radius is taken off the part's outline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum Compensation {
+    /// The toolpath is the tool's centre; the control moves it as written.
+    #[default]
+    Computer,
+    /// The toolpath is the tool's centre, written with G41/G42: the operator trims the size
+    /// on the machine with the tool's wear offset (D = its tool number).
+    Wear,
+}
+
+impl Compensation {
+    pub const ALL: [Compensation; 2] = [Compensation::Computer, Compensation::Wear];
+    pub fn label(self) -> &'static str {
+        match self {
+            Compensation::Computer => "In computer",
+            Compensation::Wear => "Wear (G41/G42)",
+        }
+    }
+}
+
 /// Sub-pattern of the roughing patterns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum SubPattern {
@@ -767,6 +788,9 @@ pub struct Params {
     pub use_job_bodies: bool,
     #[serde(default)]
     pub side: Side,
+    /// Where the tool radius is taken off (2-axis profile).
+    #[serde(default)]
+    pub compensation: Compensation,
     /// Material left on walls (mm).
     pub wall_stock: f64,
     /// Material left on floors (mm).
@@ -843,6 +867,7 @@ impl Params {
             drive: Drive::default(),
             use_job_bodies: true,
             side: Side::Auto,
+            compensation: Compensation::Computer,
             wall_stock: 0.0,
             floor_stock: 0.0,
             step_down: c.step_down.max(0.05),

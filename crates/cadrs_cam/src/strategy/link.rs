@@ -6,7 +6,7 @@ use crate::geom::{P2, P3, dist2, lerp2};
 use crate::toolpath::{FeedKind, Step, Toolpath};
 
 use super::path::{Contour, lead_arc, lead_out_arc, ramp_along, sub_walk, with_tabs};
-use super::{Entry, Input, LeadKind, LinkAction};
+use super::{Compensation, Entry, Input, LeadKind, LinkAction, Pattern};
 
 /// Points along an XY arc from `a` to `b` about `c` (for checking what a lead sweeps).
 pub(super) fn arc_path(a: P2, b: P2, c: P2, cw: bool) -> Vec<P2> {
@@ -218,6 +218,11 @@ impl<'a> Builder<'a> {
         let l = &p.links;
         let walk = c.walk();
         let tabs_here = cut.tabs.filter(|(top, _, _)| *top > z + 1e-9 && c.closed);
+        // Wear compensation (G41/G42) on a profile: it starts on a straight move into the lead
+        // and ends after the lead-out.
+        let comp = cut
+            .free_side
+            .filter(|_| p.compensation == Compensation::Wear && p.pattern == Pattern::Profile2D);
         // Leads (in the free side only).
         let lead_in = cut
             .free_side
@@ -237,16 +242,31 @@ impl<'a> Builder<'a> {
                         )
                     }
                 };
+                // Compensated, an arc has a straight run into it, along its start's tangent.
+                let run_in = match lead.1 {
+                    Some((ctr, cw)) if comp.is_some() => {
+                        let v = [lead.0[0] - ctr[0], lead.0[1] - ctr[1]];
+                        let n = v[0].hypot(v[1]).max(1e-9);
+                        let t = if cw { [v[1], -v[0]] } else { [-v[1], v[0]] };
+                        let k = l.lead_radius / n;
+                        Some([lead.0[0] - t[0] * k, lead.0[1] - t[1] * k])
+                    }
+                    _ => None,
+                };
                 // Only where the tool can come down and run to the contour: what it sweeps along
                 // the lead clear (else it ramps in along the contour).
-                let path = match lead.1 {
+                let mut path = match lead.1 {
                     Some((ctr, cw)) => arc_path(lead.0, pt, ctr, cw),
                     None => vec![lead.0, pt],
                 };
-                self.lead_clear(&path, cut).then_some(lead)
+                if let Some(q) = run_in {
+                    path.insert(0, q);
+                }
+                self.lead_clear(&path, cut)
+                    .then_some((lead.0, lead.1, run_in))
             });
         let start = walk[0];
-        let entry_xy = lead_in.map_or(start, |(s, _)| s);
+        let entry_xy = lead_in.map_or(start, |(s, _, run_in)| run_in.unwrap_or(s));
         let at_depth = self.travel_to(entry_xy, z, cut);
         if !at_depth {
             let use_ramp =
@@ -284,7 +304,26 @@ impl<'a> Builder<'a> {
                 _ => self.feed([entry_xy[0], entry_xy[1], z], FeedKind::Plunge),
             }
         }
-        if let Some((_, arc)) = lead_in {
+        let compensated = match (comp, lead_in) {
+            (Some(side), Some((s, _, run_in))) => {
+                self.steps.push(Step::Compensation(Some(side > 0.0)));
+                if run_in.is_some() {
+                    self.feed([s[0], s[1], z], FeedKind::LeadIn);
+                }
+                true
+            }
+            (Some(_), None) => {
+                let w = "Wear compensation needs room for a lead-in: contours without one were \
+                         cut without it"
+                    .to_string();
+                if !self.warnings.contains(&w) {
+                    self.warnings.push(w);
+                }
+                false
+            }
+            _ => false,
+        };
+        if let Some((_, arc, _)) = lead_in {
             match arc {
                 Some((ctr, cw)) => self.arc([start[0], start[1], z], ctr, cw, FeedKind::LeadIn),
                 None => self.feed([start[0], start[1], z], FeedKind::LeadIn),
@@ -311,6 +350,19 @@ impl<'a> Builder<'a> {
             }
         }
         self.finish_contour(c, z, cut, false);
+        if compensated {
+            // Cancelled on a straight run on out of the lead-out (if there's room; else with
+            // the retract).
+            self.steps.push(Step::Compensation(None));
+            if let (Some(a), Some(h)) = (self.at, self.heading)
+                && l.lead_out != LeadKind::None
+            {
+                let e = [a[0] + h[0] * l.lead_radius, a[1] + h[1] * l.lead_radius];
+                if self.lead_clear(&[[a[0], a[1]], e], cut) {
+                    self.feed([e[0], e[1], z], FeedKind::LeadOut);
+                }
+            }
+        }
     }
 
     /// Down to `z` from where the tool is, back and forth along `stretch` (from its start) at

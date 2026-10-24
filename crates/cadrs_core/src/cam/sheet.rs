@@ -6,8 +6,8 @@
 
 use std::fmt::Write as _;
 
-use cadrs_cam::Frame;
 use cadrs_cam::tool::fmt_mm;
+use cadrs_cam::{Frame, Step};
 
 use super::program::{SetupRun, stock_in, stock_shape};
 use super::{CamStudio, Job, Origin, Role, Setup, StockKind};
@@ -244,6 +244,17 @@ pub fn setup_sheet(
         }
         if o.posting.stop_before {
             notes.push(format!("{}: the program stops before it (M0)", o.name));
+        }
+        if o.toolpath
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::Compensation(Some(_))))
+        {
+            notes.push(format!(
+                "{}: wear compensation (G41/G42 D{}): set D{} to the wear only (0 to start), not \
+                 the tool's radius",
+                o.name, o.tool_number, o.tool_number
+            ));
         }
         if !o.posting.comment.is_empty() {
             notes.push(format!("{}: {}", o.name, o.posting.comment));

@@ -22,6 +22,7 @@
 //! Lengths are mm, feeds mm/min, angles degrees unless a name says otherwise.
 
 pub mod dropcutter;
+pub mod feeds;
 pub mod geom;
 pub mod heightmap;
 pub mod machine;

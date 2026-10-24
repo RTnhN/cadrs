@@ -864,6 +864,14 @@ impl Draft {
         }
         f.push(Field::section("Cutting data"));
         if !tool.is_beam() {
+            let mut opts = vec!["Set by hand".to_string()];
+            opts.extend(WorkMaterial::ALL.iter().map(|m| m.label().to_string()));
+            let at = tool
+                .cutting
+                .material
+                .and_then(|m| WorkMaterial::ALL.iter().position(|x| *x == m))
+                .map_or(0, |i| i + 1);
+            f.push(Field::select("work-material", "Worked out for", opts, at));
             f.push(Field::number(
                 "rpm",
                 "Spindle speed",
@@ -989,6 +997,8 @@ impl Draft {
                     ));
                 }
                 repeat_fields(f, &p.repeat);
+                f.push(Field::section("Template"));
+                f.push(Field::button("save-template", "Save as template", "books"));
             }
             "Beam" => {
                 f.push(Field::section("Beam"));
@@ -1176,6 +1186,21 @@ pub(super) fn face_normal(ctx: &Ctx, pick: Pick) -> Option<[f64; 3]> {
     (l > 1e-9).then(|| [n[0] / l, n[1] / l, n[2] / l])
 }
 
+/// The library's toolpath templates a `tk` tool on a `machine` can run.
+pub(super) fn usable_templates(
+    cam: &CamStudio,
+    tk: ToolKind,
+    machine: MachineKind,
+) -> Vec<&Template> {
+    cam.library
+        .templates
+        .iter()
+        .filter(|t| {
+            Pattern::available(t.params.pattern.type_of(), tk, machine).contains(&t.params.pattern)
+        })
+        .collect()
+}
+
 pub(super) fn machine_of(cam: &CamStudio, setup: CamId) -> MachineKind {
     cam.setup(setup)
         .and_then(|(j, _)| j.machine.as_ref())
@@ -1208,6 +1233,13 @@ pub(super) fn toolpath_fields(
     picking: Option<&str>,
 ) {
     f.push(Field::text("name", "Name", &op.name));
+    // Start from a template saved in the library (one this tool and machine can run).
+    let templates = usable_templates(ctx.cam, tk, machine);
+    if !templates.is_empty() {
+        let mut opts = vec!["None".to_string()];
+        opts.extend(templates.iter().map(|t| t.name.clone()));
+        f.push(Field::select("template", "Start from template", opts, 0));
+    }
     let types: Vec<Type> = Type::ALL
         .into_iter()
         .filter(|t| !Pattern::available(*t, tk, machine).is_empty())
@@ -1295,6 +1327,14 @@ pub(super) fn toolpath_fields(
             "Side",
             labels(&Side::ALL, Side::label),
             index_of(&Side::ALL, p.side),
+        ));
+    }
+    if pat == Profile2D && p.side != Side::On {
+        f.push(Field::select(
+            "comp",
+            "Compensation",
+            labels(&Compensation::ALL, Compensation::label),
+            index_of(&Compensation::ALL, p.compensation),
         ));
     }
     let beam = tk.is_beam();

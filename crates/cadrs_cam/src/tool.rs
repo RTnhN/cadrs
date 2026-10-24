@@ -175,6 +175,10 @@ pub struct CuttingData {
     pub step_down: f64,
     /// Width of cut (mm).
     pub step_over: f64,
+    /// The work material these were worked out for ([`crate::feeds::cutting_data`]); `None`:
+    /// set by hand.
+    #[serde(default)]
+    pub material: Option<crate::feeds::WorkMaterial>,
 }
 
 impl Default for CuttingData {
@@ -185,6 +189,7 @@ impl Default for CuttingData {
             plunge_feed: 300.0,
             step_down: 1.0,
             step_over: 2.4,
+            material: None,
         }
     }
 }
@@ -347,6 +352,7 @@ impl Tool {
                 plunge_feed: 300.0,
                 step_down: (d * 0.5).max(0.1),
                 step_over: d * 0.4,
+                material: None,
             },
             beam: BeamData::default(),
         };
@@ -559,7 +565,7 @@ pub fn fmt_mm(v: f64) -> String {
     }
 }
 
-/// The studio's tools, holders and arbors.
+/// The studio's tools, holders, arbors and toolpath templates.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ToolLibrary {
     #[serde(default)]
@@ -568,6 +574,34 @@ pub struct ToolLibrary {
     pub holders: Vec<Profile>,
     #[serde(default)]
     pub arbors: Vec<Profile>,
+    #[serde(default)]
+    pub templates: Vec<Template>,
+}
+
+/// A toolpath's settings saved to start others from: everything but what it machines (its
+/// drive geometry, which belongs to its part).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Template {
+    pub name: String,
+    pub params: crate::strategy::Params,
+}
+
+impl Template {
+    pub fn new(name: &str, params: &crate::strategy::Params) -> Template {
+        let mut params = params.clone();
+        params.drive = Default::default();
+        Template {
+            name: name.to_string(),
+            params,
+        }
+    }
+
+    /// `params` with this template's settings, keeping what they machine.
+    pub fn apply_to(&self, params: &mut crate::strategy::Params) {
+        let drive = std::mem::take(&mut params.drive);
+        *params = self.params.clone();
+        params.drive = drive;
+    }
 }
 
 /// The file format's name and version, checked on import.
@@ -612,6 +646,15 @@ impl ToolLibrary {
                 points: vec![[16.0, 0.0], [16.0, 30.0], [25.0, 40.0], [25.0, 60.0]],
             }],
             arbors: Vec::new(),
+            templates: Vec::new(),
+        }
+    }
+
+    /// Saves `t`, over a template of the same name.
+    pub fn save_template(&mut self, t: Template) {
+        match self.templates.iter_mut().find(|x| x.name == t.name) {
+            Some(x) => *x = t,
+            None => self.templates.push(t),
         }
     }
 
@@ -686,6 +729,11 @@ impl ToolLibrary {
         }
         for a in &other.arbors {
             self.add_arbor(a);
+        }
+        for t in &other.templates {
+            if !self.templates.iter().any(|x| x.name == t.name) {
+                self.templates.push(t.clone());
+            }
         }
         self.tools.len() - before
     }

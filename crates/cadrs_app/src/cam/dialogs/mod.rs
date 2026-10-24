@@ -9,14 +9,15 @@
 //! result (the job cache).
 
 use bevy::prelude::*;
+use cadrs_core::cam::cadrs_cam::feeds::{self, WorkMaterial};
 use cadrs_core::cam::cadrs_cam::machine::{Machine, MachineKind, catalog};
 use cadrs_core::cam::cadrs_cam::post::LaserMode;
 use cadrs_core::cam::cadrs_cam::strategy::{
-    CuttingMethod, Direction, Entry, HeightRef, HoleSelect, LeadKind, LinkAction, MachineBy,
-    Params, Pattern, Side, SubPattern, Type,
+    Compensation, CuttingMethod, Direction, Entry, HeightRef, HoleSelect, LeadKind, LinkAction,
+    MachineBy, Params, Pattern, Side, SubPattern, Type,
 };
 use cadrs_core::cam::cadrs_cam::tool::{
-    Hand, MachiningType, Profile, Tool, ToolKind, ToolLibrary, Unit as LenUnit,
+    Hand, MachiningType, Profile, Template, Tool, ToolKind, ToolLibrary, Unit as LenUnit,
 };
 use cadrs_core::cam::cadrs_cam::toolpath::{Coolant, CycleKind};
 use cadrs_core::cam::{

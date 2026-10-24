@@ -783,3 +783,95 @@ fn sequence_numbers_stay_five_digits() {
     }
     assert!(nc.contains("M30"));
 }
+
+/// A profile with wear compensation: G41 (climb, the tool left of the path) on the straight run
+/// into each arc lead-in, never on an arc; G40 after the lead-out; the cuts themselves where
+/// they are without it. GRBL, without compensation, refuses it.
+#[test]
+fn wear_compensation_starts_on_a_straight_move() {
+    use crate::geom::Aabb;
+    use crate::model::{Model, box_triangles};
+    use crate::strategy::{Compensation, Input, Params, Pattern, Stock, generate};
+    let m = Model::from_triangles(
+        "block",
+        box_triangles(&Aabb::new([0.0, 0.0, 0.0], [40.0, 30.0, 10.0])),
+    );
+    // (A plate cut to size: the leads start off it.)
+    let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [40.0, 30.0, 10.0]));
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let toolpath = |c: Compensation| {
+        let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        p.step_down = 5.0;
+        p.compensation = c;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        generate(&input).unwrap()
+    };
+    let plain = toolpath(Compensation::Computer);
+    let worn = toolpath(Compensation::Wear);
+    let cuts = |tp: &Toolpath| -> Vec<P3> {
+        tp.steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed {
+                    to,
+                    kind: FeedKind::Cut,
+                    ..
+                } => Some(*to),
+                _ => None,
+            })
+            .collect()
+    };
+    // The same cuts (the last depth closing where its start, near the tool, put it).
+    let (a, b) = (cuts(&plain), cuts(&worn));
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a[..a.len() - 1], b[..b.len() - 1]);
+    let mut op = square_op(tool.clone(), false);
+    op.toolpath = worn;
+    let program = NcProgram {
+        name: "Plate".into(),
+        number: 1,
+        operations: vec![op],
+    };
+    let m = machine(MachineKind::Mill, Dialect::Fanuc);
+    let nc = post(&program, &m, &m.post).unwrap();
+    let lines: Vec<&str> = nc.lines().collect();
+    let on: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].contains("G41 D1"))
+        .collect();
+    // Two depths, each compensated once.
+    assert_eq!(on.len(), 2, "{nc}");
+    for &i in &on {
+        assert!(lines[i].contains("G1") && !lines[i].contains("G2") && !lines[i].contains("G3"));
+        // The arc lead-in next, then (after the contour and lead-out) G40.
+        assert!(
+            lines[i + 1].contains("G2") || lines[i + 1].contains("G3"),
+            "{nc}"
+        );
+        let off = (i..lines.len())
+            .find(|&k| lines[k].contains("G40"))
+            .expect(&nc);
+        assert!(on.iter().all(|&j| j <= i || j > off), "{nc}");
+        // Cancelled on a straight move across, off the lead-out arc.
+        assert!(lines[off].contains("G1 G40 "), "{nc}");
+        assert!(
+            lines[off - 1].contains("G2") || lines[off - 1].contains("G3"),
+            "{nc}"
+        );
+    }
+    assert!(!nc.contains("G42"), "{nc}");
+    let mut grbl = machine(MachineKind::Mill, Dialect::Fanuc);
+    grbl.dialect = Dialect::Grbl;
+    let s = PostSettings::for_dialect(Dialect::Grbl, MachineKind::Mill);
+    assert!(matches!(
+        post(&program, &grbl, &s),
+        Err(PostError::NoCompensation(_))
+    ));
+}

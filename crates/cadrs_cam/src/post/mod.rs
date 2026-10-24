@@ -285,6 +285,8 @@ pub enum PostError {
     CantTilt(String),
     /// A work offset the control doesn't have.
     NoDatum(String),
+    /// Cutter compensation on a control without it.
+    NoCompensation(String),
 }
 
 impl std::fmt::Display for PostError {
@@ -294,6 +296,7 @@ impl std::fmt::Display for PostError {
             PostError::WrongTool(s) => write!(f, "{s}"),
             PostError::CantTilt(s) => write!(f, "{s}"),
             PostError::NoDatum(s) => write!(f, "{s}"),
+            PostError::NoCompensation(s) => write!(f, "{s}"),
         }
     }
 }
@@ -364,6 +367,8 @@ struct Writer<'a> {
     beam_on: bool,
     /// The spindle speed last set (rpm).
     rpm: Option<f64>,
+    /// Cutter compensation words (G41 D1, G40) for the next straight move.
+    comp: Option<String>,
 }
 
 impl<'a> Writer<'a> {
@@ -381,6 +386,7 @@ impl<'a> Writer<'a> {
             no_z: false,
             beam_on: false,
             rpm: None,
+            comp: None,
         }
     }
 
@@ -469,11 +475,11 @@ impl<'a> Writer<'a> {
             return;
         }
         if self.s.rapid_positioning {
-            let m = self.motion(0);
+            let m = self.motion(0) + &self.comp_words();
             let line = format!("{m}{axes}").trim().to_string();
             self.block(&line);
         } else {
-            let m = self.motion(1);
+            let m = self.motion(1) + &self.comp_words();
             let f = self.feed_word(self.s.rapid_rate);
             let line = format!("{m}{axes}{f}").trim().to_string();
             self.block(&line);
@@ -485,13 +491,22 @@ impl<'a> Writer<'a> {
         if axes.is_empty() {
             return;
         }
-        let m = self.motion(1);
+        let m = self.motion(1) + &self.comp_words();
         let f = self.feed_word(feed);
         let line = format!("{m}{axes}{f}").trim().to_string();
         self.block(&line);
     }
 
+    /// The pending compensation words, once (on the straight move they start or end on).
+    fn comp_words(&mut self) -> String {
+        self.comp.take().map_or(String::new(), |c| format!(" {c}"))
+    }
+
     fn arc(&mut self, from: P3, to: P3, center: P2, cw: bool, feed: f64) {
+        // Compensation never starts or ends on an arc: on its own line first.
+        if let Some(c) = self.comp.take() {
+            self.block(&c);
+        }
         let mode = if cw { 2 } else { 3 };
         self.mode = None;
         let i = self.num(center[0] - from[0]);
@@ -527,6 +542,18 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
     }
     let d = machine.dialect;
     for op in &program.operations {
+        let compensated = op
+            .toolpath
+            .steps
+            .iter()
+            .any(|s| matches!(s, Step::Compensation(Some(_))));
+        if compensated && d == Dialect::Grbl {
+            return Err(PostError::NoCompensation(format!(
+                "{}: GRBL has no cutter compensation; set the profile's compensation to \
+                 In computer",
+                op.name
+            )));
+        }
         if let Some(t) = op.tilt {
             if d != Dialect::Fanuc {
                 return Err(PostError::CantTilt(format!(
@@ -921,7 +948,22 @@ fn post_moves(
             Step::Drill(c) => {
                 post_drill(w, c, s, d, tool, &mut at);
             }
+            Step::Compensation(side) => {
+                w.comp = Some(match side {
+                    Some(true) => format!("G41 D{}", op.tool_number),
+                    Some(false) => format!("G42 D{}", op.tool_number),
+                    None => "G40".to_string(),
+                });
+                // With the motion code written again on the move that takes it.
+                w.mode = None;
+            }
         }
+    }
+    // Never left on past the operation.
+    if let Some(c) = w.comp.take()
+        && c == "G40"
+    {
+        w.block("G40");
     }
     if qtp && !tool.beam.thc {
         w.block("M63 P2");

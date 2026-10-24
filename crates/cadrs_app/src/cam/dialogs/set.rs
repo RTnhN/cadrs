@@ -141,7 +141,7 @@ impl Draft {
                 }
             }
             Draft::Tool { .. } => self.set_tool(world, key, v, ctx_cam),
-            Draft::Toolpath { .. } => self.set_toolpath(key, v, ctx_cam),
+            Draft::Toolpath { .. } => self.set_toolpath(world, key, v, ctx_cam),
         }
     }
 
@@ -335,6 +335,11 @@ impl Draft {
             ("plunge", Value::Number(n)) => tool.cutting.plunge_feed = *n,
             ("stepdown", Value::Number(n)) => tool.cutting.step_down = *n,
             ("stepover", Value::Number(n)) => tool.cutting.step_over = *n,
+            ("work-material", Value::Index(i)) => {
+                tool.cutting.material = i
+                    .checked_sub(1)
+                    .and_then(|i| WorkMaterial::ALL.get(i).copied())
+            }
             ("holder", Value::Bool(b)) => {
                 tool.holder = b.then(|| {
                     ctx_cam
@@ -370,6 +375,22 @@ impl Draft {
             ("number", Value::Number(n)) => t.number = n.clamp(1.0, 999.0) as u32,
             _ => {}
         }
+        // Cutting data worked out for a material follows the tool (and the machine's limits);
+        // typed over, it's the operator's own.
+        if let OpKind::Tool(t) = &mut op.kind {
+            let tool = &mut t.tool;
+            if matches!(key, "rpm" | "feed" | "plunge" | "stepdown" | "stepover") {
+                tool.cutting.material = None;
+            } else if let Some(m) = tool.cutting.material
+                && !tool.is_beam()
+            {
+                let (rpm, feed) = ctx_cam
+                    .setup(*setup)
+                    .and_then(|(j, _)| j.machine.as_ref())
+                    .map_or((24_000.0, 10_000.0), |m| (m.max_spindle, m.max_feed));
+                tool.cutting = feeds::cutting_data(tool, m, rpm, feed);
+            }
+        }
         // A name nobody typed follows the tool.
         if let OpKind::Tool(t) = &mut op.kind
             && key != "name"
@@ -381,7 +402,7 @@ impl Draft {
     }
 
     /// A changed field of the Toolpath draft.
-    fn set_toolpath(&mut self, key: &str, v: &Value, ctx_cam: &CamStudio) {
+    fn set_toolpath(&mut self, world: &mut World, key: &str, v: &Value, ctx_cam: &CamStudio) {
         let Draft::Toolpath {
             op, kind, setup, ..
         } = self
@@ -401,6 +422,33 @@ impl Draft {
         match (key, v) {
             ("name", Value::Text(s)) => {
                 renamed = Some(s.clone());
+            }
+            ("template", Value::Index(i)) => {
+                if let Some(t) = i
+                    .checked_sub(1)
+                    .and_then(|i| usable_templates(ctx_cam, tk, machine).get(i).copied())
+                {
+                    let ty = t.params.pattern.type_of();
+                    t.apply_to(p);
+                    // Picks of another kind of geometry don't carry over.
+                    if ty != *kind {
+                        p.drive = Default::default();
+                        *kind = ty;
+                    }
+                    if !name_edited {
+                        renamed = Some(t.name.clone());
+                    }
+                }
+            }
+            ("save-template", Value::Activate) => {
+                let name = op.name.clone();
+                let mut lib = ctx_cam.library.clone();
+                lib.save_template(Template::new(&name, p));
+                edit(world, Edit::SetLibrary(Box::new(lib)));
+                toast(
+                    world,
+                    &format!("Saved the template \"{name}\" to the library"),
+                );
             }
             ("type", Value::Index(i)) => {
                 let types: Vec<Type> = Type::ALL
@@ -460,6 +508,7 @@ impl Draft {
             },
             ("reverse", Value::Bool(b)) => p.drive.reverse = *b,
             ("side", Value::Index(i)) => p.side = Side::ALL[(*i).min(3)],
+            ("comp", Value::Index(i)) => p.compensation = Compensation::ALL[(*i).min(1)],
             ("wall", Value::Number(n)) => p.wall_stock = *n,
             ("floor", Value::Number(n)) => p.floor_stock = *n,
             ("stepdown", Value::Number(n)) => p.step_down = *n,

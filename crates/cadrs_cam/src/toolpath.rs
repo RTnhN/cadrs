@@ -129,6 +129,10 @@ pub enum Step {
     Coolant(Coolant),
     Dwell(f64),
     Comment(String),
+    /// Cutter compensation from the next straight move on: the tool left of the path (G41) or
+    /// right of it (G42); `None` cancels it (G40). For wear offsets on a path that is already the
+    /// tool's centre.
+    Compensation(Option<bool>),
 }
 
 /// A straight piece of the expanded motion.
