@@ -43,6 +43,27 @@ use crate::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+/// A hair, a fraction of the radius (plus one): how near a crossing found again to the strip's
+/// own start, or an edge's end, still counts as there. Well past a point's tolerance (a
+/// crossing found again a hair off moves its contact 1e-5 of the radius or so), well short of
+/// any piece of strip worth building.
+const HAIR: f64 = 1e-4;
+
+/// A traced strip's steps along its spine, as a fraction of the radius: a contact moves about as
+/// far as the spine does (more round a tight turn), so a quarter radius a step misses no face a
+/// strip could roll onto.
+const TRACE_STEP: f64 = 0.25;
+/// The fewest and the most steps a traced side takes.
+const TRACE_STEPS: (usize, usize) = (8, 64);
+
+/// Points along a curve across a strip or along a fan's rim, fitted through (as
+/// [`across_points`]): enough for [`fit_cut`]'s tolerance on a curve of a radius or so.
+const ACROSS: usize = 16;
+
+/// How many faces deep past smooth edges a strip's contact is looked for (a cap over a fillet's
+/// end, the round beyond it and the face past a corner of it).
+const SMOOTH_DEPTH: usize = 3;
+
 /// Progress on stderr with `CADRS_FILLET_DEBUG=1`.
 fn debug(what: impl FnOnce() -> String) {
     if std::env::var_os("CADRS_FILLET_DEBUG").is_some() {
@@ -451,7 +472,8 @@ fn crossings(
                 (a, ha, bcur) = (tb, hb, bb);
                 tb = tn;
             }
-            if best.0 <= tol::REL_POINT * (1.0 + tbest.abs()) {
+            // (Settled within a point's tolerance along the spine.)
+            if ef.spine_len(tbest, tbest + best.0) <= tol::REL_POINT * (1.0 + ef.r()) {
                 settled.push((best.1, best.2));
             }
         }
@@ -4144,7 +4166,7 @@ fn first_roll(
                 // runs nearly along the edge it rolled over, its contact hardly moved.)
                 if !(t > lo + tol::REL * span && t < hi - tol::REL * span)
                     || (t - t0).abs() < 1e-6 * whole
-                    || (ball.q[k].p - from.q[k].p).norm() < 1e-4 * (1.0 + ef.r())
+                    || (ball.q[k].p - from.q[k].p).norm() < HAIR * (1.0 + ef.r())
                 {
                     continue;
                 }
@@ -4211,7 +4233,8 @@ fn traced_roll(
     t0: f64,
     t1: f64,
 ) -> Option<(usize, usize, Ball, f64)> {
-    let n = ((ef.spine_len(t0, t1) / (0.25 * ef.r())).ceil() as usize).clamp(8, 64);
+    let n = ((ef.spine_len(t0, t1) / (TRACE_STEP * ef.r())).ceil() as usize)
+        .clamp(TRACE_STEPS.0, TRACE_STEPS.1);
     let step = (t1 - t0) / n as f64;
     let on = |ball: &Ball, k: usize| point_in_face(b, ef.faces[k], &ball.q[k].p);
     let (mut ta, mut ba) = (t0, *from);
@@ -4234,7 +4257,7 @@ fn traced_roll(
             }
             // (At the end within a hair: the contact reaching its face's edge at the vertex,
             // no strip beyond.)
-            if ef.spine_len(lo, t1) <= 1e-4 * (1.0 + ef.r()) {
+            if ef.spine_len(lo, t1) <= HAIR * (1.0 + ef.r()) {
                 return None;
             }
             // Over the face's edge nearest there, onto the face beyond, if smooth there: of
@@ -4521,7 +4544,7 @@ fn pieces_of(
         let mut seen = vec![fi, other];
         let mut ring = vec![fi];
         let mut past = None;
-        'search: for _ in 0..3 {
+        'search: for _ in 0..SMOOTH_DEPTH {
             let mut next = Vec::new();
             for &f in &ring {
                 for g in smooth_beyond(f) {
@@ -5542,7 +5565,7 @@ fn fan_corner(
         let wk = 1 - k_of(m)?;
         let (t0, b0) = end_of(m, from)?;
         let (t1, _) = end_of(m, 1 - from)?;
-        let n = 16;
+        let n = ACROSS;
         let mut cur = b0;
         let mut tc = t0;
         for i in 0..=n {
@@ -11268,7 +11291,7 @@ fn trim(
                     let line = match out.section_edges.get(&key) {
                         Some(&x) => x,
                         None => {
-                            let n = 16;
+                            let n = ACROSS;
                             let mut xs = vec![nb.verts[wv].p];
                             let mut cur = (t[kw], balls[kw]);
                             for i in 1..n {

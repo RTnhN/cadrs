@@ -462,12 +462,17 @@ pub fn rail_crossings(
                 let q = contact(fo, uv);
                 Vector2::new((q.p - c).dot(t), (c - q.p).dot(&t.cross(&q.n)))
             };
-            let h = 1e-7;
+            // (Differences a hair of the parameters' size; a foot Newton doesn't settle on is
+            // none.)
+            let sc = 1.0 + c.coords.abs().max();
+            let mut settled = false;
             for _ in 0..20 {
                 let r = res(uv);
-                if r.norm() < 1e-12 * (1.0 + c.coords.abs().max()) {
+                if r.norm() < 1e-12 * sc {
+                    settled = true;
                     break;
                 }
+                let h = 1e-7 * (1.0 + uv.x.abs().max(uv.y.abs()));
                 let (ru, rv) = (
                     (res(uv + Vector2::new(h, 0.0)) - r) / h,
                     (res(uv + Vector2::new(0.0, h)) - r) / h,
@@ -475,6 +480,9 @@ pub fn rail_crossings(
                 let m = Matrix2::from_columns(&[ru, rv]);
                 let d = m.lu().solve(&(-r))?;
                 uv = clamp_uv(fo, uv + d);
+            }
+            if !settled && res(uv).norm() > tol::REL_POINT * sc {
+                return None;
             }
         }
         *hint = Some(uv);
