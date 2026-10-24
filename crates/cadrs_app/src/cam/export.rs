@@ -177,7 +177,11 @@ fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
         .collect();
     let file = post::file_name(&format!("{} {}", job.name, setup.name), m.dialect);
     let sheet = cadrs_core::cam::sheet::setup_sheet(cam, job, setup, &run, &parts, &file);
-    let mut notes = Vec::new();
+    // The work offsets to set beyond the setup's own.
+    let mut notes: Vec<String> = program::offset_lines(setup, job, &run)
+        .into_iter()
+        .map(|l| format!("Set {l}"))
+        .collect();
     // Where the machine mating puts it on the table: inside the travel?
     let travel = program::stock_shape(cam, job, &parts)
         .map(|shape| {

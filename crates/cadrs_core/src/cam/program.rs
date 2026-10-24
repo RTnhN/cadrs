@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use cadrs_cam::geom::{Aabb, Frame, P3, add, dot, normalize, sub};
 use cadrs_cam::model::Model;
+use cadrs_cam::post::WorkOffset;
 use cadrs_cam::sim::{self, MillResult, SheetResult, SimOp};
 use cadrs_cam::strategy::Stock;
 use cadrs_cam::toolpath::{Step, Toolpath};
@@ -304,7 +305,9 @@ pub fn op_key(input: &OpInput, features: u64) -> u64 {
     h.update(format!("{:?}", input.frame).as_bytes());
     h.update(format!("{:?}", input.tool).as_bytes());
     h.update(format!("{:?}", input.params).as_bytes());
+    // (And what of the machine `generate` reads: its spindle limit scales speeds and feeds.)
     h.update(format!("{:?}", input.machine.kind).as_bytes());
+    h.update(&input.machine.max_spindle.to_le_bytes());
     h.update(format!("{:?}", input.stock).as_bytes());
     h.update(format!("{:?}", input.parts).as_bytes());
     for t in &input.fixtures {
@@ -463,6 +466,8 @@ pub struct RunOp<'a> {
     pub plane: Option<(Frame, WorkPlaneType, Option<u32>)>,
     /// In its own work plane's coordinates.
     pub local: &'a Toolpath,
+    /// Its work plane's name ("" for the setup's).
+    pub plane_name: &'a str,
     /// Its work plane tilts the tool off the setup's Z (3+2): `toolpath` is its moves as
     /// straight lines in the setup's coordinates (to show and time; a height-map simulation
     /// along the setup's Z can't cut it).
@@ -494,6 +499,9 @@ pub fn setup_run<'a>(
             .tool_for(o.id)
             .ok_or_else(|| format!("{} has no tool above it", o.name))?;
         let (wid, wp) = cam.work_plane_for(o.id).ok_or("gone")?;
+        let plane_name = wid
+            .and_then(|w| cam.operation(w))
+            .map_or("", |(_, _, op)| op.name.as_str());
         let own_axis = tp.params.axis != cadrs_cam::strategy::ToolAxis::WorkPlane;
         let (toolpath, plane, tilted) = if wid.is_none() && !own_axis {
             (local.clone(), None, false)
@@ -532,6 +540,7 @@ pub fn setup_run<'a>(
             toolpath,
             plane,
             local,
+            plane_name,
             tilted,
         });
     }
@@ -910,6 +919,13 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
         }
     }
     let mut operations = Vec::new();
+    // The work offsets the program uses: the setup's first, the planes' after.
+    let mut offsets = vec![WorkOffset {
+        number: base,
+        origin: format!("{}'s work coordinate system", setup.name),
+        at: [0.0; 3],
+        operations: Vec::new(),
+    }];
     for o in &run.ops {
         let mut tilt = None;
         let (toolpath, datum) = match &o.plane {
@@ -949,7 +965,25 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
                             n
                         }
                     };
-                    (o.local.clone(), n)
+                    // A work offset only moves the origin (G54…G59 don't turn): the plane's
+                    // moves in the setup's axes, from the plane's origin.
+                    let shifted = Frame {
+                        origin: wf.origin,
+                        ..run.frame
+                    };
+                    let tp = move_toolpath(o.local, wf, &shifted)
+                        .map_err(|e| format!("{}: {e}", o.name))?;
+                    let at = run.frame.to_local(wf.origin);
+                    match offsets.iter_mut().find(|w: &&mut WorkOffset| w.number == n) {
+                        Some(w) => w.operations.push(o.name.to_string()),
+                        None => offsets.push(WorkOffset {
+                            number: n,
+                            origin: o.plane_name.to_string(),
+                            at,
+                            operations: vec![o.name.to_string()],
+                        }),
+                    }
+                    (tp, n)
                 } else {
                     (o.toolpath.clone(), base)
                 }
@@ -967,11 +1001,48 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
             tilt,
         });
     }
+    for op in &operations {
+        if op.datum == base {
+            offsets[0].operations.push(op.name.clone());
+        }
+    }
     Ok(NcProgram {
         name: format!("{} {}", job.name, setup.name),
         number: setup.program_number,
+        offsets,
         operations,
     })
+}
+
+/// The work offsets beyond the setup's own that a setup's program uses, for the operator: "G55:
+/// Work plane 1 at X 10 Y 0 Z 0 from G54 (Profile 2)". Empty when it uses just one.
+pub fn offset_lines(setup: &Setup, job: &Job, run: &SetupRun) -> Vec<String> {
+    let Some(m) = job.machine.as_ref() else {
+        return Vec::new();
+    };
+    let Ok(p) = nc_program(setup, job, run) else {
+        return Vec::new();
+    };
+    if p.offsets.len() < 2 {
+        return Vec::new();
+    }
+    let code = |n: u32| m.dialect.datum(n).unwrap_or_else(|| format!("offset {n}"));
+    let first = code(p.offsets[0].number);
+    p.offsets
+        .iter()
+        .skip(1)
+        .map(|o| {
+            format!(
+                "{}: {} at X {} Y {} Z {} from {first} ({})",
+                code(o.number),
+                o.origin,
+                cadrs_cam::tool::fmt_mm(o.at[0]),
+                cadrs_cam::tool::fmt_mm(o.at[1]),
+                cadrs_cam::tool::fmt_mm(o.at[2]),
+                o.operations.join(", ")
+            )
+        })
+        .collect()
 }
 
 /// The G-code for a setup's operations.

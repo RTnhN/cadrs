@@ -86,13 +86,17 @@ fn pick_holes(input: &Input, bore: bool) -> (Vec<Hole>, Vec<String>) {
     (ordered, warnings)
 }
 
-/// Whether the straight move between two holes at height `z` clears the model.
+/// Whether the straight move between two holes at height `z` clears the model and the
+/// material still on it (stock not yet faced, what earlier toolpaths left).
 fn clear_between(input: &Input, a: P2, b: P2, z: f64) -> bool {
     let n = ((dist2(a, b) / 1.0).ceil() as usize).clamp(2, 400);
     let r = input.tool.radius();
     (0..=n).all(|i| {
         let t = i as f64 / n as f64;
         let p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        if input.material_top(p, r) >= z - 0.5 {
+            return false;
+        }
         [[0.0, 0.0], [r, 0.0], [-r, 0.0], [0.0, r], [0.0, -r]]
             .iter()
             .all(|o| {
@@ -468,6 +472,49 @@ mod tests {
             }
         }
         assert!(at[2] > 14.0);
+    }
+
+    /// Material an earlier toolpath left standing between two holes (a ridge at 18, over the
+    /// holes' R plane at 13): the drill goes up to the clearance height to cross it.
+    #[test]
+    fn holes_are_travelled_between_over_what_is_left() {
+        let m = plate();
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [80.0, 40.0, 10.0]));
+        let mut rest = crate::heightmap::HeightMap::new([0.0, 0.0], [80.0, 40.0], 0.5);
+        for j in 0..rest.ny {
+            for i in 0..rest.nx {
+                let x = rest.point(i, j)[0];
+                let n = rest.index(i, j);
+                rest.z[n] = if (22.0..28.0).contains(&x) {
+                    18.0
+                } else {
+                    10.0
+                };
+            }
+        }
+        let tool = Tool::new(ToolKind::Drill, 6.0);
+        let p = Params::new(Pattern::Drill, &tool, MachineKind::Mill);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: Some(&rest),
+            fixtures: &[],
+        };
+        let clearance = input.clearance();
+        assert!(clearance > 18.0);
+        let tp = generate(&input).unwrap();
+        let over_second = tp
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                Step::Rapid(q) if (q[0] - 40.0).abs() < 1e-9 => Some(*q),
+                _ => None,
+            })
+            .unwrap();
+        assert!(over_second[2] >= clearance - 1e-9, "{over_second:?}");
     }
 
     #[test]

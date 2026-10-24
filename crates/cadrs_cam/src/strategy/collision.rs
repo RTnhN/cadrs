@@ -230,8 +230,16 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
     let mut skipping = false;
     let mut counts = [0usize; 2];
     let mut first: [Option<P3>; 2] = [None; 2];
+    // Cutter compensation on (a profile's wear compensation): cancelled before a lift clear,
+    // never carried through the lift and the way back in.
+    let mut compensating = false;
+    let mut cancelled = false;
     for s in tp.steps {
         match &s {
+            Step::Compensation(c) => {
+                compensating = c.is_some();
+                out.push(s);
+            }
             Step::Feed { to, .. } | Step::Arc { to, .. } => {
                 let to = *to;
                 if let Some(from) = at
@@ -242,6 +250,11 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
                     first[k].get_or_insert(from);
                     if retract {
                         if !skipping {
+                            if compensating {
+                                out.push(Step::Compensation(None));
+                                compensating = false;
+                                cancelled = true;
+                            }
                             out.push(Step::Rapid([from[0], from[1], clearance.max(from[2])]));
                             skipping = true;
                         }
@@ -306,6 +319,13 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
         }
     }
     let mut warnings = tp.warnings;
+    if cancelled {
+        warnings.push(
+            "Wear compensation is cancelled where the tool lifts clear of a collision: the \
+             rest of those contours is cut without it"
+                .into(),
+        );
+    }
     let what = [
         if input.tool.holder.is_some() {
             "the shank or holder into the part"
@@ -451,6 +471,56 @@ mod tests {
                 _ => None,
             })
             .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Wear compensation on a profile whose holder forces a lift clear: compensation is off
+    /// before every rapid (never on through a lift or the way back in), and the toolpath says
+    /// where it was cancelled.
+    #[test]
+    fn a_lift_clear_cancels_compensation() {
+        let m = Model::from_triangles(
+            "block",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [40.0, 30.0, 30.0])),
+        );
+        let stock = Stock::block(Aabb::new([-10.0, -10.0, 0.0], [50.0, 40.0, 30.0]));
+        let mut tool = Tool::new(ToolKind::EndMill, 6.0);
+        tool.cutting_length = 20.0;
+        tool.overall_length = 25.0;
+        tool.holder = Some(Profile::cylinder("ER20", 30.0, 40.0));
+        let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        p.step_down = 10.0;
+        p.compensation = crate::strategy::Compensation::Wear;
+        p.collision.action = CollisionAction::Retract;
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        let tp = generate(&input).unwrap();
+        let mut on = false;
+        let mut started = 0;
+        for s in &tp.steps {
+            match s {
+                Step::Compensation(c) => {
+                    on = c.is_some();
+                    started += c.is_some() as usize;
+                }
+                Step::Rapid(q) => assert!(!on, "a rapid to {q:?} under compensation"),
+                _ => {}
+            }
+        }
+        assert!(started > 0);
+        assert!(
+            tp.warnings
+                .iter()
+                .any(|w| w.contains("cancelled where the tool lifts")),
+            "{:?}",
+            tp.warnings
+        );
     }
 
     #[test]

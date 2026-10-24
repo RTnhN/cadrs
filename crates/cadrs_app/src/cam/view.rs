@@ -147,11 +147,14 @@ fn sync_toolpaths(
                 );
             }
         }
+        // Drawn again for each new preview result (its own key: the studio's generation
+        // needn't change between two of them).
         if let Some(op) = editing
             && let Some((pop, Ok(_))) = computed.preview()
             && pop == op
         {
-            want.insert(op, (computed.generation, true, false, true));
+            let key = computed.preview_key().unwrap_or(0) ^ computed.generation;
+            want.insert(op, (key, true, false, true));
         }
     }
     // Drop what's no longer wanted or changed.

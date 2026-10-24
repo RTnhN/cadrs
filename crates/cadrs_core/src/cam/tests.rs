@@ -876,3 +876,95 @@ fn work_offsets_are_never_shared() {
     let err = post(&f).unwrap_err();
     assert!(err.contains("work offset 1"), "{err}");
 }
+
+/// An Absolute work plane turned 90° about Z on its own work offset: G55 only moves the
+/// origin, so the program cuts the plane's moves in the setup's axes, from the plane's origin.
+/// The header, the setup sheet and the offset list say where G55 is.
+#[test]
+fn a_turned_work_plane_posts_in_the_setups_axes() {
+    let mut f = Fixture::new();
+    let fanuc = catalog()
+        .into_iter()
+        .find(|m| m.kind == MachineKind::Mill && m.dialect == cadrs_cam::Dialect::Fanuc)
+        .unwrap();
+    let (job, setup) = f.job_on(fanuc);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let wp = Operation {
+        id: CamId::new(),
+        name: "Turned".into(),
+        kind: OpKind::WorkPlane(Box::new(WorkPlane {
+            x: [0.0, 1.0, 0.0],
+            ..WorkPlane::default()
+        })),
+        suppressed: false,
+        hidden: false,
+    };
+    let last = f.cam().job(job).unwrap().setups[0]
+        .operations
+        .last()
+        .map(|o| o.id);
+    f.run(Edit::AddOperation {
+        setup,
+        after: last,
+        op: Box::new(wp),
+    })
+    .unwrap();
+    let op = f.add_toolpath(
+        setup,
+        Params::new(Pattern::Profile2D, &em, MachineKind::Mill),
+    );
+    let mut paths = HashMap::new();
+    paths.insert(op, f.compute(op).unwrap());
+    let parts = f.parts();
+    let cam = f.cam();
+    let j = cam.job(job).unwrap();
+    let s = &j.setups[0];
+    let run = program::setup_run(cam, j, s, &parts, &paths, None).unwrap();
+    let p = program::nc_program(s, j, &run).unwrap();
+    assert_eq!(p.operations[0].datum, 2);
+    // The posted moves are the setup's, less the plane's origin: no turn.
+    let wf = run.ops[0].plane.unwrap().0;
+    let o = run.frame.to_local(wf.origin);
+    let (a, b) = (
+        run.ops[0].toolpath.bounds(),
+        p.operations[0].toolpath.bounds(),
+    );
+    for k in 0..3 {
+        assert!(
+            (a.min[k] - o[k] - b.min[k]).abs() < 1e-6,
+            "{a:?} {b:?} {o:?}"
+        );
+        assert!(
+            (a.max[k] - o[k] - b.max[k]).abs() < 1e-6,
+            "{a:?} {b:?} {o:?}"
+        );
+    }
+    // Where to set G55.
+    let lines = program::offset_lines(s, j, &run);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].starts_with("G55: Turned at X "), "{lines:?}");
+    let nc = program::post_setup(s, j, &run).unwrap();
+    assert!(nc.contains("(G55: Turned at X"), "{nc}");
+    let sheet = crate::cam::sheet::setup_sheet(cam, j, s, &run, &parts, "x.nc");
+    assert!(sheet.contains("Turned at X"), "{sheet}");
+}
+
+/// What a toolpath is cached by includes the machine's spindle limit (its speeds and feeds
+/// are scaled to it): lowering it calculates the toolpath again.
+#[test]
+fn a_toolpath_is_recalculated_for_a_new_spindle_limit() {
+    let mut f = Fixture::new();
+    let (_, setup) = f.job(MachineKind::Mill);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let op = f.add_toolpath(
+        setup,
+        Params::new(Pattern::Profile2D, &em, MachineKind::Mill),
+    );
+    let parts = f.parts();
+    let mut input = program::op_input(f.cam(), op, &parts).unwrap();
+    let before = program::op_key(&input, 0);
+    input.machine.max_spindle /= 2.0;
+    assert_ne!(program::op_key(&input, 0), before);
+}

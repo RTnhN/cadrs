@@ -276,9 +276,6 @@ impl<'a> Builder<'a> {
                 self.lead_clear(&path, cut)
                     .then_some((lead.0, lead.1, run_in))
             });
-        if comp_wanted.is_some() && lead_in.is_none() {
-            self.comp_missed.insert(self.contour);
-        }
         let start = walk[0];
         let entry_xy = lead_in.map_or(start, |(s, _, run_in)| run_in.unwrap_or(s));
         let at_depth = self.travel_to(entry_xy, z, cut);
@@ -288,6 +285,11 @@ impl<'a> Builder<'a> {
             if use_ramp {
                 let from = self.at.map_or(cut.material_top, |a| a[2]);
                 let pts = ramp_along(c, from, z, l.ramp_angle);
+                // Compensated from the ramp's first straight leg along the contour: above the
+                // depth, and cut again at it as the pass goes round.
+                if let Some(side) = comp {
+                    self.steps.push(Step::Compensation(Some(side > 0.0)));
+                }
                 let mut deep = false;
                 for q in pts.iter().skip(1) {
                     if !deep && (q[2] - z).abs() < 1e-9 {
@@ -298,6 +300,9 @@ impl<'a> Builder<'a> {
                     self.feed(*q, if deep { FeedKind::Cut } else { FeedKind::Ramp });
                 }
                 self.finish_contour(c, z, cut, true);
+                if comp.is_some() {
+                    self.end_compensation(z, cut);
+                }
                 return;
             }
             // Tabs on this contour: a ramp back and forth along its start, which is clear of
@@ -317,6 +322,10 @@ impl<'a> Builder<'a> {
                 }
                 _ => self.feed([entry_xy[0], entry_xy[1], z], FeedKind::Plunge),
             }
+        }
+        // A plunge or a zigzag ramp in has no straight run for compensation to start on.
+        if comp_wanted.is_some() && lead_in.is_none() {
+            self.comp_missed.insert(self.contour);
         }
         let compensated = match (comp, lead_in) {
             (Some(side), Some((s, _, run_in))) => {
@@ -356,16 +365,21 @@ impl<'a> Builder<'a> {
         }
         self.finish_contour(c, z, cut, false);
         if compensated {
-            // Cancelled on a straight run on out of the lead-out (if there's room; else with
-            // the retract).
-            self.steps.push(Step::Compensation(None));
-            if let (Some(a), Some(h)) = (self.at, self.heading)
-                && l.lead_out != LeadKind::None
-            {
-                let e = [a[0] + h[0] * l.lead_radius, a[1] + h[1] * l.lead_radius];
-                if self.lead_clear(&[[a[0], a[1]], e], cut) {
-                    self.feed([e[0], e[1], z], FeedKind::LeadOut);
-                }
+            self.end_compensation(z, cut);
+        }
+    }
+
+    /// Compensation off: cancelled on a straight run on out of the lead-out (if there's room;
+    /// else with the retract).
+    fn end_compensation(&mut self, z: f64, cut: &Cut<'_>) {
+        let l = &self.input.params.links;
+        self.steps.push(Step::Compensation(None));
+        if let (Some(a), Some(h)) = (self.at, self.heading)
+            && l.lead_out != LeadKind::None
+        {
+            let e = [a[0] + h[0] * l.lead_radius, a[1] + h[1] * l.lead_radius];
+            if self.lead_clear(&[[a[0], a[1]], e], cut) {
+                self.feed([e[0], e[1], z], FeedKind::LeadOut);
             }
         }
     }

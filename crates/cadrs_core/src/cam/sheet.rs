@@ -106,6 +106,11 @@ pub fn setup_sheet(
         &cadrs_cam::post::datum_code(setup.wcs.datum.unwrap_or(1)),
     );
     row(&mut h, "WCS origin", &origin_words(&setup.wcs.origin));
+    // Set these too: an offset left at machine zero crashes the tool.
+    for line in super::program::offset_lines(setup, job, run) {
+        let (code, rest) = line.split_once(": ").unwrap_or(("Offset", &line));
+        row(&mut h, code, rest);
+    }
     row(
         &mut h,
         "On the table",

@@ -60,6 +60,7 @@ fn fanuc_program_shape() {
     let p = NcProgram {
         name: "Bracket".into(),
         number: 1001,
+        offsets: Vec::new(),
         operations: vec![square_op(Tool::new(ToolKind::EndMill, 6.0), false)],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -83,6 +84,7 @@ fn grbl_laser_uses_dynamic_power() {
     let p = NcProgram {
         name: "Sign".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![square_op(Tool::new(ToolKind::Laser, 0.1), true)],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -98,6 +100,7 @@ fn plasma_linuxcnc_torch_codes() {
     let p = NcProgram {
         name: "Bracket".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![square_op(Tool::new(ToolKind::Plasma, 1.5), true)],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -111,6 +114,7 @@ fn wrong_tool_is_refused() {
     let p = NcProgram {
         name: "x".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![square_op(Tool::new(ToolKind::EndMill, 6.0), false)],
     };
     assert!(matches!(
@@ -127,6 +131,7 @@ fn inch_output_scales() {
     let p = NcProgram {
         name: "x".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![square_op(Tool::new(ToolKind::EndMill, 6.0), false)],
     };
     let nc = post(&p, &m, &s).unwrap();
@@ -173,6 +178,7 @@ fn canned_cycles_and_expansion() {
     let p = NcProgram {
         name: "Holes".into(),
         number: 2,
+        offsets: Vec::new(),
         operations: vec![op],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -247,6 +253,7 @@ fn drill_dwells_suit_the_dialect() {
         let p = NcProgram {
             name: "Holes".into(),
             number: 1,
+            offsets: Vec::new(),
             operations: vec![op],
         };
         let nc = post(&p, &m, &s).unwrap();
@@ -256,12 +263,17 @@ fn drill_dwells_suit_the_dialect() {
 }
 
 fn tap_program(d: Dialect) -> String {
+    tap_program_fed(d, 625.0)
+}
+
+/// A tap at 500 rpm, 1.25 pitch, its cycle written with `feed`.
+fn tap_program_fed(d: Dialect, feed: f64) -> String {
     let cycle = DrillCycle {
         at: [10.0, 20.0],
         r_plane: 2.0,
         bottom: -12.0,
         retract: 10.0,
-        feed: 625.0,
+        feed,
         kind: CycleKind::Tap,
         peck: 0.0,
         dwell: 0.0,
@@ -295,6 +307,7 @@ fn tap_program(d: Dialect) -> String {
         &NcProgram {
             name: "Taps".into(),
             number: 1,
+            offsets: Vec::new(),
             operations: vec![op],
         },
         &m,
@@ -406,6 +419,7 @@ fn qtplasmac_leaves_heights_to_the_material() {
     let p = NcProgram {
         name: "Bracket".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![op],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -576,6 +590,7 @@ fn programs_read_back_onto_their_toolpaths() {
         let p = NcProgram {
             name: "Block".into(),
             number: 1,
+            offsets: Vec::new(),
             operations: ops.clone(),
         };
         let nc = post(&p, &m, &s).unwrap();
@@ -650,6 +665,7 @@ fn tilted_planes_post_as_g68_2() {
     let p = NcProgram {
         name: "Block".into(),
         number: 7,
+        offsets: Vec::new(),
         operations: vec![flat.clone(), tilted.clone(), flat.clone()],
     };
     let nc = post(&p, &five, &five.post).unwrap();
@@ -690,6 +706,7 @@ fn tilted_planes_post_as_g68_2() {
     let p2 = NcProgram {
         name: "Block".into(),
         number: 7,
+        offsets: Vec::new(),
         operations: vec![tilted.clone(), t2],
     };
     let nc2 = post(&p2, &five, &five.post).unwrap();
@@ -742,6 +759,7 @@ fn grbl_goes_up_before_it_goes_across() {
     let p = NcProgram {
         name: "Plate".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![op],
     };
     let nc = post(&p, &m, &s).unwrap();
@@ -773,6 +791,7 @@ fn sequence_numbers_stay_five_digits() {
     let p = NcProgram {
         name: "Long".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![op],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -839,6 +858,7 @@ fn wear_compensation_starts_on_a_straight_move() {
     let program = NcProgram {
         name: "Plate".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![op],
     };
     let m = machine(MachineKind::Mill, Dialect::Fanuc);
@@ -882,13 +902,15 @@ fn wear_compensation_starts_on_a_straight_move() {
 }
 
 /// A frame with a window, profiled with wear compensation at two depths: a contour is
-/// compensated at every depth or at none (never one depth and not the next), and the toolpath
-/// says which weren't.
+/// compensated at every depth or at none (never one depth and not the next). It starts on a
+/// lead-in where there's room, else on the ramp in (the window, and the first depth in oversize
+/// stock); a plunge in leaves no straight start, so its contours go uncompensated, and the
+/// toolpath says so.
 #[test]
 fn wear_compensation_is_all_or_nothing_per_contour() {
     use crate::geom::Aabb;
     use crate::model::{Model, box_triangles};
-    use crate::strategy::{Compensation, Input, Params, Pattern, Stock, generate};
+    use crate::strategy::{Compensation, Entry, Input, Params, Pattern, Stock, generate};
     let mut tris = Vec::new();
     for (lo, hi) in [
         ([0.0, 0.0], [15.0, 40.0]),
@@ -903,10 +925,11 @@ fn wear_compensation_is_all_or_nothing_per_contour() {
     }
     let m = Model::from_triangles("frame", tris);
     let tool = Tool::new(ToolKind::EndMill, 6.0);
-    let post_with = |stock: Stock| {
+    let post_with = |stock: Stock, entry: Entry| {
         let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
         p.step_down = 5.0;
         p.compensation = Compensation::Wear;
+        p.links.entry = entry;
         let input = Input {
             model: &m,
             stock: &stock,
@@ -922,32 +945,39 @@ fn wear_compensation_is_all_or_nothing_per_contour() {
         let program = NcProgram {
             name: "Frame".into(),
             number: 1,
+            offsets: Vec::new(),
             operations: vec![op],
         };
         let mc = machine(MachineKind::Mill, Dialect::Fanuc);
         (tp, post(&program, &mc, &mc.post).unwrap())
     };
-    // Cut to size: the outside has room for its leads at both depths, the window (stock inside
-    // it) at neither.
-    let (tp, nc) = post_with(Stock::block(Aabb::new([0.0; 3], [60.0, 40.0, 10.0])));
+    let missed = |tp: &Toolpath| tp.warnings.iter().any(|w| w.contains("cut without"));
+    let to_size = Stock::block(Aabb::new([0.0; 3], [60.0, 40.0, 10.0]));
+    let oversize = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [65.0, 45.0, 10.0]));
+    for stock in [to_size.clone(), oversize] {
+        // Both contours at both depths, each started on a straight move.
+        let (tp, nc) = post_with(stock, Entry::Ramp);
+        assert_eq!(nc.matches("G41").count(), 4, "{nc}");
+        assert!(!missed(&tp), "{:?}", tp.warnings);
+        for l in nc.lines().filter(|l| l.contains("G41")) {
+            assert!(
+                l.contains("G1 ") && !l.contains("G2") && !l.contains("G3"),
+                "{l}"
+            );
+        }
+        assert_eq!(
+            nc.matches("G41").count(),
+            nc.matches("G40").count() - 1,
+            "{nc}"
+        );
+    }
+    // Plunged in, the window has no straight start at any depth: never compensated.
+    let (tp, nc) = post_with(to_size, Entry::Plunge);
     assert_eq!(nc.matches("G41").count(), 2, "{nc}");
     assert!(
         tp.warnings
             .iter()
             .any(|w| w.contains("1 contour is cut without")),
-        "{:?}",
-        tp.warnings
-    );
-    // 5 mm oversize: the outside's first depth has no room, so it isn't compensated at all.
-    let (tp, nc) = post_with(Stock::block(Aabb::new(
-        [-5.0, -5.0, 0.0],
-        [65.0, 45.0, 10.0],
-    )));
-    assert_eq!(nc.matches("G41").count(), 0, "{nc}");
-    assert!(
-        tp.warnings
-            .iter()
-            .any(|w| w.contains("2 contours are cut without")),
         "{:?}",
         tp.warnings
     );
@@ -965,6 +995,7 @@ fn a_new_work_offset_goes_up_before_across() {
     let p = NcProgram {
         name: "Two vises".into(),
         number: 1,
+        offsets: Vec::new(),
         operations: vec![first, second],
     };
     let nc = post(&p, &m, &m.post).unwrap();
@@ -978,4 +1009,13 @@ fn a_new_work_offset_goes_up_before_across() {
         first_move.contains("Z25") && !first_move.contains('X') && !first_move.contains('Y'),
         "{nc}"
     );
+}
+
+/// A tap's feed is always its pitch a turn of the speed the program set, even if the cycle was
+/// worked out for another speed (the machine's spindle limit lowered since).
+#[test]
+fn a_tap_feeds_its_pitch_at_the_speed_set() {
+    let nc = tap_program_fed(Dialect::Fanuc, 900.0);
+    let line = nc.lines().find(|l| l.contains("G84")).expect(&nc);
+    assert!(line.ends_with("F625"), "{line}");
 }

@@ -272,7 +272,22 @@ impl Tilt {
 pub struct NcProgram {
     pub name: String,
     pub number: u32,
+    /// The work offsets it uses (listed in its header for the operator to set).
+    pub offsets: Vec<WorkOffset>,
     pub operations: Vec<NcOperation>,
+}
+
+/// A work offset a program uses and where its origin is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WorkOffset {
+    /// 1 = G54, 2 = G55, …
+    pub number: u32,
+    /// What its origin is ("Setup 1's work coordinate system", "Work plane 1").
+    pub origin: String,
+    /// Its origin from the first one's (mm, the first one's axes).
+    pub at: P3,
+    /// The operations cut in it.
+    pub operations: Vec<String>,
 }
 
 /// Why a program couldn't be written.
@@ -585,6 +600,36 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         if !listed.contains(&(op.tool_number, op.tool.name.as_str())) {
             listed.push((op.tool_number, &op.tool.name));
             w.comment(&format!("T{} {}", op.tool_number, op.tool.name));
+        }
+    }
+    // Every work offset beyond the first, and where to set it (an offset left at machine zero
+    // crashes the tool).
+    if program.offsets.len() > 1 {
+        for (k, o) in program.offsets.iter().enumerate() {
+            let Some(code) = d.datum(o.number) else {
+                continue;
+            };
+            let at = if k == 0 {
+                String::new()
+            } else {
+                let first = program
+                    .offsets
+                    .first()
+                    .and_then(|f| d.datum(f.number))
+                    .unwrap_or_default();
+                format!(
+                    " at X{} Y{} Z{} from {first}",
+                    w.num(o.at[0]),
+                    w.num(o.at[1]),
+                    w.num(o.at[2])
+                )
+            };
+            let ops = if o.operations.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", o.operations.join(", "))
+            };
+            w.comment(&format!("{code}: {}{at}{ops}", o.origin));
         }
     }
     let unit = match s.output_unit {
@@ -1066,9 +1111,14 @@ fn post_drill(
             let rpm = w.rpm.unwrap_or(c.feed / c.pitch.max(1e-6));
             w.block(&format!("M29 S{}", rpm.round()));
         }
-        // (A tap's feed is its pitch × rpm already.)
+        // A tap's feed is its pitch a turn of the speed the program set (whatever the cycle
+        // says: a spindle limited since keeps them in step).
+        let feed = match (c.kind, w.rpm) {
+            (CycleKind::Tap, Some(rpm)) if c.pitch > 0.0 => rpm * c.pitch,
+            _ => c.feed,
+        };
         w.feed = None;
-        let fw = w.feed_word(c.feed);
+        let fw = w.feed_word(feed);
         words.push_str(&fw);
         w.block(&words);
         w.block("G80");

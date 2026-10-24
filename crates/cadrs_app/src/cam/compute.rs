@@ -227,6 +227,11 @@ impl Computed {
         self.preview.as_ref().map(|(op, _, r)| (*op, r))
     }
 
+    /// The key the live preview's result was calculated for (a new result, a new drawing).
+    pub fn preview_key(&self) -> Option<u64> {
+        self.preview.as_ref().map(|(_, k, _)| *k)
+    }
+
     /// Whether the live preview is being calculated.
     pub fn preview_busy(&self) -> bool {
         self.preview_req.is_some() || self.preview_running.is_some()
