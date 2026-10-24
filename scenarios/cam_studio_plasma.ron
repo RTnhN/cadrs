@@ -38,7 +38,7 @@ Scenario(
         Click(ui("cam-tb-machine")),
         WaitFor("cam-dialog"),
         Click(ui("cam-f-machine")),
-        Click(ui("cam-f-machine-option-9")),
+        Click(ui("cam-f-machine-option-8")),
         MoveTo(1420, 900),
         Wait(3),
         Screenshot("01-plasma-machine"),

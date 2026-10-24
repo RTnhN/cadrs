@@ -125,6 +125,7 @@ fn flag_pending_work(
     computed: Res<Computed>,
     dialog: Option<Res<dialogs::CamDialog>>,
     preview: Option<Res<preview::PreviewState>>,
+    insert: Option<Res<dialogs::InsertParts>>,
     mut pending: ResMut<cadrs_ui::PendingWork>,
     mut why: ResMut<cadrs_ui::PendingWhy>,
 ) {
@@ -132,6 +133,10 @@ fn flag_pending_work(
     if computed.busy() || waiting {
         pending.0 = true;
         why.add("cam toolpaths");
+    }
+    if insert.is_some() {
+        pending.0 = true;
+        why.add("cam insert parts");
     }
     if preview.is_some_and(|p| p.checking()) {
         pending.0 = true;
@@ -634,7 +639,14 @@ fn rows_of(cam: &CamStudio, ui: &CamUi, computed: &Computed) -> (Vec<RowSnap>, V
             label: job
                 .machine
                 .as_ref()
-                .map(|m| m.title())
+                // (The model alone for the catalogue's generic machines: the row is narrow.)
+                .map(|m| {
+                    if m.builder == "Generic" {
+                        m.model.clone()
+                    } else {
+                        m.title()
+                    }
+                })
                 .unwrap_or_else(|| "No machine: Create machine".into()),
             icon: job
                 .machine

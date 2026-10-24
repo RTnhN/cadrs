@@ -1,7 +1,7 @@
 //! What a CAM Studio tab draws in the view besides its parts:
 //!
 //! - **Toolpaths** of the active job (each visible toolpath's latest result, in model
-//!   coordinates): rapids red, cuts blue, plunges and ramps green, leads cyan, links yellow,
+//!   coordinates): rapids faint red, cuts blue, plunges and ramps green, leads cyan, links yellow,
 //!   retracts purple, beam cuts orange. The selected toolpath's lines are wider and brighter; one
 //!   that is out of date is grey. While the toolpath dialog is open its live preview is drawn
 //!   in its place.
@@ -39,7 +39,7 @@ impl Plugin for ViewPlugin {
 /// The colour of a move.
 pub fn move_color(s: &Segment, beam: bool) -> Color {
     if s.is_rapid() {
-        return Color::srgb_u8(0xe0, 0x3c, 0x31);
+        return Color::srgba_u8(0xe0, 0x3c, 0x31, 0x70);
     }
     if beam && s.beam {
         return Color::srgb_u8(0xff, 0x8a, 0x00);

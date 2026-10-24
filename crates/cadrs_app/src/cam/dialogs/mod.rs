@@ -46,7 +46,13 @@ impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (take_changes, take_picks, sync_dialog, live_preview)
+            (
+                take_insert_parts,
+                take_changes,
+                take_picks,
+                sync_dialog,
+                live_preview,
+            )
                 .chain()
                 .run_if(in_state(AppState::Document)),
         )
@@ -252,17 +258,65 @@ pub fn insert_component(world: &mut World, role: Role) {
 }
 
 /// The parts of the draft's Part Studio at its reference.
+/// Lists the chosen studio's parts: rebuilt on a worker thread ([`take_insert_parts`] puts
+/// them in the dialog when they come).
 fn fill_parts(world: &mut World, d: &mut InsertDraft) {
+    d.parts.clear();
     let Some(d2) = source_of(world, d) else {
-        d.parts.clear();
+        world.remove_resource::<InsertParts>();
         return;
     };
-    let parts = cadrs_core::derived::source_parts(&d2.0).unwrap_or_default();
-    d.parts = parts
-        .into_iter()
-        .enumerate()
-        .map(|(i, (id, name))| (id, name, i == 0 && d.role == Role::Part))
-        .collect();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("cam-insert-parts".into())
+        .spawn(move || {
+            let parts = std::panic::catch_unwind(|| {
+                cadrs_core::derived::source_parts(&d2.0).unwrap_or_default()
+            })
+            .unwrap_or_default();
+            let _ = tx.send(parts);
+        });
+    if spawned.is_ok() {
+        world.insert_resource(InsertParts {
+            studio: d.studio,
+            version: d.version,
+            rx: std::sync::Mutex::new(rx),
+        });
+    }
+}
+
+/// An insert dialog's studio being rebuilt for its part list.
+#[derive(Resource)]
+pub struct InsertParts {
+    studio: usize,
+    version: usize,
+    rx: std::sync::Mutex<std::sync::mpsc::Receiver<Vec<(PartId, String)>>>,
+}
+
+/// Puts the rebuilt part list in the insert dialog (if it still shows that studio).
+fn take_insert_parts(world: &mut World) {
+    let Some(mut job) = world.get_resource_mut::<InsertParts>() else {
+        return;
+    };
+    let got = match job.rx.get_mut().map(|r| r.try_recv()) {
+        Ok(Ok(p)) => p,
+        Ok(Err(std::sync::mpsc::TryRecvError::Empty)) => return,
+        _ => Vec::new(),
+    };
+    let (studio, version) = (job.studio, job.version);
+    world.remove_resource::<InsertParts>();
+    if let Some(mut dlg) = world.get_resource_mut::<CamDialog>()
+        && let Draft::Insert(d) = &mut dlg.draft
+        && d.studio == studio
+        && d.version == version
+    {
+        d.parts = got
+            .into_iter()
+            .enumerate()
+            .map(|(i, (id, name))| (id, name, i == 0 && d.role == Role::Part))
+            .collect();
+        dlg.shown = None;
+    }
 }
 
 /// The Derived reference an insert draft makes (and the frozen copies a version needs).
@@ -867,7 +921,7 @@ fn sync_dialog(world: &mut World) {
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(2.0),
                         width: Val::Percent(100.0),
-                        max_height: Val::Px(560.0),
+                        max_height: Val::Vh(82.0),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     })
@@ -903,6 +957,10 @@ fn on_cancel(
 
 /// ✓: the draft's edits (and a toolpath's calculation), then closes.
 pub fn accept(world: &mut World) {
+    if world.contains_resource::<InsertParts>() {
+        toast(world, "Still reading the Part Studio's parts");
+        return;
+    }
     // Text typed without Enter counts too.
     sync_typed_text(world);
     let Some(d) = world.remove_resource::<CamDialog>() else {
