@@ -144,6 +144,66 @@ pub fn simplify(r: &[Ring], epsilon: f64) -> Region {
     from_paths(&simplify_paths(&to_paths(r), epsilon * SCALE, true))
 }
 
+/// The pieces of open polylines inside a region, each running the way its line does, in the
+/// order they come along the lines.
+pub fn clip_open(lines: &[Vec<P2>], r: &[Ring]) -> Vec<Vec<P2>> {
+    if lines.is_empty() || r.is_empty() {
+        return Vec::new();
+    }
+    let mut c = clipper2_rust::Clipper64::new();
+    c.add_open_subject(
+        &lines
+            .iter()
+            .map(|l| l.iter().map(|p| p64(*p)).collect())
+            .collect(),
+    );
+    c.add_clip(&to_paths(r));
+    let mut closed = Paths64::new();
+    let mut open = Paths64::new();
+    c.execute(
+        ClipType::Intersection,
+        FillRule::NonZero,
+        &mut closed,
+        Some(&mut open),
+    );
+    // Where along the lines a point is: (line, segment, fraction), and the segment's way.
+    let place = |q: P2| -> ((usize, usize, f64), P2) {
+        let mut best = (f64::INFINITY, (0, 0, 0.0), [1.0, 0.0]);
+        for (li, l) in lines.iter().enumerate() {
+            for (si, w) in l.windows(2).enumerate() {
+                let d = crate::geom::dist_to_segment2(q, w[0], w[1]);
+                if d < best.0 {
+                    let v = [w[1][0] - w[0][0], w[1][1] - w[0][1]];
+                    let l2 = (v[0] * v[0] + v[1] * v[1]).max(1e-18);
+                    let t = ((q[0] - w[0][0]) * v[0] + (q[1] - w[0][1]) * v[1]) / l2;
+                    best = (d, (li, si, t.clamp(0.0, 1.0)), v);
+                }
+            }
+        }
+        (best.1, best.2)
+    };
+    let mut pieces: Vec<((usize, usize, f64), Vec<P2>)> = open
+        .iter()
+        .map(from_path)
+        .filter(|piece| piece.len() >= 2)
+        .map(|mut piece| {
+            // The way the line runs where the piece starts.
+            let (_, v) = place(piece[0]);
+            let d = [piece[1][0] - piece[0][0], piece[1][1] - piece[0][1]];
+            if d[0] * v[0] + d[1] * v[1] < 0.0 {
+                piece.reverse();
+            }
+            (place(piece[0]).0, piece)
+        })
+        .collect();
+    pieces.sort_by(|a, b| {
+        (a.0.0, a.0.1)
+            .cmp(&(b.0.0, b.0.1))
+            .then(a.0.2.total_cmp(&b.0.2))
+    });
+    pieces.into_iter().map(|(_, p)| p).collect()
+}
+
 /// Whether `p` is inside the region (even-odd over its rings: holes are inside their outer
 /// ring).
 pub fn contains(r: &[Ring], p: P2) -> bool {
@@ -288,6 +348,28 @@ pub fn segments_for(radius: f64, sweep: f64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_lines_clipped_keep_their_way() {
+        let sq = vec![rect([0.0, 0.0], [10.0, 10.0])];
+        let lines = vec![
+            vec![[-5.0, 5.0], [15.0, 5.0]],
+            vec![[5.0, 15.0], [5.0, -5.0]],
+        ];
+        let mut out = clip_open(&lines, &sq);
+        out.sort_by(|a, b| a[0][0].total_cmp(&b[0][0]));
+        assert_eq!(out.len(), 2);
+        let h = out
+            .iter()
+            .find(|l| (l[0][1] - 5.0).abs() < 1e-9 && (l[1][1] - 5.0).abs() < 1e-9)
+            .unwrap();
+        assert!(h[0][0] < h[h.len() - 1][0] && (h[0][0]).abs() < 1e-6);
+        let v = out
+            .iter()
+            .find(|l| (l[0][0] - 5.0).abs() < 1e-9 && (l[1][0] - 5.0).abs() < 1e-9)
+            .unwrap();
+        assert!(v[0][1] > v[v.len() - 1][1]);
+    }
 
     #[test]
     fn segments_inside_a_u() {

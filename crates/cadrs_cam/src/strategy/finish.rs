@@ -80,15 +80,232 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
     if area.is_empty() {
         return Err("Nothing to finish inside the stock".into());
     }
+    let zig = p.cutting_method == CuttingMethod::Zigzag;
+    let lines = hatch(&area, p.angle, p.step_over, zig);
+    follow(input, lines, zig)
+}
+
+/// Spiral: one spiral from the area's middle outward, a step over apart each turn, dropped
+/// onto the model (no links but where it leaves the area): for round, shallow shapes.
+pub fn spiral(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let area = finish_area(input);
+    if area.is_empty() {
+        return Err("Nothing to finish inside the stock".into());
+    }
+    let b = crate::geom::Aabb::of(area.iter().flatten().map(|q| [q[0], q[1], 0.0]));
+    let c = [(b.min[0] + b.max[0]) / 2.0, (b.min[1] + b.max[1]) / 2.0];
+    let reach = area
+        .iter()
+        .flatten()
+        .map(|q| dist2(*q, c))
+        .fold(0.0, f64::max);
+    // r = step·θ/2π, sampled so each chord strays less than the tolerance.
+    let step = p.step_over;
+    let mut pts = vec![c];
+    let mut theta: f64 = 0.0;
+    while step * theta / std::f64::consts::TAU < reach + step {
+        let r = (step * theta / std::f64::consts::TAU).max(step * 0.25);
+        let dth = (8.0 * p.tolerance.max(0.001) / r).sqrt().clamp(0.005, 0.5);
+        theta += dth;
+        let r = step * theta / std::f64::consts::TAU;
+        // Climb: material outside the growing spiral on the right, so clockwise.
+        let a = if p.direction == Direction::Climb {
+            -theta
+        } else {
+            theta
+        };
+        pts.push([c[0] + r * a.cos(), c[1] + r * a.sin()]);
+    }
+    let pieces = region::clip_open(&[pts], &area);
+    follow(input, pieces, true)
+}
+
+/// Scallop: rings offset in from the area's edge a step over apart, dropped onto the model,
+/// so the step over (and the cusp it leaves) stays even along the shapes on shallow ground.
+/// The area is where the surface is shallower than the steep angle: walls are Constant Z's.
+pub fn scallop(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let shallow = shallow_area(input);
+    let area = region::intersection(&finish_area(input), &shallow);
+    if area.is_empty() {
+        return Err("No surface is shallower than the steep angle".into());
+    }
+    let mut rings = Vec::new();
+    let mut cur = area.clone();
+    for _ in 0..10_000 {
+        if cur.is_empty() {
+            break;
+        }
+        // Climb: the material inward of each ring on its right, so clockwise outer rings.
+        for c in super::mill::orient(region_contours(&cur), p.direction, false) {
+            rings.push(c.walk());
+        }
+        cur = region::simplify(
+            &region::offset(&cur, -p.step_over),
+            region::ARC_TOLERANCE * 0.5,
+        );
+    }
+    follow(input, rings, false)
+}
+
+/// Where the model's surface is shallower than the steep angle, seen from above.
+fn shallow_area(input: &Input) -> Region {
+    let cos = input.params.steep_angle.clamp(0.0, 90.0).to_radians().cos();
+    let tris = input.model.triangles.iter().filter_map(|t| {
+        let n = crate::geom::cross(crate::geom::sub(t[1], t[0]), crate::geom::sub(t[2], t[0]));
+        let l = crate::geom::len(n);
+        (l > 1e-12 && n[2] / l >= cos - 1e-9).then(|| t.iter().map(|q| [q[0], q[1]]).collect())
+    });
+    // (Grown by half the cutter's radius: its centre runs past a shallow face's edge.)
+    region::offset(&region::union_all(tris), input.tool.radius() * 0.5)
+}
+
+/// Pencil: along the model's concave corners and fillets tighter than the tool, where it
+/// touches two surfaces at once and the passes over them leave the most: the creases of the
+/// surface the cutter's tip rides on (its drop-cutter surface), found on a grid and chained.
+pub fn pencil(input: &Input) -> Result<Toolpath, String> {
+    let area = finish_area(input);
+    if area.is_empty() {
+        return Err("Nothing to finish inside the stock".into());
+    }
+    let idx = TriIndex::new(&input.model.triangles);
+    let r = input.tool.radius();
+    let g = (r / 4.0).clamp(0.05, 0.5);
+    let bb = crate::geom::Aabb::of(area.iter().flatten().map(|q| [q[0], q[1], 0.0]));
+    let nx = ((bb.max[0] - bb.min[0]) / g).ceil() as usize + 1;
+    let ny = ((bb.max[1] - bb.min[1]) / g).ceil() as usize + 1;
+    if nx * ny > 4_000_000 {
+        return Err("The area is too big for pencil passes at this tool size".into());
+    }
+    let floor = input.bottom() - 1e3;
+    let pts: Vec<P2> = (0..ny)
+        .flat_map(|j| (0..nx).map(move |i| [bb.min[0] + i as f64 * g, bb.min[1] + j as f64 * g]))
+        .collect();
+    let zs = crate::dropcutter::drop_points(input.tool, &idx, &pts, floor);
+    let z = |i: usize, j: usize| zs[j * nx + i];
+    // A crease: the tip's surface bends up on both sides by more than the threshold (its
+    // slopes either side differing by over 20°), most across one direction.
+    let thresh = g * (20f64).to_radians().tan();
+    let mut bend = vec![0.0f64; nx * ny];
+    let dirs: [(isize, isize, f64); 4] = [
+        (1, 0, 1.0),
+        (0, 1, 1.0),
+        (1, 1, std::f64::consts::SQRT_2),
+        (1, -1, std::f64::consts::SQRT_2),
+    ];
+    let mut across = vec![0usize; nx * ny];
+    for j in 1..ny - 1 {
+        for i in 1..nx - 1 {
+            let c = z(i, j);
+            for (k, (dx, dy, l)) in dirs.iter().enumerate() {
+                let a = z((i as isize - dx) as usize, (j as isize - dy) as usize);
+                let b = z((i as isize + dx) as usize, (j as isize + dy) as usize);
+                // Both sides up (a valley), by how much the slope turns.
+                if a > c && b > c {
+                    let d = (a + b - 2.0 * c) / l;
+                    if d > bend[j * nx + i] {
+                        bend[j * nx + i] = d;
+                        across[j * nx + i] = k;
+                    }
+                }
+            }
+        }
+    }
+    // Keep the crease's middle: a cell bending most across its direction.
+    let mut keep = vec![false; nx * ny];
+    for j in 1..ny - 1 {
+        for i in 1..nx - 1 {
+            let v = bend[j * nx + i];
+            if v < thresh {
+                continue;
+            }
+            let (dx, dy, _) = dirs[across[j * nx + i]];
+            let a = bend[((j as isize - dy) as usize) * nx + (i as isize - dx) as usize];
+            let b = bend[((j as isize + dy) as usize) * nx + (i as isize + dx) as usize];
+            let q = pts[j * nx + i];
+            keep[j * nx + i] = v >= a && v >= b && region::contains(&area, q);
+        }
+    }
+    // Chain neighbouring kept cells into lines.
+    let mut used = vec![false; nx * ny];
+    let mut lines: Vec<Vec<P2>> = Vec::new();
+    let neighbours = |i: usize, j: usize| {
+        let mut v = Vec::with_capacity(8);
+        for dy in -1isize..=1 {
+            for dx in -1isize..=1 {
+                let (a, b) = (i as isize + dx, j as isize + dy);
+                if (dx, dy) != (0, 0) && a >= 0 && b >= 0 && (a as usize) < nx && (b as usize) < ny
+                {
+                    v.push((a as usize, b as usize));
+                }
+            }
+        }
+        v
+    };
+    let degree = |i: usize, j: usize, keep: &[bool]| {
+        neighbours(i, j)
+            .iter()
+            .filter(|(a, b)| keep[b * nx + a])
+            .count()
+    };
+    // Ends first (cells with one neighbour), then what's left (loops).
+    let mut starts: Vec<(usize, usize)> = (0..nx * ny)
+        .filter(|k| keep[*k])
+        .map(|k| (k % nx, k / nx))
+        .collect();
+    starts.sort_by_key(|(i, j)| degree(*i, *j, &keep) != 1);
+    for (i0, j0) in starts {
+        if used[j0 * nx + i0] {
+            continue;
+        }
+        let mut line = vec![pts[j0 * nx + i0]];
+        used[j0 * nx + i0] = true;
+        let (mut i, mut j) = (i0, j0);
+        while let Some((a, b)) = neighbours(i, j)
+            .into_iter()
+            .filter(|(a, b)| keep[b * nx + a] && !used[b * nx + a])
+            // Straight on first (orthogonal neighbours before diagonal ones).
+            .min_by_key(|(a, b)| (*a != i) as u8 + (*b != j) as u8)
+        {
+            used[b * nx + a] = true;
+            line.push(pts[b * nx + a]);
+            (i, j) = (a, b);
+        }
+        if line.len() >= 3 && polyline_len(&line) >= r {
+            lines.push(line);
+        }
+    }
+    if lines.is_empty() {
+        return Err("The model has no concave corners tighter than the tool".into());
+    }
+    let start = [bb.min[0], bb.min[1]];
+    let ordered: Vec<Vec<P2>> =
+        nearest_order(lines.into_iter().map(Contour::open).collect(), start)
+            .into_iter()
+            .map(|c| c.pts)
+            .collect();
+    follow(input, ordered, false)
+}
+
+fn polyline_len(pts: &[P2]) -> f64 {
+    pts.windows(2).map(|w| dist2(w[0], w[1])).sum()
+}
+
+/// Runs the tool along each line, every point dropped onto the model: down at the first line
+/// and wherever the next starts far off, else (`link_close`) along the surface from the last
+/// line's end.
+fn follow(input: &Input, lines: Vec<Vec<P2>>, link_close: bool) -> Result<Toolpath, String> {
+    let p = input.params;
     let idx = TriIndex::new(&input.model.triangles);
     let bottom = input.bottom();
     let top = input.top();
-    let zig = p.cutting_method == CuttingMethod::Zigzag;
-    let lines = hatch(&area, p.angle, p.step_over, zig);
     // Samples every half radius at most, split where the surface needs it (exact drops).
     let step = (input.tool.radius() / 2.0).clamp(0.05, 1.0);
     let min_step = (p.tolerance * 2.0).max(0.01);
     let mut b = Builder::new(input);
+    // Half the tolerance for the drops, half for simplifying them: within it in all.
+    let tol = p.tolerance * 0.5;
     let drop = |pts: &[P2]| -> Vec<P3> {
         drop_line(
             input.tool,
@@ -96,7 +313,7 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
             pts,
             bottom - p.floor_stock,
             step,
-            p.tolerance,
+            tol,
             min_step,
         )
         .into_iter()
@@ -106,17 +323,20 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
     let mut prev_end: Option<P3> = None;
     let mut skipped_high = false;
     for l in lines {
+        if l.len() < 2 {
+            continue;
+        }
         let pts = drop(&l);
         if pts.iter().all(|q| q[2] > top + 1e-6) {
             skipped_high = true;
             continue;
         }
-        let pts = simplify3(&pts, p.tolerance);
+        let pts = simplify3(&pts, tol);
         let start = pts[0];
         // A link that follows the surface from the last line's end, when it's short.
         let linked = match prev_end {
             Some(e)
-                if zig
+                if link_close
                     && dist2([e[0], e[1]], [start[0], start[1]])
                         <= (p.step_over * 3.0).max(p.links.small_gap) =>
             {
@@ -128,7 +348,11 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
             _ => false,
         };
         if !linked {
-            let material_top = input.stock.bounds.max[2].min(start[2] + p.step_down.max(1.0));
+            // Down over the material really there (the stock, or what the operations before
+            // left): never a rapid into it.
+            let material_top = input
+                .material_top([start[0], start[1]], input.tool.radius())
+                .max(start[2]);
             let cut = Cut {
                 material_top,
                 direct_ok: false,
@@ -149,6 +373,9 @@ pub fn parallel(input: &Input) -> Result<Toolpath, String> {
     if skipped_high {
         b.warnings
             .push("Passes entirely above the top height were left out".into());
+    }
+    if !b.moved() {
+        return Err("Nothing to finish between the heights".into());
     }
     Ok(b.finish())
 }
@@ -417,5 +644,126 @@ mod tests {
             [2.0, 1.0, 0.0],
         ];
         assert_eq!(simplify3(&pts, 0.01).len(), 3);
+    }
+
+    fn on_pocket(pattern: Pattern, f: impl FnOnce(&mut Params)) -> (Toolpath, Tool) {
+        let m = crate::strategy::testing::pocket_block();
+        let stock = crate::strategy::testing::stock_for(&m, 5.0, 1.0);
+        let tool = Tool::new(ToolKind::BallMill, 6.0);
+        let mut p = Params::new(pattern, &tool, MachineKind::Mill);
+        f(&mut p);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+        };
+        (generate(&input).unwrap(), tool)
+    }
+
+    fn cut_points(tp: &Toolpath) -> Vec<P3> {
+        tp.steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed {
+                    to,
+                    kind: FeedKind::Cut,
+                    ..
+                } => Some(*to),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Nothing cuts further into the part than the toolpath's tolerance.
+    fn no_gouge(tp: &Toolpath, tool: &Tool) {
+        let m = crate::strategy::testing::pocket_block();
+        let tol = Params::new(Pattern::Parallel, tool, MachineKind::Mill).tolerance;
+        let (g, at) = crate::strategy::testing::max_gouge_within(&m, tool, tp, tol);
+        assert!(
+            g < 1e-6,
+            "{g} mm past the tolerance into the part at {at:?}"
+        );
+    }
+
+    #[test]
+    fn spiral_winds_out_over_the_part() {
+        let (tp, tool) = on_pocket(Pattern::Spiral, |p| p.step_over = 1.0);
+        no_gouge(&tp, &tool);
+        let pts = cut_points(&tp);
+        // Down on the pocket's floor and over the block's top.
+        assert!(
+            pts.iter()
+                .any(|q| (q[2] - 12.0).abs() < 1e-6 && q[0] > 20.0 && q[0] < 40.0)
+        );
+        assert!(pts.iter().any(|q| (q[2] - 20.0).abs() < 1e-6));
+        // Outward: the distance from the middle grows along the cut.
+        let c = [30.0, 20.0];
+        let first = pts
+            .iter()
+            .take(10)
+            .map(|q| dist2([q[0], q[1]], c))
+            .fold(0.0, f64::max);
+        let last = pts
+            .iter()
+            .rev()
+            .take(10)
+            .map(|q| dist2([q[0], q[1]], c))
+            .fold(0.0, f64::max);
+        assert!(last > first + 10.0, "{first} → {last}");
+    }
+
+    #[test]
+    fn scallop_rings_cover_the_shallow_ground() {
+        let (tp, tool) = on_pocket(Pattern::Scallop, |p| p.step_over = 1.0);
+        no_gouge(&tp, &tool);
+        let pts = cut_points(&tp);
+        assert!(pts.iter().any(|q| (q[2] - 12.0).abs() < 1e-6));
+        assert!(pts.iter().any(|q| (q[2] - 20.0).abs() < 1e-6));
+        // Rings: many separate passes, each a closed loop or a piece of one.
+        let plunges = tp
+            .steps
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s,
+                    Step::Feed {
+                        kind: FeedKind::Plunge,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(plunges > 5, "{plunges}");
+    }
+
+    /// The ball runs along the pocket floor's four inside corners (its centre the radius off
+    /// both the floor and the wall) and up the four corners between its walls: nowhere else.
+    #[test]
+    fn pencil_follows_the_pockets_inside_corners() {
+        let (tp, tool) = on_pocket(Pattern::Pencil, |_| {});
+        no_gouge(&tp, &tool);
+        let pts = cut_points(&tp);
+        assert!(!pts.is_empty());
+        for q in &pts {
+            // In the pocket, against a wall (a radius off it, and a grid cell).
+            let in_pocket = q[0] > 15.0 && q[0] < 45.0 && q[1] > 10.0 && q[1] < 30.0;
+            let off_wall = (q[0] - 15.0)
+                .min(45.0 - q[0])
+                .min(q[1] - 10.0)
+                .min(30.0 - q[1]);
+            assert!(in_pocket && off_wall <= 3.75, "a pencil pass at {q:?}");
+        }
+        // All four sides.
+        for side in [
+            |q: &P3| (q[0] - 18.0).abs() < 0.3,
+            |q: &P3| (q[0] - 42.0).abs() < 0.3,
+            |q: &P3| (q[1] - 13.0).abs() < 0.3,
+            |q: &P3| (q[1] - 27.0).abs() < 0.3,
+        ] {
+            assert!(pts.iter().any(|q| side(q) && (q[2] - 12.0).abs() < 0.05));
+        }
     }
 }

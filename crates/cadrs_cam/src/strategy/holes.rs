@@ -1,5 +1,6 @@
-//! Hole making: Drill (drilling, peck drilling, chip breaking and tapping cycles) and Bore
-//! (helical milling of holes larger than the end mill).
+//! Hole making: Drill (drilling, peck drilling, chip breaking and tapping cycles), Bore
+//! (helical milling of holes larger than the end mill) and Thread mill (a thread cut by a
+//! single-form thread mill on a helix, a pitch a turn).
 //!
 //! Holes are the model's vertical cylindrical walls the material surrounds
 //! ([`crate::model::Model::holes`]), with their exact diameters and depths from the kernel.
@@ -233,6 +234,122 @@ pub fn bore(input: &Input) -> Result<Toolpath, String> {
     Ok(b.finish())
 }
 
+/// The major diameter of the thread to mill in a hole: the parameter, else the hole's own
+/// diameter when it's modelled at the thread's size, or its diameter plus the pitch when it's
+/// the tap drill of a standard metric thread.
+fn thread_major(h: &Hole, pitch: f64, set: f64) -> f64 {
+    if set > 0.0 {
+        return set;
+    }
+    const SIZES: [f64; 14] = [
+        2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 30.0,
+    ];
+    let up = h.diameter + pitch;
+    if SIZES.iter().any(|d| (d - up).abs() < 0.15)
+        && !SIZES.iter().any(|d| (d - h.diameter).abs() < 0.05)
+    {
+        up
+    } else {
+        h.diameter
+    }
+}
+
+/// Thread mill: each hole threaded by a helix, a pitch a turn. Climb milling: a right-hand
+/// thread from the bottom up (counter-clockwise), a left-hand one (a left-hand tool) from the
+/// top down; conventional the other way. In from the middle on a half circle, out the same.
+pub fn thread_mill(input: &Input) -> Result<Toolpath, String> {
+    let p = input.params;
+    let t = input.tool;
+    if t.pitch <= 0.0 {
+        return Err("The thread mill needs a pitch".into());
+    }
+    let (holes, warnings) = pick_holes(input, true);
+    if holes.is_empty() {
+        return Err("No hole is bigger than the thread mill".into());
+    }
+    let mut b = Builder::new(input);
+    b.warnings.extend(warnings);
+    let clearance = input.clearance();
+    let pitch = t.pitch;
+    let climb = p.direction == super::Direction::Climb;
+    let right = t.hand == crate::tool::Hand::Right;
+    // Counter-clockwise when climbing (the wall outside the circle on the right); up when that
+    // turn makes the thread's hand.
+    let ccw = climb;
+    let up = ccw == right;
+    let mut too_big = 0;
+    for h in holes {
+        let major = thread_major(&h, pitch, p.thread_diameter);
+        let full = major / 2.0 - t.radius();
+        let first = h.diameter / 2.0 - t.radius();
+        if full <= 0.05 || first <= 0.0 {
+            too_big += 1;
+            continue;
+        }
+        let c = h.center;
+        // The thread's length: out the bottom of a through hole, short of a blind one's.
+        let z_top = h.top;
+        let z_bot = if h.through {
+            h.bottom - pitch
+        } else {
+            h.bottom + 1.5 * pitch + p.floor_stock
+        };
+        if z_bot >= z_top {
+            continue;
+        }
+        let (z0, z1) = if up { (z_bot, z_top) } else { (z_top, z_bot) };
+        let top = h.top.max(input.material_top(c, h.diameter / 2.0)) + p.links.rapid_distance;
+        b.up_to(clearance);
+        b.rapid([c[0], c[1], clearance]);
+        b.rapid([c[0], c[1], top]);
+        let passes = p.passes.max(1);
+        for k in 1..=passes {
+            let r = first + (full - first) * k as f64 / passes as f64;
+            b.feed([c[0], c[1], z0], FeedKind::Plunge);
+            // In on a half circle to the wall's side at +X.
+            let s = [c[0] + r, c[1]];
+            let mid = [c[0] + r / 2.0, c[1]];
+            b.arc([s[0], s[1], z0], mid, !ccw, FeedKind::LeadIn);
+            // The helix, half a turn at a time.
+            let turns = (z1 - z0).abs() / pitch;
+            let halves = (turns * 2.0).floor() as usize;
+            let dz = (z1 - z0).signum() * pitch / 2.0;
+            let mut z = z0;
+            let mut ang: f64 = 0.0;
+            for _ in 0..halves {
+                z += dz;
+                ang += std::f64::consts::PI;
+                let q = [c[0] + r * ang.cos(), c[1] + r * ang.sin()];
+                b.arc([q[0], q[1], z], c, !ccw, FeedKind::Cut);
+            }
+            // The rest of the last turn.
+            let rest = turns * 2.0 - halves as f64;
+            if rest > 1e-6 {
+                ang += std::f64::consts::PI * rest;
+                let q = [c[0] + r * ang.cos(), c[1] + r * ang.sin()];
+                b.arc([q[0], q[1], z1], c, !ccw, FeedKind::Cut);
+            }
+            // Out to the middle on a half circle.
+            let at = b.at.map_or([c[0], c[1]], |a| [a[0], a[1]]);
+            let m = [(at[0] + c[0]) / 2.0, (at[1] + c[1]) / 2.0];
+            b.arc([c[0], c[1], z1], m, !ccw, FeedKind::LeadOut);
+            if k < passes {
+                b.rapid([c[0], c[1], top]);
+            }
+        }
+        b.rapid([c[0], c[1], clearance]);
+    }
+    if too_big > 0 {
+        b.warnings.push(format!(
+            "{too_big} hole(s) too small for the thread mill were left out"
+        ));
+    }
+    if !b.moved() {
+        return Err("No hole could be threaded with this tool".into());
+    }
+    Ok(b.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +453,54 @@ mod tests {
             }
         }
         assert!(at[2] > 14.0);
+    }
+
+    #[test]
+    fn thread_mill_helixes_up_the_big_hole() {
+        let mut tool = Tool::new(ToolKind::ThreadMill, 12.0);
+        tool.pitch = 2.0;
+        let tp = run(Pattern::ThreadMill, tool).unwrap();
+        // The Ø20 through hole (modelled at the thread's size): a right-hand thread, climb,
+        // from below its bottom up, counter-clockwise, at 10 − 6 = 4 from its axis.
+        let arcs: Vec<(P3, [f64; 2], bool, FeedKind)> = tp
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Arc {
+                    to,
+                    center,
+                    cw,
+                    kind,
+                    ..
+                } => Some((*to, *center, *cw, *kind)),
+                _ => None,
+            })
+            .collect();
+        let cuts: Vec<_> = arcs.iter().filter(|a| a.3 == FeedKind::Cut).collect();
+        assert!(cuts.iter().all(|a| !a.2), "counter-clockwise");
+        for a in &cuts {
+            assert!((dist2([a.0[0], a.0[1]], [70.0, 20.0]) - 4.0).abs() < 1e-9);
+        }
+        // Rising a pitch a turn (two half turns), from 2 below the bottom to the top.
+        assert!((cuts[1].0[2] - cuts[0].0[2] - 1.0).abs() < 1e-9);
+        assert!((cuts.first().unwrap().0[2] + 1.0).abs() < 1e-9);
+        assert!((cuts.last().unwrap().0[2] - 10.0).abs() < 1e-9);
+        // (The two Ø6 holes are too small for it: every turn is round the Ø20.)
+    }
+
+    #[test]
+    fn thread_size_from_a_tap_drill_hole() {
+        let h = |d: f64| Hole {
+            center: [0.0, 0.0],
+            diameter: d,
+            top: 10.0,
+            bottom: 0.0,
+            through: true,
+        };
+        // An M10 tap drill (8.5) threads to 10; a hole modelled at M10 stays 10.
+        assert!((thread_major(&h(8.5), 1.5, 0.0) - 10.0).abs() < 1e-9);
+        assert!((thread_major(&h(10.0), 1.5, 0.0) - 10.0).abs() < 1e-9);
+        assert!((thread_major(&h(8.5), 1.5, 9.0) - 9.0).abs() < 1e-9);
     }
 
     #[test]

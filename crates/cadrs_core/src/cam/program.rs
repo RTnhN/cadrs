@@ -328,8 +328,8 @@ pub fn model_tolerance(p: &cadrs_cam::Params) -> f64 {
     use cadrs_cam::Pattern::*;
     let fine = (p.tolerance * 0.5).clamp(0.002, 0.05);
     match p.pattern {
-        Rough2D | Rough3D => ((p.wall_stock.min(p.floor_stock)) / 4.0).clamp(fine, 0.1),
-        Face | Drill | Bore => 0.05_f64.max(fine),
+        Rough2D | Rough3D | Adaptive => ((p.wall_stock.min(p.floor_stock)) / 4.0).clamp(fine, 0.1),
+        Face | Drill | Bore | ThreadMill => 0.05_f64.max(fine),
         _ => fine,
     }
 }

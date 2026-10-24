@@ -141,7 +141,8 @@ fn flag_pending_work(
 
 /// Scripted steps (`Custom("cam …")`): `select job|setup|op N` selects the Nth job, the active
 /// job's Nth setup or its first setup's Nth operation (from 0); `play` and `pause` the preview;
-/// `preview-end` jumps it to the end; `preview-at F` to a fraction of it.
+/// `preview-end` jumps it to the end; `preview-at F` to a fraction of it; `fit` zooms the view
+/// to the studio's parts and stock.
 pub fn script(world: &mut World, arg: &str) {
     let words: Vec<&str> = arg.split_whitespace().collect();
     let Some((_, cam)) = active_cam_owned(world) else {
@@ -187,6 +188,7 @@ pub fn script(world: &mut World, arg: &str) {
                 }
             }
         }
+        ["fit"] => crate::viewport::zoom_to_fit(world),
         _ => warn!("cam {arg}: not a CAM Studio step"),
     }
 }

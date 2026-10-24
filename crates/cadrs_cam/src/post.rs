@@ -334,6 +334,8 @@ struct Writer<'a> {
     number_next: bool,
     /// Leave Z out of moves (the control runs the torch's heights).
     no_z: bool,
+    /// The beam is on.
+    beam_on: bool,
 }
 
 impl<'a> Writer<'a> {
@@ -349,6 +351,7 @@ impl<'a> Writer<'a> {
             mode: None,
             number_next: false,
             no_z: false,
+            beam_on: false,
         }
     }
 
@@ -532,6 +535,15 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
     };
     match d {
         Dialect::Grbl => w.block(&format!("G90 G94{plane} {unit}")),
+        // QtPlasmaC's own preamble (its path blending tolerance).
+        Dialect::LinuxCnc if qtplasmac(machine) => w.block(&format!(
+            "{unit} G40 G49 G64 P{} G80 G90 G92.1 G94 G97",
+            if s.output_unit == Unit::Inch {
+                "0.004"
+            } else {
+                "0.1"
+            }
+        )),
         Dialect::LinuxCnc => w.block(&format!("G90 G94{plane} G40 G49 {unit} G64 P0.01")),
         _ => w.block(&format!("G90 G94{plane} G40 G49 G80 {unit}")),
     }
@@ -632,10 +644,11 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         retract_home(&mut w, d);
         w.block("G69");
     }
-    if qtplasmac(machine) {
-        w.block("M5 $0");
-    } else if beam {
-        w.block("M5");
+    if beam {
+        // The beam off if an operation left it on.
+        if w.beam_on {
+            w.block(if qtplasmac(machine) { "M5 $0" } else { "M5" });
+        }
     } else {
         w.block("M5");
         if coolant != Coolant::Off {
@@ -750,27 +763,31 @@ fn post_moves(
                     *coolant = *c;
                 }
             }
-            Step::BeamOn { power } => match machine.kind {
-                MachineKind::Laser => {
-                    let m = match s.laser_mode {
-                        LaserMode::Dynamic => "M4",
-                        LaserMode::Constant => "M3",
-                    };
-                    let sv = (power.clamp(0.0, 1.0) * max_s).round();
-                    w.block(&format!("{m} S{sv}"));
-                    if tool.beam.air_assist {
-                        w.block("M8");
+            Step::BeamOn { power } => {
+                w.beam_on = true;
+                match machine.kind {
+                    MachineKind::Laser => {
+                        let m = match s.laser_mode {
+                            LaserMode::Dynamic => "M4",
+                            LaserMode::Constant => "M3",
+                        };
+                        let sv = (power.clamp(0.0, 1.0) * max_s).round();
+                        w.block(&format!("{m} S{sv}"));
+                        if tool.beam.air_assist {
+                            w.block("M8");
+                        }
+                    }
+                    _ => {
+                        if d == Dialect::LinuxCnc && machine.kind == MachineKind::Plasma {
+                            w.block("M3 $0 S1");
+                        } else {
+                            w.block("M3");
+                        }
                     }
                 }
-                _ => {
-                    if d == Dialect::LinuxCnc && machine.kind == MachineKind::Plasma {
-                        w.block("M3 $0 S1");
-                    } else {
-                        w.block("M3");
-                    }
-                }
-            },
+            }
             Step::BeamOff => {
+                w.beam_on = false;
                 if machine.kind == MachineKind::Plasma && d == Dialect::LinuxCnc {
                     w.block("M5 $0");
                 } else {
@@ -1346,6 +1363,16 @@ mod tests {
         assert!(at("M63 P2") > at("M3 $0 S1"));
         assert!(
             nc.contains("(Torch: pierce 0.5 s at 3.8 mm, cut at 1.5 mm)"),
+            "{nc}"
+        );
+        // QtPlasmaC's preamble; the torch off once for each time it's on.
+        assert!(
+            body.contains(&"G21 G40 G49 G64 P0.1 G80 G90 G92.1 G94 G97"),
+            "{nc}"
+        );
+        assert_eq!(
+            body.iter().filter(|l| **l == "M5 $0").count(),
+            body.iter().filter(|l| **l == "M3 $0 S1").count(),
             "{nc}"
         );
     }

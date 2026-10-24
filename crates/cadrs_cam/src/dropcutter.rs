@@ -318,10 +318,22 @@ fn refine(
     depth: u32,
 ) {
     let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+    let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
     if len < min_step * 2.0 || depth > 12 {
+        // As fine as it goes: a cliff in the surface the cutter follows (a wall it slides down,
+        // the ends' heights apart by more than the tolerance this close) is gone over at the
+        // higher end's height, then down, never cut through.
+        let zm = drop_point(tool, idx, m, floor, scratch);
+        if (a[2] - b[2]).abs() > tol || zm > (a[2] + b[2]) / 2.0 + tol {
+            let z = a[2].max(b[2]).max(zm);
+            out.push(if a[2] >= b[2] {
+                [b[0], b[1], z]
+            } else {
+                [a[0], a[1], z]
+            });
+        }
         return;
     }
-    let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
     let zm = drop_point(tool, idx, m, floor, scratch);
     if (zm - (a[2] + b[2]) / 2.0).abs() <= tol {
         return;

@@ -48,13 +48,15 @@ pub enum ToolKind {
     FaceMill,
     Drill,
     Tap,
+    /// A single-form thread mill: cuts a thread with a helix, a pitch per turn.
+    ThreadMill,
     Laser,
     Plasma,
     Waterjet,
 }
 
 impl ToolKind {
-    pub const ALL: [ToolKind; 11] = [
+    pub const ALL: [ToolKind; 12] = [
         ToolKind::EndMill,
         ToolKind::BallMill,
         ToolKind::BullMill,
@@ -63,6 +65,7 @@ impl ToolKind {
         ToolKind::FaceMill,
         ToolKind::Drill,
         ToolKind::Tap,
+        ToolKind::ThreadMill,
         ToolKind::Laser,
         ToolKind::Plasma,
         ToolKind::Waterjet,
@@ -78,6 +81,7 @@ impl ToolKind {
             ToolKind::FaceMill => "Face mill",
             ToolKind::Drill => "Drill",
             ToolKind::Tap => "Thread tap",
+            ToolKind::ThreadMill => "Thread mill",
             ToolKind::Laser => "Laser",
             ToolKind::Plasma => "Plasma torch",
             ToolKind::Waterjet => "Waterjet nozzle",
@@ -87,7 +91,7 @@ impl ToolKind {
     /// The icon of the kind (icon-rs).
     pub fn icon(self) -> &'static str {
         match self {
-            ToolKind::Drill | ToolKind::Tap => "cam-drill",
+            ToolKind::Drill | ToolKind::Tap | ToolKind::ThreadMill => "cam-drill",
             ToolKind::Laser => "cam-laser",
             ToolKind::Plasma => "cam-plasma",
             ToolKind::Waterjet => "cam-waterjet",
@@ -97,7 +101,7 @@ impl ToolKind {
 
     pub fn machining(self) -> MachiningType {
         match self {
-            ToolKind::Drill | ToolKind::Tap => MachiningType::HoleMaking,
+            ToolKind::Drill | ToolKind::Tap | ToolKind::ThreadMill => MachiningType::HoleMaking,
             ToolKind::Laser | ToolKind::Plasma | ToolKind::Waterjet => MachiningType::Cutting,
             _ => MachiningType::Milling,
         }
@@ -372,6 +376,14 @@ impl Tool {
                 t.cutting.feed = t.pitch * 500.0;
                 t.cutting.plunge_feed = t.cutting.feed;
             }
+            ToolKind::ThreadMill => {
+                // A cutter for the coarse thread a size up (a D6 cuts M8 and bigger).
+                t.pitch = metric_coarse_pitch(d + 2.0);
+                t.flutes = 3;
+                t.cutting.spindle_rpm = 8_000.0;
+                t.cutting.feed = 400.0;
+                t.cutting.plunge_feed = 200.0;
+            }
             ToolKind::Laser => {
                 t.cutting.feed = 600.0;
                 t.cutting.plunge_feed = 600.0;
@@ -412,6 +424,8 @@ impl Tool {
             format!("D{} R{}", fmt_mm(self.diameter), fmt_mm(self.corner_radius))
         } else if self.kind == ToolKind::Tap {
             format!("M{}×{}", fmt_mm(self.diameter), fmt_mm(self.pitch))
+        } else if self.kind == ToolKind::ThreadMill {
+            format!("D{} P{}", fmt_mm(self.diameter), fmt_mm(self.pitch))
         } else {
             format!("D{}", fmt_mm(self.diameter))
         };
@@ -457,7 +471,7 @@ impl Tool {
                     (r - tip) / half.tan()
                 }
             }
-            ToolKind::Tap => 0.0,
+            ToolKind::Tap | ToolKind::ThreadMill => 0.0,
             ToolKind::Laser | ToolKind::Plasma | ToolKind::Waterjet => 0.0,
         })
     }
@@ -587,6 +601,7 @@ impl ToolLibrary {
             tools.push(Tool::new(ToolKind::Drill, d));
         }
         tools.push(Tool::new(ToolKind::Tap, 8.0));
+        tools.push(Tool::new(ToolKind::ThreadMill, 6.0));
         tools.push(Tool::new(ToolKind::Laser, 0.15));
         tools.push(Tool::new(ToolKind::Plasma, 1.5));
         tools.push(Tool::new(ToolKind::Waterjet, 0.9));

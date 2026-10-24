@@ -20,6 +20,9 @@ Scenario(
     start: Some("document"),
     steps: [
         WaitFor("document-shell"),
+        // The frame-stats panel off (F12: profile, fps, hidden).
+        Key("F12"),
+        Key("F12"),
         Custom("clear-dir target/exports/cam_studio_mill"),
         Custom("with-hole"),
         Wait(3),
@@ -46,6 +49,7 @@ Scenario(
         Screenshot("03-create-job"),
         Click(ui("cam-dialog-accept")),
         Wait(3),
+        Custom("cam fit"),
         Click(ui("cam-tb-machine")),
         WaitFor("cam-dialog"),
         MoveTo(1420, 900),

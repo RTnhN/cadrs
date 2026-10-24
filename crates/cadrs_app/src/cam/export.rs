@@ -1,8 +1,8 @@
 //! Post: a setup's toolpaths (Post child operations) or the selected ones (Post selected
 //! operations) as G-code for the job's machine. The Export dialog shows the program number,
 //! the file name, the machine and its post processor, the output units, the operations in it
-//! and the start of the program; Post writes it to the folder (Browse… picks another) and says
-//! where.
+//! and the start of the program; Post writes it to the folder (Browse… picks another), with the
+//! setup sheet beside it when that's ticked ([`cadrs_core::cam::sheet`]), and says where.
 
 use std::path::PathBuf;
 
@@ -12,7 +12,9 @@ use cadrs_core::cam::cadrs_cam::post;
 use cadrs_core::cam::cadrs_cam::tool::Unit as LenUnit;
 use cadrs_core::cam::{CamId, NodeRef, OpKind, program};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, Dialog, DialogClose, Notification, Select, show_notification};
+use cadrs_ui::{
+    Button, Checkbox, CheckboxChange, Dialog, DialogClose, Notification, Select, show_notification,
+};
 
 use super::{CamUi, Computed, active_cam_owned, toast};
 use crate::{ActiveDocument, AppState};
@@ -23,6 +25,7 @@ impl Plugin for ExportPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_activate)
             .add_observer(on_select)
+            .add_observer(on_check)
             .add_systems(
                 Update,
                 on_folder_picked.run_if(in_state(AppState::Document)),
@@ -38,6 +41,8 @@ pub struct ExportSession {
     /// The operations (`None`: all of the setup's).
     pub ops: Option<Vec<CamId>>,
     pub inch: bool,
+    /// Write the setup sheet beside the program.
+    pub sheet: bool,
 }
 
 #[derive(Component)]
@@ -120,15 +125,25 @@ pub fn open_for_selection(world: &mut World) {
         setup: st.id,
         ops: (!ops.is_empty()).then_some(ops),
         inch,
+        sheet: true,
     });
     open_dialog(world);
 }
 
-/// The program for the session (with the dialog's units).
-fn program_text(
-    world: &World,
-    s: &ExportSession,
-) -> Result<(String, String, String, Vec<String>), String> {
+/// What the session posts (with the dialog's units).
+struct Program {
+    nc: String,
+    /// The default file name.
+    file: String,
+    /// "Generic 3-axis mill — Fanuc (post: Fanuc)".
+    machine: String,
+    /// "T1 Profile 1", …
+    names: Vec<String>,
+    /// The setup sheet (HTML).
+    sheet: String,
+}
+
+fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
     let doc = world.resource::<ActiveDocument>();
     let (_, cam) = super::active_cam(doc).ok_or("No CAM Studio")?;
     let job = cam.job(s.job).ok_or("The job is gone")?;
@@ -154,19 +169,27 @@ fn program_text(
         .map(|o| format!("T{} {}", o.tool_number, o.name))
         .collect();
     let file = post::file_name(&format!("{} {}", job.name, setup.name), m.dialect);
-    Ok((
+    let sheet = cadrs_core::cam::sheet::setup_sheet(cam, job, setup, &run, &parts, &file);
+    Ok(Program {
         nc,
         file,
-        format!("{} (post: {})", m.title(), m.dialect.label()),
+        machine: format!("{} (post: {})", m.title(), m.dialect.label()),
         names,
-    ))
+        sheet,
+    })
 }
 
 fn open_dialog(world: &mut World) {
     let Some(s) = world.get_resource::<ExportSession>().cloned() else {
         return;
     };
-    let (nc, file, machine, names) = match program_text(world, &s) {
+    let Program {
+        nc,
+        file,
+        machine,
+        names,
+        ..
+    } = match program_text(world, &s) {
         Ok(x) => x,
         Err(e) => {
             toast(world, &e);
@@ -264,6 +287,14 @@ fn open_dialog(world: &mut World) {
                         t.foreground,
                     ));
                 });
+                row(b, "Setup sheet", &mut |r| {
+                    r.spawn(
+                        Checkbox::new("cam-export-sheet")
+                            .label("Write the setup sheet beside it (HTML)")
+                            .checked(s.sheet)
+                            .build(t),
+                    );
+                });
                 row(b, "Folder", &mut |r| {
                     r.spawn(
                         TextInput::new("cam-export-folder")
@@ -351,6 +382,14 @@ fn on_select(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut commands: Comm
     }
 }
 
+fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, session: Option<ResMut<ExportSession>>) {
+    if let (Ok(n), Some(mut s)) = (q.get(ev.entity), session)
+        && n.as_str() == "cam-export-sheet"
+    {
+        s.sheet = ev.checked;
+    }
+}
+
 fn on_activate(ev: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut commands: Commands) {
     let Ok(n) = q.get(ev.entity) else { return };
     match n.as_str() {
@@ -417,7 +456,12 @@ pub fn post_now(world: &mut World) {
             },
         );
     }
-    let (nc, default_name, _, _) = match program_text(world, &s) {
+    let Program {
+        nc,
+        file: default_name,
+        sheet,
+        ..
+    } = match program_text(world, &s) {
         Ok(x) => x,
         Err(e) => {
             toast(world, &e);
@@ -430,16 +474,36 @@ pub fn post_now(world: &mut World) {
     }
     let file = if name.is_empty() { default_name } else { name };
     let path = PathBuf::from(&folder).join(&file);
-    let r = std::fs::create_dir_all(&folder).and_then(|_| std::fs::write(&path, nc.as_bytes()));
+    let sheet_path = s.sheet.then(|| {
+        let stem = path
+            .file_stem()
+            .map_or("program".into(), |x| x.to_string_lossy());
+        PathBuf::from(&folder).join(format!("{stem}-setup-sheet.html"))
+    });
+    let r = std::fs::create_dir_all(&folder)
+        .and_then(|_| std::fs::write(&path, nc.as_bytes()))
+        .and_then(|_| match &sheet_path {
+            Some(p) => std::fs::write(p, sheet.as_bytes()),
+            None => Ok(()),
+        });
     match r {
         Ok(()) => {
             close(world);
             let theme = world.resource::<Theme>().clone();
             let mut commands = world.commands();
+            let what = match &sheet_path {
+                Some(p) => format!(
+                    "Posted {} and its setup sheet {}",
+                    path.display(),
+                    p.file_name()
+                        .map_or(String::new(), |n| n.to_string_lossy().into())
+                ),
+                None => format!("Posted {}", path.display()),
+            };
             show_notification(
                 &mut commands,
                 &theme,
-                Notification::info(format!("Posted {}", path.display())).name("cam-toast"),
+                Notification::info(what).name("cam-toast"),
             );
             world.flush();
         }

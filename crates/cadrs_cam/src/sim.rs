@@ -107,12 +107,17 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
                 dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]).max((s.to[2] - s.from[2]).abs());
             let n = ((len / map.cell).ceil() as usize).clamp(1, 100_000);
             if s.is_rapid() {
-                // Material over the tip anywhere along it.
+                // Straight up out of where it was is always clear.
+                let up = dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]) < 1e-9
+                    && s.to[2] >= s.from[2];
+                if up {
+                    continue;
+                }
+                // The cutter running into material anywhere along it.
                 for i in 0..=n {
                     let t = i as f64 / n as f64;
                     let p = crate::geom::lerp(s.from, s.to, t);
-                    let top = max_in_disc(&map, [p[0], p[1]], r * 0.95);
-                    if top != EMPTY && top as f64 > p[2] + 0.01 {
+                    if map.cuts_into(op.tool, p, 0.01) {
                         if rapid_hits.len() < MAX_REPORTED {
                             rapid_hits.push((k, p));
                         }

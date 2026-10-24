@@ -1383,7 +1383,7 @@ impl Draft {
                         ToolKind::Drill => {
                             f.push(Field::number("angle", "Point angle", tool.angle, Unit::Deg));
                         }
-                        ToolKind::Tap => {
+                        ToolKind::Tap | ToolKind::ThreadMill => {
                             f.push(Field::number("pitch", "Thread pitch", tool.pitch, Unit::Mm));
                         }
                         _ => {}
@@ -1910,7 +1910,7 @@ fn toolpath_fields(
     }
     if matches!(
         pat,
-        Rough2D | Rough3D | Profile2D | ConstantZ | Face | Engrave | Bore
+        Rough2D | Rough3D | Adaptive | Profile2D | ConstantZ | Face | Engrave | Bore
     ) {
         f.push(Field::section("Step down"));
         f.push(Field::number(
@@ -1934,7 +1934,16 @@ fn toolpath_fields(
     }
     if matches!(
         pat,
-        Rough2D | Rough3D | Face | Flatlands | Parallel | Fill | Profile2D
+        Rough2D
+            | Rough3D
+            | Adaptive
+            | Face
+            | Flatlands
+            | Parallel
+            | Scallop
+            | Spiral
+            | Fill
+            | Profile2D
     ) {
         f.push(Field::section("Step over"));
         f.push(Field::number(
@@ -1950,6 +1959,28 @@ fn toolpath_fields(
         if pat == Profile2D {
             f.push(Field::count("passes", "Passes", p.passes as i64));
         }
+        if pat == Scallop {
+            f.push(Field::number(
+                "steep",
+                "Steep angle (walls left to Constant Z)",
+                p.steep_angle,
+                Unit::Deg,
+            ));
+        }
+    }
+    if pat == ThreadMill {
+        f.push(Field::section("Thread"));
+        f.push(Field::number(
+            "thread-d",
+            "Major diameter (0: from the hole)",
+            p.thread_diameter,
+            Unit::Mm,
+        ));
+        f.push(Field::count("passes", "Radial passes", p.passes as i64));
+        f.push(Field::note(
+            "Right-hand threads with a right-hand tool, left-hand with a left-hand one; the \
+             tool's pitch sets the thread's.",
+        ));
     }
     if !matches!(pat, Drill) {
         f.push(Field::section("Sorting"));
@@ -2145,7 +2176,7 @@ fn toolpath_fields(
         p.posting.stop_before,
     ));
     f.push(Field::text("comment", "Comment", &p.posting.comment));
-    if matches!(pat, Rough2D | Rough3D) {
+    if matches!(pat, Rough2D | Rough3D | Adaptive) {
         f.push(Field::check(
             "rest",
             "Rest machining (what the operations above left)",
@@ -2679,6 +2710,8 @@ impl Draft {
                     ("first", Value::Number(n)) => p.first_step_down = n.max(0.0),
                     ("stepover", Value::Number(n)) => p.step_over = *n,
                     ("passes", Value::Number(n)) => p.passes = n.clamp(1.0, 50.0) as u32,
+                    ("steep", Value::Number(n)) => p.steep_angle = n.clamp(0.0, 90.0),
+                    ("thread-d", Value::Number(n)) => p.thread_diameter = n.max(0.0),
                     ("direction", Value::Index(i)) => p.direction = Direction::ALL[(*i).min(1)],
                     ("method", Value::Index(i)) => {
                         p.cutting_method = CuttingMethod::ALL[(*i).min(1)]

@@ -19,6 +19,7 @@
 //! - [`beam`]: Cut (through-cutting with kerf compensation, pierces, leads and microjoints,
 //!   holes before outlines), Etch (marking along edges) and Fill (laser hatching).
 
+pub mod adaptive;
 pub mod beam;
 pub mod collision;
 pub mod finish;
@@ -79,14 +80,24 @@ pub enum Pattern {
     Flatlands,
     /// Removes the bulk of the stock around any shape, level by level.
     Rough3D,
+    /// Roughing at a constant radial engagement: deep, light, fast.
+    Adaptive,
     /// Raster passes over the surfaces (drop cutter).
     Parallel,
     /// Waterline passes round the steep walls.
     ConstantZ,
+    /// Rings offset across the shallow surfaces: an even step over along them.
+    Scallop,
+    /// One spiral out from the middle over the surfaces.
+    Spiral,
+    /// Along the concave corners and fillets tighter than the tool.
+    Pencil,
     /// Drilling, peck drilling and tapping cycles.
     Drill,
     /// Helical milling of holes with an end mill.
     Bore,
+    /// Threads cut with a thread mill on a helix.
+    ThreadMill,
     /// Through-cutting with a beam, kerf compensated.
     Cut,
     /// Marking along edges with a beam (no compensation).
@@ -96,7 +107,7 @@ pub enum Pattern {
 }
 
 impl Pattern {
-    pub const ALL: [Pattern; 14] = [
+    pub const ALL: [Pattern; 19] = [
         Pattern::Face,
         Pattern::Rough2D,
         Pattern::Profile2D,
@@ -104,10 +115,15 @@ impl Pattern {
         Pattern::Engrave,
         Pattern::Flatlands,
         Pattern::Rough3D,
+        Pattern::Adaptive,
         Pattern::Parallel,
         Pattern::ConstantZ,
+        Pattern::Scallop,
+        Pattern::Spiral,
+        Pattern::Pencil,
         Pattern::Drill,
         Pattern::Bore,
+        Pattern::ThreadMill,
         Pattern::Cut,
         Pattern::Etch,
         Pattern::Fill,
@@ -122,8 +138,13 @@ impl Pattern {
             Pattern::Engrave => "Engrave",
             Pattern::Flatlands => "Flatlands",
             Pattern::Rough3D => "Rough",
+            Pattern::Adaptive => "Adaptive clearing",
             Pattern::Parallel => "Parallel",
             Pattern::ConstantZ => "Constant Z",
+            Pattern::Scallop => "Scallop",
+            Pattern::Spiral => "Spiral",
+            Pattern::Pencil => "Pencil",
+            Pattern::ThreadMill => "Thread mill",
             Pattern::Drill => "Drill",
             Pattern::Bore => "Bore",
             Pattern::Cut => "Cut",
@@ -141,15 +162,21 @@ impl Pattern {
             | Pattern::Cut
             | Pattern::Etch => Type::Edges,
             Pattern::Face | Pattern::Rough2D | Pattern::Flatlands | Pattern::Fill => Type::Faces,
-            Pattern::Rough3D | Pattern::Parallel | Pattern::ConstantZ => Type::Bodies,
-            Pattern::Drill | Pattern::Bore => Type::Holes,
+            Pattern::Rough3D
+            | Pattern::Adaptive
+            | Pattern::Parallel
+            | Pattern::ConstantZ
+            | Pattern::Scallop
+            | Pattern::Spiral
+            | Pattern::Pencil => Type::Bodies,
+            Pattern::Drill | Pattern::Bore | Pattern::ThreadMill => Type::Holes,
         }
     }
 
     /// The icon for the tree (icon-rs).
     pub fn icon(self) -> &'static str {
         match self {
-            Pattern::Drill | Pattern::Bore => "cam-drill-cycle",
+            Pattern::Drill | Pattern::Bore | Pattern::ThreadMill => "cam-drill-cycle",
             Pattern::Cut | Pattern::Etch | Pattern::Fill => "cam-cut-path",
             _ => "cam-toolpath",
         }
@@ -169,12 +196,18 @@ impl Pattern {
             Pattern::Chamfer2D => matches!(tool, ChamferMill),
             Pattern::Engrave => matches!(tool, ChamferMill | BallMill | EndMill | TaperMill),
             Pattern::Face => matches!(tool, FaceMill | EndMill | BullMill),
-            Pattern::Rough2D | Pattern::Rough3D | Pattern::Profile2D | Pattern::Flatlands => {
+            Pattern::Rough2D
+            | Pattern::Rough3D
+            | Pattern::Adaptive
+            | Pattern::Profile2D
+            | Pattern::Flatlands => {
                 matches!(tool, EndMill | BullMill | BallMill | FaceMill | TaperMill)
             }
-            Pattern::Parallel | Pattern::ConstantZ => {
+            Pattern::Parallel | Pattern::ConstantZ | Pattern::Scallop | Pattern::Spiral => {
                 matches!(tool, EndMill | BullMill | BallMill | TaperMill)
             }
+            Pattern::Pencil => matches!(tool, BallMill | BullMill),
+            Pattern::ThreadMill => tool == ThreadMill,
         }
     }
 
@@ -696,6 +729,12 @@ pub struct Params {
     /// The Axis tab.
     #[serde(default)]
     pub axis: ToolAxis,
+    /// Thread mill: the thread's major diameter (mm; 0 = from the hole).
+    #[serde(default)]
+    pub thread_diameter: f64,
+    /// Adaptive clearing: the fine levels' spacing between the deep ones (mm; 0 = none).
+    #[serde(default)]
+    pub fine_step_down: f64,
 }
 
 fn yes() -> bool {
@@ -737,6 +776,8 @@ impl Params {
             links: Links::default(),
             collision: collision::Collision::default(),
             axis: ToolAxis::WorkPlane,
+            thread_diameter: 0.0,
+            fine_step_down: 0.0,
             speeds: Speeds {
                 spindle_rpm: c.spindle_rpm,
                 feed: c.feed,
@@ -764,6 +805,17 @@ impl Params {
             Pattern::Rough2D | Pattern::Rough3D => {
                 p.wall_stock = if d >= 3.0 { 0.3 } else { 0.1 };
                 p.floor_stock = p.wall_stock;
+            }
+            Pattern::Adaptive => {
+                p.wall_stock = if d >= 3.0 { 0.3 } else { 0.1 };
+                p.floor_stock = p.wall_stock;
+                // Light and deep: a tenth of the diameter across, the flutes down (at most
+                // twice the diameter).
+                p.step_over = (d * 0.1).max(0.05);
+                p.step_down = tool.cutting_length.min(d * 2.0).max(0.1);
+                p.fine_step_down = (d * 0.2).max(0.1);
+                // At a tenth of the diameter across the chips thin: feed faster.
+                p.speeds.feed = c.feed * 2.0;
             }
             Pattern::Profile2D => {
                 p.links.lead_radius = (d * 0.5).max(1.0);
@@ -800,6 +852,19 @@ impl Params {
             Pattern::ConstantZ => {
                 p.step_down = (d * 0.1).max(0.1);
                 p.links.lead_in = LeadKind::Arc;
+            }
+            Pattern::Scallop | Pattern::Spiral | Pattern::Pencil => {
+                p.step_over = if tool.kind == ToolKind::BallMill {
+                    d * 0.1
+                } else {
+                    d * 0.2
+                };
+                p.links.lead_in = LeadKind::None;
+                p.links.lead_out = LeadKind::None;
+            }
+            Pattern::ThreadMill => {
+                p.posting.coolant = Coolant::Flood;
+                p.passes = 1;
             }
             Pattern::Drill => {
                 p.cycle.kind = if tool.kind == ToolKind::Tap {
@@ -1123,12 +1188,17 @@ pub fn generate(input: &Input) -> Result<Toolpath, String> {
         Pattern::Face => mill::face(input),
         Pattern::Rough2D => mill::rough(input, false),
         Pattern::Rough3D => mill::rough(input, true),
+        Pattern::Adaptive => adaptive::adaptive(input),
         Pattern::Profile2D => mill::profile(input),
         Pattern::Chamfer2D => mill::chamfer(input),
         Pattern::Engrave => mill::engrave(input),
         Pattern::Flatlands => mill::flatlands(input),
         Pattern::Parallel => finish::parallel(input),
         Pattern::ConstantZ => finish::constant_z(input),
+        Pattern::Scallop => finish::scallop(input),
+        Pattern::Spiral => finish::spiral(input),
+        Pattern::Pencil => finish::pencil(input),
+        Pattern::ThreadMill => holes::thread_mill(input),
         Pattern::Drill => holes::drill(input),
         Pattern::Bore => holes::bore(input),
         Pattern::Cut => beam::cut(input),
@@ -1229,11 +1299,22 @@ pub(crate) mod testing {
     /// How far the toolpath's worst move (rapids, links, leads and cuts alike, sampled every
     /// 0.05 mm) takes the tool into the model (exact drop-cutter), and where: 0 if never.
     pub fn max_gouge(m: &Model, tool: &Tool, tp: &Toolpath) -> (f64, crate::geom::P3) {
+        max_gouge_within(m, tool, tp, 0.001)
+    }
+
+    /// [`max_gouge`] allowing `tol` into the surface along its normal (a finishing
+    /// toolpath's own tolerance): the cutter is shrunk by it all round, so a wall (where a
+    /// hair sideways is a long way down) counts by how far into it the cutter goes.
+    pub fn max_gouge_within(
+        m: &Model,
+        tool: &Tool,
+        tp: &Toolpath,
+        tol: f64,
+    ) -> (f64, crate::geom::P3) {
         let idx = crate::dropcutter::TriIndex::new(&m.triangles);
         let mut scratch = Vec::new();
-        // A hair smaller, so a cutter running exactly against a wall isn't counted.
         let mut tool = tool.clone();
-        tool.diameter -= 0.002;
+        tool.diameter -= 2.0 * tol;
         if tool.kind == ToolKind::BallMill {
             tool.corner_radius = tool.diameter / 2.0;
         }
@@ -1258,8 +1339,8 @@ pub(crate) mod testing {
                     f64::NEG_INFINITY,
                     &mut scratch,
                 );
-                if low - q[2] > worst.0 {
-                    worst = (low - q[2], q);
+                if low - tol - q[2] > worst.0 {
+                    worst = (low - tol - q[2], q);
                 }
             }
         }

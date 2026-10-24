@@ -236,6 +236,20 @@ impl HeightMap {
         }
     }
 
+    /// Whether the tool with its tip at `p` would cut more than `tol` into the map's surface
+    /// (its own shape, at the cells' centres).
+    pub fn cuts_into(&self, tool: &Tool, p: crate::geom::P3, tol: f64) -> bool {
+        let mut hit = false;
+        let z = p[2] + tol;
+        self.stamp(tool, [p[0], p[1]], false, |i, h| {
+            let v = self.z[i];
+            if v != EMPTY && v as f64 > z + h as f64 {
+                hit = true;
+            }
+        });
+        hit
+    }
+
     /// How low the tool's tip can go at `p` without cutting into the map's surface (`floor`
     /// when nothing is under it). Cells the cutter only partly covers count, so it never comes
     /// out lower than the true drop.

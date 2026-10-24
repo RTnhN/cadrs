@@ -38,13 +38,13 @@ pub fn materials_above(input: &Input, zs: &[f64]) -> Vec<Region> {
 }
 
 /// The height whose material keeps the tool out at depth `z` (the floor stock above floors).
-fn keep_out_z(input: &Input, z: f64) -> f64 {
+pub(super) fn keep_out_z(input: &Input, z: f64) -> f64 {
     z - input.params.floor_stock + 1e-4
 }
 
 /// Where the tool's centre may go at depth `z` without touching the model (keeping the wall
 /// and floor stock), within `limit`; `solid` is the material at [`keep_out_z`].
-fn free_centres_in(input: &Input, solid: &Region, limit: &Region) -> Region {
+pub(super) fn free_centres_in(input: &Input, solid: &Region, limit: &Region) -> Region {
     let p = input.params;
     let r = input.tool.radius();
     // Padded by the offset's tolerance: its round corners' chords cut inside the true arc.
@@ -59,7 +59,7 @@ fn free_centres(input: &Input, z: f64, limit: &Region) -> Region {
 
 /// The stock's footprint grown so the tool clears its edges (centres up to just inside the
 /// radius past them).
-fn stock_limit(input: &Input) -> Region {
+pub(super) fn stock_limit(input: &Input) -> Region {
     let r = input.tool.radius();
     let grow = (r - (input.params.step_over * 0.5).min(r * 0.5)).max(0.0);
     region::offset(&input.stock.footprint(), grow)
@@ -94,7 +94,7 @@ pub fn material_left(map: &HeightMap, z: f64) -> Region {
 
 /// Contours ordered for climb or conventional milling: `material_inside` when the material is
 /// on the inside of the region's rings (a profile), else outside (a pocket).
-fn orient(cs: Vec<Contour>, dir: Direction, material_inside: bool) -> Vec<Contour> {
+pub(super) fn orient(cs: Vec<Contour>, dir: Direction, material_inside: bool) -> Vec<Contour> {
     // Region rings are counter-clockwise outside, clockwise for holes: the region on the left.
     // Climb keeps the material on the right.
     let keep = (dir == Direction::Climb) != material_inside;

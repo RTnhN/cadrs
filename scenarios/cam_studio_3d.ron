@@ -2,8 +2,9 @@
 // whose bottom is a spherical dish) machined from below on a 3-axis mill: the setup's tool axis
 // points down the model's −Z, so the dish faces the spindle.
 // 01 Create setup: Z along −Z, the work coordinate system at the stock's (now) top centre.
-// 02 Rough (Bodies): constant-Z roughing with a D10 end mill, previewed live: levels following
-//    the dish, 0.3 mm left on the walls and floors.
+// 02 Adaptive clearing (Bodies) with a D10 end mill, previewed live: the dish roughed a flute
+//    length deep at a tenth of the diameter across, levels following it, 0.3 mm left on the
+//    walls and floors.
 // 03 Parallel finishing with a D6 ball mill, previewed live: raster passes dropped exactly onto
 //    the dish (the drop-cutter on the kernel's tessellation).
 // 04 Verify of the setup: the dish roughed and finished, no gouges.
@@ -11,6 +12,9 @@ Scenario(
     start: Some("document"),
     steps: [
         WaitFor("document-shell"),
+        // The frame-stats panel off (F12: profile, fps, hidden).
+        Key("F12"),
+        Key("F12"),
         Custom("reflector"),
         Wait(3),
         Click(ui("insert-tab")),
@@ -36,7 +40,7 @@ Scenario(
         Click(ui("cam-f-p-z")),
         Click(ui("cam-f-p-z-option-1")),
         Custom("view 35 -32"),
-        Custom("fit"),
+        Custom("cam fit"),
         MoveTo(1420, 900),
         Wait(3),
         Screenshot("01-setup-from-below"),
@@ -52,9 +56,11 @@ Scenario(
         WaitFor("cam-dialog"),
         Click(ui("cam-f-type")),
         Click(ui("cam-f-type-option-2")),
+        Click(ui("cam-f-pattern")),
+        Click(ui("cam-f-pattern-option-1")),
         MoveTo(1420, 900),
         Wait(20),
-        Screenshot("02-rough"),
+        Screenshot("02-adaptive"),
         Click(ui("cam-dialog-accept")),
         Wait(5),
         Click(ui("cam-tb-tool")),
@@ -68,7 +74,7 @@ Scenario(
         Click(ui("cam-f-type")),
         Click(ui("cam-f-type-option-2")),
         Click(ui("cam-f-pattern")),
-        Click(ui("cam-f-pattern-option-1")),
+        Click(ui("cam-f-pattern-option-2")),
         MoveTo(1420, 900),
         Wait(20),
         Screenshot("03-parallel"),

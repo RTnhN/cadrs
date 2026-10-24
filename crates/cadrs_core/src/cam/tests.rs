@@ -285,6 +285,27 @@ fn mill_job_end_to_end() {
     assert!(nc.contains("O1001"));
     assert!(nc.contains("T1 M6") && nc.contains("T2 M6"));
     assert!(nc.contains("G2 ") || nc.contains("G3 "), "arcs: {nc}");
+    // Its setup sheet: the stock, the WCS, both tools and the three operations with times.
+    let sheet = super::sheet::setup_sheet(cam, j, s, &run, &parts, "Job_1_Setup_1.nc");
+    assert!(sheet.starts_with("<!doctype html>"));
+    assert!(
+        sheet.contains("Program O1001 · Job_1_Setup_1.nc"),
+        "{sheet}"
+    );
+    assert!(sheet.contains("64 × 44 × 11 mm"), "{sheet}");
+    assert!(
+        sheet.contains("The stock's box: top, centre, centre"),
+        "{sheet}"
+    );
+    assert!(sheet.contains("<td>T1</td><td>D6 end mill</td>"), "{sheet}");
+    assert!(
+        sheet.contains("<td>T2</td><td>D6 chamfer mill / v-bit</td>"),
+        "{sheet}"
+    );
+    assert!(sheet.contains("3 operations, 2 tools"), "{sheet}");
+    for name in ["2-axis profile 1", "Bore 1", "2-axis chamfer 1"] {
+        assert!(sheet.contains(name), "{name} in {sheet}");
+    }
     // Verify the profile and bore (the chamfer cuts into the part by design: the model has no
     // chamfer): no gouges.
     let run = program::setup_run(cam, j, s, &parts, &paths, Some(&[profile, bore])).unwrap();

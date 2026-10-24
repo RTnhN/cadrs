@@ -14,6 +14,9 @@ Scenario(
     start: Some("document"),
     steps: [
         WaitFor("document-shell"),
+        // The frame-stats panel off (F12: profile, fps, hidden).
+        Key("F12"),
+        Key("F12"),
         Custom("clear-dir target/exports/cam_studio_plasma"),
         Custom("with-hole"),
         Wait(3),
@@ -31,10 +34,11 @@ Scenario(
         WaitFor("cam-dialog"),
         Click(ui("cam-dialog-accept")),
         Wait(3),
+        Custom("cam fit"),
         Click(ui("cam-tb-machine")),
         WaitFor("cam-dialog"),
         Click(ui("cam-f-machine")),
-        Click(ui("cam-f-machine-option-7")),
+        Click(ui("cam-f-machine-option-9")),
         MoveTo(1420, 900),
         Wait(3),
         Screenshot("01-plasma-machine"),
