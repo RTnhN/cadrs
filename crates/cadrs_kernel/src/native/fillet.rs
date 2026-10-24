@@ -286,7 +286,7 @@ impl EdgeFillet {
             Some(g) => g,
             None => initial_guess(b, self, t)?,
         };
-        let Some(mut ball) = geom::ball_in_plane(f, self.k_at(t), &p, &d, g) else {
+        let Some(mut ball) = geom::ball_in_plane(f, self.k_at(t), &p, &d, g, self.flat) else {
             debug(|| {
                 format!(
                     "edge {}: no ball at t {t} (radius {})",
@@ -297,12 +297,25 @@ impl EdgeFillet {
             return None;
         };
         // Not a far branch: the contacts lie near the spine (a section plane through a circle's
-        // axis holds the ball on the other side too).
+        // axis holds the ball on the other side too); a chamfer's facing the way its faces do at
+        // the edge (one as wide as a round it runs along has a section touching the round's far
+        // side, off the face, about as near).
         ball.flat = self.flat;
-        ball.q
-            .iter()
-            .all(|q| (q.p - p).norm() <= self.reach)
-            .then_some(ball)
+        // (A face the strip has rolled onto past a smooth edge doesn't reach the edge: its
+        // contacts aren't checked so.)
+        let facing = !self.flat
+            || (0..2).all(|k| {
+                let fi = self.faces[k];
+                let ed = &b.edges[self.e];
+                let Some(c) = coedge_of(b, fi, self.e) else {
+                    return true;
+                };
+                let q =
+                    c.pc.point(t.clamp(ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1])));
+                let n = geom::contact(&b.faces[fi], P2::new(q.x, q.y)).n;
+                ball.q[k].n.dot(&n) > 0.0
+            });
+        (facing && ball.q.iter().all(|q| (q.p - p).norm() <= self.reach)).then_some(ball)
     }
 
     /// The ball at t marched from `start` (at t0) in steps no longer than the radius, nor
@@ -398,13 +411,18 @@ fn crossings(
     near: &P3,
     reach: f64,
 ) -> Vec<(f64, Ball)> {
-    let mut out = geom::rail_crossings(f, k, side, bd, near, reach);
+    // A flat ball's section through a point: the spine's at the point's parameter.
+    let section = |p: &P3| ef.spine.at(ef.spine.param_of(p, ef.tm)).1;
+    let plane = ef.flat.then_some(&section as &dyn Fn(&P3) -> V3);
+    let mut out = geom::rail_crossings(f, k, side, bd, near, reach, plane);
     // A varying radius: each crossing again with the radius where it is. The crossing with the
     // radius at spine parameter t lies at F(t); secant steps on F(t) − t find where they agree.
+    // (Only those found so: one the steps don't settle has another crossing's radius.)
     if ef.law.is_some() {
-        for x in out.iter_mut() {
+        let mut settled = Vec::new();
+        for x in out {
             let at = |t: f64, near: &Ball| -> Option<(f64, f64, Ball)> {
-                let y = geom::rail_crossings(f, ef.k_at(t), side, bd, &near.c, 2.0 * ef.r())
+                let y = geom::rail_crossings(f, ef.k_at(t), side, bd, &near.c, 2.0 * ef.r(), plane)
                     .into_iter()
                     .min_by(|p, q| (p.1.c - near.c).norm().total_cmp(&(q.1.c - near.c).norm()))?;
                 Some((ef.spine.param_of(&y.1.c, t) - t, y.0, y.1))
@@ -413,6 +431,7 @@ fn crossings(
             let Some((h0, s0, b0)) = at(t0, &x.1) else {
                 continue;
             };
+            let mut tbest = t0;
             let (mut a, mut ha) = (t0, h0);
             let mut best = (h0.abs(), s0, b0);
             let mut bcur = b0;
@@ -423,6 +442,7 @@ fn crossings(
                 };
                 if hb.abs() < best.0 {
                     best = (hb.abs(), sb, bb);
+                    tbest = tb;
                 }
                 if hb.abs() <= tol::REL_FINE * (1.0 + tb.abs()) || (hb - ha).abs() < tol::TINY {
                     break;
@@ -431,8 +451,11 @@ fn crossings(
                 (a, ha, bcur) = (tb, hb, bb);
                 tb = tn;
             }
-            *x = (best.1, best.2);
+            if best.0 <= tol::REL_POINT * (1.0 + tbest.abs()) {
+                settled.push((best.1, best.2));
+            }
         }
+        out = settled;
     }
     for (_, b) in out.iter_mut() {
         b.flat = ef.flat;
@@ -444,6 +467,16 @@ fn crossings(
 /// ball's centre would have between the faces' tangent planes.
 fn initial_guess(b: &Body, ef: &EdgeFillet, t: f64) -> Option<[P2; 2]> {
     let (p, uv, theta, bis) = wedge(b, ef, t)?;
+    if ef.flat {
+        // A chamfer's: the feet of the points its contacts would have on the faces' tangent
+        // planes, r / tan(θ/2) into each (the centre may lie by the axis of a round as wide as
+        // the chamfer, where its foot on the round could be anywhere round it).
+        let d = ef.radius_at(t) / (theta / 2.0).tan();
+        let w = wedge_dirs(b, ef, t)?;
+        return Some(std::array::from_fn(|k| {
+            geom::foot(&b.faces[ef.faces[k]], &(p + w[k] * d), Some(uv[k]))
+        }));
+    }
     let c0 = p + bis * (ef.r() / (theta / 2.0).sin());
     Some([
         geom::foot(&b.faces[ef.faces[0]], &c0, Some(uv[0])),
@@ -455,6 +488,23 @@ fn initial_guess(b: &Body, ef: &EdgeFillet, t: f64) -> Option<[P2; 2]> {
 /// its parameters on the faces, the angle between the faces (inside the material) and its
 /// bisector.
 fn wedge(b: &Body, ef: &EdgeFillet, t: f64) -> Option<(P3, [P2; 2], f64, V3)> {
+    let (p, uv, w) = wedge_at(b, ef, t)?;
+    let theta = w[0].dot(&w[1]).clamp(-1.0, 1.0).acos();
+    if theta < tol::ANGULAR_POINT {
+        return None;
+    }
+    let bis = (w[0] + w[1]).normalize();
+    Some((p, uv, theta, bis))
+}
+
+/// The directions into the faces from the edge, square to it, at spine parameter t (clamped).
+fn wedge_dirs(b: &Body, ef: &EdgeFillet, t: f64) -> Option<[V3; 2]> {
+    wedge_at(b, ef, t).map(|x| x.2)
+}
+
+/// The edge's point at spine parameter t (clamped to the edge), its parameters on the faces
+/// and the directions into the faces square to it.
+fn wedge_at(b: &Body, ef: &EdgeFillet, t: f64) -> Option<(P3, [P2; 2], [V3; 2])> {
     let ed = &b.edges[ef.e];
     let tc = t.clamp(ed.t[0].min(ed.t[1]), ed.t[0].max(ed.t[1]));
     let (p, d) = ef.spine.at(tc);
@@ -470,12 +520,7 @@ fn wedge(b: &Body, ef: &EdgeFillet, t: f64) -> Option<(P3, [P2; 2], f64, V3)> {
         let along = if c.fwd { d } else { -d };
         w[k] = n.cross(&along);
     }
-    let theta = w[0].dot(&w[1]).clamp(-1.0, 1.0).acos();
-    if theta < tol::ANGULAR_POINT {
-        return None;
-    }
-    let bis = (w[0] + w[1]).normalize();
-    Some((p, uv, theta, bis))
+    Some((p, uv, w))
 }
 
 /// Whether edge e is convex (true), concave (false) or neither (its faces tangent) at its
@@ -1089,7 +1134,7 @@ fn ball_of_radius(b: &Body, ef: &EdgeFillet, t: f64, rho: f64, guess: [P2; 2]) -
     let f = [&b.faces[ef.faces[0]], &b.faces[ef.faces[1]]];
     let (p, d) = ef.spine.at(t);
     let s = ef.k[0].signum();
-    geom::ball_in_plane(f, [s * rho, s * rho * ef.ratio], &p, &d, guess)
+    geom::ball_in_plane(f, [s * rho, s * rho * ef.ratio], &p, &d, guess, ef.flat)
 }
 
 /// `ef`'s radius at spine parameter t where its ball would reach past face `wall`: that of the
@@ -4051,11 +4096,13 @@ fn first_roll(
             };
             for (_, ball) in crossings(ef, f, ef.k_at(t0), k, &bd, &from.c, reach) {
                 let t = ef.spine.param_of(&ball.c, t0);
-                // Only a ball some section of the spine holds (a crossing on a far branch of
-                // the offsets, round a curved spine's end, has none: its parameter is where the
-                // search gave up).
+                // Only a ball some section of the spine holds, centre and contacts (a crossing
+                // on a far branch of the offsets, round a curved spine's end, has none: its
+                // parameter is where the search gave up; a chamfer's crossing found in the
+                // section through its contact may have its centre in another).
                 let (p, d) = ef.spine.at(t);
-                if (ball.c - p).dot(&d).abs() > tol::REL_POINT * (1.0 + ef.r()) {
+                let off = |x: &P3| (x - p).dot(&d).abs() > tol::REL_POINT * (1.0 + ef.r());
+                if off(&ball.c) || (ef.flat && ball.q.iter().any(|q| off(&q.p))) {
                     continue;
                 }
                 // (Not the crossing the strip starts at, found again a hair off: where the rail
@@ -4077,13 +4124,102 @@ fn first_roll(
                     continue;
                 }
                 let d = (t - t0).abs();
-                if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
-                    best = Some((d, (k, into, ball, t)));
+                if best.as_ref().is_some_and(|(bd, _)| d >= *bd) {
+                    continue;
                 }
+                // The strip's own ball there, run on from `from`: the crossing is where its
+                // contact crosses (one on another branch, in another section through the same
+                // centre or with another parameter's radius isn't). (Where the run doesn't get
+                // there, the crossing as found.)
+                if ef
+                    .ball_from(b, from, t0, t)
+                    .is_some_and(|x| (x.c - ball.c).norm() > tol::REL_POINT * (1.0 + ef.r()))
+                {
+                    debug(|| {
+                        format!(
+                            "edge {}: a crossing of edge {} at t {t} isn't the strip's",
+                            ef.e, c.edge
+                        )
+                    });
+                    continue;
+                }
+                best = Some((d, (k, into, ball, t)));
             }
         }
     }
+    if best.is_none() && ef.flat {
+        return Ok(traced_roll(b, ef, from, t0, t1));
+    }
     Ok(best.map(|x| x.1))
+}
+
+/// [`first_roll`] by following the strip: its ball run on from `from` (at t0) towards t1 in
+/// steps, where a contact first leaves its face over a smooth edge (bisected to the edge). For a
+/// chamfer, whose crossings the offsets' search may miss (a section plane turning fast round a
+/// short curved edge).
+fn traced_roll(
+    b: &Body,
+    ef: &EdgeFillet,
+    from: &Ball,
+    t0: f64,
+    t1: f64,
+) -> Option<(usize, usize, Ball, f64)> {
+    let n = ((ef.spine_len(t0, t1) / (0.25 * ef.r())).ceil() as usize).clamp(8, 64);
+    let on = |ball: &Ball, k: usize| point_in_face(b, ef.faces[k], &ball.q[k].p);
+    let (mut ta, mut ba) = (t0, *from);
+    for i in 1..=n {
+        let tb = t0 + (t1 - t0) * i as f64 / n as f64;
+        let bb = ef.ball(b, tb, Some([ba.q[0].uv, ba.q[1].uv]))?;
+        if let Some(k) = (0..2).find(|&k| on(&ba, k) && !on(&bb, k)) {
+            // Bisected to where the contact leaves.
+            let (mut lo, mut hi, mut blo) = (ta, tb, ba);
+            for _ in 0..50 {
+                let m = 0.5 * (lo + hi);
+                let Some(bm) = ef.ball(b, m, Some([blo.q[0].uv, blo.q[1].uv])) else {
+                    break;
+                };
+                if on(&bm, k) {
+                    (lo, blo) = (m, bm);
+                } else {
+                    hi = m;
+                }
+            }
+            // (At the end within a hair: the contact reaching its face's edge at the vertex,
+            // no strip beyond.)
+            if ef.spine_len(lo, t1) <= 1e-4 * (1.0 + ef.r()) {
+                return None;
+            }
+            // Over the face's edge nearest there, onto the face beyond, if smooth there.
+            let fi = ef.faces[k];
+            let p = blo.q[k].p;
+            let dist = |x: usize| {
+                let xe = &b.edges[x];
+                (xe.point(xe.curve.closest(&p, xe.t[0], xe.t[1])) - p).norm()
+            };
+            let x = b.faces[fi]
+                .loops
+                .iter()
+                .flatten()
+                .map(|c| c.edge)
+                .filter(|&x| x != ef.e && !b.edges[x].degenerate && !is_seam(b, fi, x))
+                .min_by(|&x, &y| dist(x).total_cmp(&dist(y)))?;
+            let into = beyond(b, x, fi)?;
+            let g = &b.faces[into];
+            let n = geom::contact(g, geom::foot(g, &p, None)).n;
+            if n.dot(&blo.q[k].n) < 1.0 - tol::ANGULAR_POINT {
+                return None;
+            }
+            debug(|| {
+                format!(
+                    "edge {}: traced: its contact leaves face {fi} over edge {x} at t {lo}",
+                    ef.e
+                )
+            });
+            return Some((k, into, blo, lo));
+        }
+        (ta, ba) = (tb, bb);
+    }
+    None
 }
 
 /// Where the ball of strip `ef`, rolling over a smooth edge on side k onto face `into` (ball
@@ -4367,8 +4503,6 @@ fn pieces_of(
             }
             let mut faces = cur.faces;
             faces[k] = into;
-            rolls.push(ball);
-            let id = rolls.len() - 1;
             let mut next = EdgeFillet {
                 faces,
                 mid: ball,
@@ -4381,6 +4515,47 @@ fn pieces_of(
                 &b.faces[into],
                 geom::foot(&b.faces[into], &ball.q[k].p, None),
             );
+            // A contact running on along the smooth edge to the edge's end (the faces' sections
+            // the same there, a section plane through a round's axis): a rail beyond only a
+            // sliver along that edge, no strip; the ball runs on on its faces to the end.
+            let from = cur.faces[k];
+            let between: Vec<usize> = b.faces[into]
+                .loops
+                .iter()
+                .flatten()
+                .map(|c| c.edge)
+                .filter(|&x| beyond(b, x, into) == Some(from))
+                .collect();
+            let on_edge = |q: &P3| {
+                between.iter().any(|&x| {
+                    let xe = &b.edges[x];
+                    (xe.point(xe.curve.closest(q, xe.t[0], xe.t[1])) - q).norm()
+                        <= tol::REL_POINT * (1.0 + cur.r())
+                })
+            };
+            // (A roll a hair from the end, no sliver: the end's section there as it is.)
+            let mut along = (t, next.mid);
+            if cur.spine_len(t, te) > tol::REL_POINT * (1.0 + cur.r())
+                && (1..=4).all(|i| {
+                    let tw = t + (te - t) * i as f64 / 4.0;
+                    match next.ball_from(b, &along.1, along.0, tw) {
+                        Some(x) => {
+                            along = (tw, x);
+                            on_edge(&x.q[k].p)
+                        }
+                        None => false,
+                    }
+                })
+            {
+                debug(|| {
+                    format!(
+                        "edge {e} side {j}: the ball only runs along face {into}'s edge to the end"
+                    )
+                });
+                break;
+            }
+            rolls.push(ball);
+            let id = rolls.len() - 1;
             next.exact = if next.law.is_some() {
                 None
             } else {
@@ -4797,6 +4972,7 @@ fn plan(
                                     &vp,
                                     &n,
                                     [x.q[0].uv, x.q[1].uv],
+                                    ef.flat,
                                 )
                             })
                             .flatten()
