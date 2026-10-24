@@ -308,6 +308,14 @@ impl SchemeMap {
         Color::Srgba(Srgba::from(out).with_alpha(c.alpha))
     }
 
+    /// Pairs a light color the app draws in `role` (one that isn't a [`Theme`] token: a
+    /// feature's own tint) with its dark counterpart, as [`Theme::dark`] does for the tokens.
+    /// On raised and floating surfaces it is lifted like the page's colors.
+    pub fn pair(&mut self, role: ColorRole, light: Color, dark: Color) {
+        self.tokens
+            .insert((role, key(light.to_srgba())), dark.to_srgba());
+    }
+
     /// The dark-scheme color for `color` painted in `role` (a fill, ink or a line) on `surface`:
     /// the surface's own token, else the page's color lifted to the surface.
     pub fn dark_on(&self, color: Color, role: ColorRole, surface: Surface) -> Color {

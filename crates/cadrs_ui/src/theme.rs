@@ -142,6 +142,8 @@ pub struct Theme {
     pub cancel: Color,
     pub checkbox_border: Color,
     pub checkbox_checked: Color,
+    /// A checkbox that doesn't apply (its fill and border).
+    pub checkbox_unavailable: Color,
     /// A selection field waiting for input.
     pub selection_field_active: Color,
     pub selection_field_active_border: Color,
@@ -290,6 +292,7 @@ impl Theme {
             cancel: hex("#c42b3c"),
             checkbox_border: hex("#a6a6a6"),
             checkbox_checked: hex("#28549d"),
+            checkbox_unavailable: hex("#a8a8a8"),
             selection_field_active: hex("#def1ff"),
             selection_field_active_border: hex("#7a8a97"),
 
@@ -364,7 +367,7 @@ impl Theme {
             foreground: hex("#e3e4e6"),
             muted_foreground: hex("#a9abb0"),
             subtle_foreground: hex("#8b8e95"),
-            disabled_foreground: hex("#5c5f66"),
+            disabled_foreground: hex("#6a6d74"),
             link: hex("#7aaaf0"),
 
             border: hex("#3d3f44"),
@@ -424,6 +427,7 @@ impl Theme {
             cancel: hex("#ff6070"),
             checkbox_border: hex("#6c6f75"),
             checkbox_checked: hex("#4a80d2"),
+            checkbox_unavailable: hex("#45474d"),
             selection_field_active: hex("#1d3a54"),
             selection_field_active_border: hex("#6d8ca8"),
 
@@ -465,6 +469,15 @@ impl Theme {
             (Fill, self.sidebar),
             (Floating, self.floating),
             (Floating, self.tooltip_background),
+            // Status fills keep their own dark colors on every surface (a warning toast).
+            (Floating, self.toast_background),
+            (Floating, self.warning_banner_background),
+            (Floating, self.info_background),
+            (Floating, self.warning_background),
+            (Raised, self.toast_background),
+            (Raised, self.warning_banner_background),
+            (Raised, self.info_background),
+            (Raised, self.warning_background),
             (Raised, self.popover),
             (Raised, self.input_background),
             (Raised, self.tooltip_background),
@@ -498,6 +511,7 @@ impl Theme {
             (Fill, self.accept),
             (Fill, self.accept_disabled),
             (Fill, self.checkbox_checked),
+            (Fill, self.checkbox_unavailable),
             (Fill, self.selection_field_active),
             (Fill, self.tab_underline),
             (Fill, self.tree_guide),
@@ -555,6 +569,7 @@ impl Theme {
             (Line, self.primary_active),
             (Line, self.primary_disabled),
             (Line, self.checkbox_checked),
+            (Line, self.checkbox_unavailable),
             (Line, self.list_selected_bar),
             (Line, self.tab_underline),
             (Line, self.plane_edge),
