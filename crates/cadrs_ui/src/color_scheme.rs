@@ -852,7 +852,7 @@ const CHOICES: [SchemePreference; 3] = [
 pub fn scheme_toggle(theme: &Theme) -> impl Bundle {
     (
         Segmented::new("color-scheme")
-            .option("", Some("theme-light"), "Light")
+            .option("", Some("theme-light-medium"), "Light")
             .option("", Some("theme-dark"), "Dark")
             .option("", Some("theme-system"), "Match the system")
             .selected(2)

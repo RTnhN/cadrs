@@ -3172,10 +3172,16 @@ fn tint_selection(
 struct SketchPlaneTint;
 
 /// A faint white over the faces on the sketch plane: shows where the sketch lies and which of
-/// the parts' faces, edges and points it can draw from.
-const SKETCH_PLANE_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.35);
+/// the parts' faces, edges and points it can draw from. In dark a shade instead, so the sketch's
+/// light lines read over the face.
+fn sketch_plane_tint() -> Color {
+    cadrs_ui::by_scheme(
+        Color::srgba(1.0, 1.0, 1.0, 0.35),
+        Color::srgba(0.0, 0.0, 0.0, 0.45),
+    )
+}
 
-/// While a sketch is edited, tints the part faces that lie on its plane ([`SKETCH_PLANE_TINT`]).
+/// While a sketch is edited, tints the part faces that lie on its plane ([`sketch_plane_tint`]).
 #[allow(clippy::too_many_arguments)]
 fn tint_sketch_plane(
     cache: Res<PartCache>,
@@ -3242,7 +3248,7 @@ fn tint_sketch_plane(
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
     .with_inserted_indices(Indices::U32(indices));
     let material = materials.add(StandardMaterial {
-        base_color: SKETCH_PLANE_TINT,
+        base_color: sketch_plane_tint(),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         cull_mode: None,

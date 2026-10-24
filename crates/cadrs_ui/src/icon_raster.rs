@@ -12,14 +12,16 @@ use icon_rs::{Icon, Palette};
 use resvg::{tiny_skia, usvg};
 
 /// Heavier copies of tintable icons, as (name, icon, stroke scale): the dialog's ✓ and ✕, the
-/// landing page's create button, and the feature tree's chevrons (about 2 px at 18 px,
-/// `screens/05`).
+/// landing page's create button, the feature tree's chevrons (about 2 px at 18 px,
+/// `screens/05`) and the scheme toggle's sun.
 pub const WEIGHTS: &[(&str, &str, f32)] = &[
     ("check-bold", "check", 2.0),
     ("x-bold", "close", 2.0),
     ("plus-bold", "plus", 2.0),
     ("chevron-down-medium", "chevron-down", 1.3),
     ("chevron-right-medium", "chevron-right", 1.3),
+    // The scheme toggle's sun, as heavy to the eye as the solid moon beside it.
+    ("theme-light-medium", "theme-light", 1.35),
 ];
 
 /// The icon `name` is drawn from, and its stroke weight (1 for icon-rs's own names).

@@ -102,6 +102,8 @@ pub struct Theme {
     pub list_selected: Color,
     pub list_selected_bar: Color,
     pub menu_hover: Color,
+    /// The current point of a history timeline.
+    pub timeline_selected: Color,
 
     // Inputs
     pub input_background: Color,
@@ -261,6 +263,7 @@ impl Theme {
             list_selected: hex("#dce8f8"),
             list_selected_bar: hex("#2750a2"),
             menu_hover: hex("#eef3fb"),
+            timeline_selected: hex("#cfe3f7"),
 
             input_background: hex("#ffffff"),
             input_disabled_background: hex("#eeeeee"),
@@ -367,7 +370,7 @@ impl Theme {
             foreground: hex("#e3e4e6"),
             muted_foreground: hex("#a9abb0"),
             subtle_foreground: hex("#8b8e95"),
-            disabled_foreground: hex("#6a6d74"),
+            disabled_foreground: hex("#7a7d84"),
             link: hex("#7aaaf0"),
 
             border: hex("#3d3f44"),
@@ -396,6 +399,7 @@ impl Theme {
             list_selected: hex("#263a57"),
             list_selected_bar: hex("#5b8fe0"),
             menu_hover: hex("#2d3544"),
+            timeline_selected: hex("#263a57"),
 
             input_background: hex("#18191c"),
             input_disabled_background: hex("#26272b"),
@@ -420,7 +424,7 @@ impl Theme {
             warning_banner_border: hex("#5a5232"),
             warning_icon: hex("#f0bd45"),
 
-            feature_error: hex("#ff7a80"),
+            feature_error: hex("#ff9a9e"),
             feature_editing: hex("#22476a"),
             accept: hex("#3dc23d"),
             accept_disabled: hex("#2b4a2b"),
@@ -497,6 +501,7 @@ impl Theme {
             (Fill, self.list_selected),
             (Fill, self.list_selected_bar),
             (Fill, self.menu_hover),
+            (Fill, self.timeline_selected),
             (Fill, self.primary),
             (Fill, self.primary_hover),
             (Fill, self.primary_open),
