@@ -14,6 +14,8 @@ serde.workspace = true
 serde_json.workspace = true
 clipper2-rust.workspace = true
 rayon.workspace = true
+# Triangulating the regions Verify shows (a cut sheet's pieces).
+earcutr.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

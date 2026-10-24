@@ -2110,6 +2110,7 @@ name = "cadrs_cam"
 version = "0.1.7"
 dependencies = [
  "clipper2-rust",
+ "earcutr",
  "proptest",
  "rayon",
  "serde",

@@ -297,6 +297,7 @@ fn draw_frames(
     doc: Option<Res<ActiveDocument>>,
     cache: Res<crate::parts::PartCache>,
     ui: Res<CamUi>,
+    dialog: Option<Res<super::dialogs::CamDialog>>,
     mut g: Gizmos,
 ) {
     let Some(doc) = doc else { return };
@@ -318,6 +319,26 @@ fn draw_frames(
             (b[0].max(b[1]).max(b[2]) * 0.18).clamp(5.0, 60.0) as f32
         })
         .unwrap_or(20.0);
+    // The setup or work plane being edited: its triad as the dialog has it now.
+    if let Some(d) = &dialog {
+        match &d.draft {
+            super::dialogs::Draft::Setup { setup, job, .. } => {
+                if let Some(j) = cam.job(*job) {
+                    triad(
+                        &mut g,
+                        &program::work_frame(cam, j, &setup.wcs, parts),
+                        size,
+                    );
+                }
+            }
+            super::dialogs::Draft::WorkPlane { op, .. } => {
+                if let OpKind::WorkPlane(w) = &op.kind {
+                    triad(&mut g, &program::work_frame(cam, job, w, parts), size * 0.8);
+                }
+            }
+            _ => {}
+        }
+    }
     for s in job.setups.iter().filter(|s| !s.suppressed) {
         if s.wcs.show_triad {
             triad(&mut g, &program::setup_frame(cam, job, s, parts), size);

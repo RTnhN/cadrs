@@ -113,6 +113,8 @@ pub struct PreviewState {
     paused_at: Option<f64>,
     /// The stock before the run: as the toolpaths before the previewed ones leave it.
     start: Option<HeightMap>,
+    /// A cut sheet's pieces (when the run's check is done), each with whether it's a part.
+    sheet: Option<Vec<(cadrs_core::cam::cadrs_cam::region::Region, bool)>>,
     /// How many warnings the run's toolpaths carry (the readout counts them).
     warnings: usize,
     /// The check of the whole run, on a worker thread until it's done.
@@ -127,6 +129,8 @@ struct Analysis {
     part: Option<HeightMap>,
     /// The stock as the toolpaths before the previewed ones leave it (when there are any).
     start: Option<HeightMap>,
+    /// A cut sheet's pieces, each with whether it's a part cut free.
+    sheet: Option<Vec<(cadrs_core::cam::cadrs_cam::region::Region, bool)>>,
 }
 
 impl PreviewState {
@@ -409,6 +413,7 @@ pub fn open_for_selection(world: &mut World) {
                     collisions: Vec::new(),
                     part: None,
                     start: None,
+                    sheet: None,
                 });
                 let _ = tx.send(a);
             });
@@ -442,6 +447,7 @@ pub fn open_for_selection(world: &mut World) {
         collisions: Vec::new(),
         paused_at: None,
         start: None,
+        sheet: None,
         warnings: run.ops.iter().map(|o| o.toolpath.warnings.len()).sum(),
         analysis,
     });
@@ -497,11 +503,18 @@ fn analyse(
                 String::new()
             }
         );
+        let sheet = r
+            .pieces
+            .iter()
+            .zip(&r.part_pieces)
+            .map(|(f, part)| (f.rings(), *part))
+            .collect();
         return Analysis {
             summary,
             collisions: Vec::new(),
             part: None,
             start: None,
+            sheet: Some(sheet),
         };
     }
     // From the stock the toolpaths before leave.
@@ -608,6 +621,7 @@ fn analyse(
         collisions,
         part: Some(part.eroded()),
         start,
+        sheet: None,
     }
 }
 
@@ -625,6 +639,7 @@ fn poll_analysis(state: Option<ResMut<PreviewState>>) {
             collisions: Vec::new(),
             part: None,
             start: None,
+            sheet: None,
         },
     };
     s.analysis = None;
@@ -635,6 +650,7 @@ fn poll_analysis(state: Option<ResMut<PreviewState>>) {
     };
     s.collisions = got.collisions;
     s.part = got.part;
+    s.sheet = got.sheet;
     if let Some(start) = got.start {
         // Played again from the in-process stock.
         s.map = Some(start.clone());
@@ -1183,6 +1199,37 @@ fn draw(
 #[derive(Component)]
 struct VerifyMesh;
 
+/// A cut sheet as Verify shows it: its pieces at the top of the sheet, the parts cut free in
+/// the parts' blue, the scrap and skeleton grey; the kerf is the gaps between them.
+fn sheet_mesh(
+    pieces: &[(cadrs_core::cam::cadrs_cam::region::Region, bool)],
+    z: f64,
+    frame: &Frame,
+) -> Mesh {
+    use cadrs_core::cam::cadrs_cam::region;
+    let mut pos: Vec<[f32; 3]> = Vec::new();
+    let mut col: Vec<[f32; 4]> = Vec::new();
+    for (rings, part) in pieces {
+        let c = if *part {
+            [0.47, 0.62, 0.78, 1.0]
+        } else {
+            [0.80, 0.82, 0.86, 1.0]
+        };
+        for t in region::triangulate(rings) {
+            for q in t {
+                pos.push(v3(frame.to_world([q[0], q[1], z])).to_array());
+                col.push(c);
+            }
+        }
+    }
+    Mesh::new(
+        bevy::mesh::PrimitiveTopology::TriangleList,
+        bevy::asset::RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+}
+
 /// Verify's stock: the height map as a surface (cut areas shaded by depth, gouges red), built
 /// again at most ten times a second while it changes.
 #[allow(clippy::too_many_arguments)]
@@ -1200,7 +1247,9 @@ fn sync_stock_mesh(
         }
         return;
     };
-    if s.mode == Mode::BackPlot || s.map.is_none() {
+    let at_end = s.t >= s.total() - 1e-9;
+    let sheet = s.beam && s.sheet.is_some() && at_end;
+    if s.mode == Mode::BackPlot || (s.map.is_none() && !sheet) {
         for e in &q {
             commands.entity(e).despawn();
         }
@@ -1215,7 +1264,15 @@ fn sync_stock_mesh(
     }
     s.mesh_dirty = false;
     s.mesh_at = Some(Instant::now());
-    let mesh = height_mesh(s.map.as_ref().unwrap(), s.part.as_ref(), s.top, &s.frame);
+    let mesh = match &s.map {
+        Some(map) => height_mesh(map, s.part.as_ref(), s.top, &s.frame),
+        // (A hair over the sheet's top, which the part's top face shares.)
+        None => sheet_mesh(
+            s.sheet.as_deref().unwrap_or_default(),
+            s.stock.bounds.max[2] + 0.05,
+            &s.frame,
+        ),
+    };
     let m = mat
         .get_or_insert_with(|| {
             materials.add(StandardMaterial {

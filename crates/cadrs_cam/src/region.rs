@@ -204,6 +204,29 @@ pub fn clip_open(lines: &[Vec<P2>], r: &[Ring]) -> Vec<Vec<P2>> {
     pieces.into_iter().map(|(_, p)| p).collect()
 }
 
+/// Triangles covering a region (holes kept out), as corner triples.
+pub fn triangulate(r: &[Ring]) -> Vec<[P2; 3]> {
+    let mut out = Vec::new();
+    for face in faces(r) {
+        let mut flat: Vec<f64> = face.outer.iter().flat_map(|p| [p[0], p[1]]).collect();
+        let mut holes = Vec::new();
+        for h in &face.holes {
+            holes.push(flat.len() / 2);
+            flat.extend(h.iter().flat_map(|p| [p[0], p[1]]));
+        }
+        if let Ok(idx) = earcutr::earcut(&flat, &holes, 2) {
+            let pt = |i: usize| [flat[2 * i], flat[2 * i + 1]];
+            out.extend(
+                idx.as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|t| [pt(t[0]), pt(t[1]), pt(t[2])]),
+            );
+        }
+    }
+    out
+}
+
 /// Whether `p` is inside the region (even-odd over its rings: holes are inside their outer
 /// ring).
 pub fn contains(r: &[Ring], p: P2) -> bool {
@@ -369,6 +392,25 @@ mod tests {
             .find(|l| (l[0][0] - 5.0).abs() < 1e-9 && (l[1][0] - 5.0).abs() < 1e-9)
             .unwrap();
         assert!(v[0][1] > v[v.len() - 1][1]);
+    }
+
+    #[test]
+    fn triangles_cover_a_holed_square() {
+        let holed = difference(
+            &[rect([0.0, 0.0], [10.0, 10.0])],
+            &[rect([3.0, 3.0], [7.0, 7.0])],
+        );
+        let t = triangulate(&holed);
+        let a: f64 = t
+            .iter()
+            .map(|t| {
+                ((t[1][0] - t[0][0]) * (t[2][1] - t[0][1])
+                    - (t[2][0] - t[0][0]) * (t[1][1] - t[0][1]))
+                    .abs()
+                    / 2.0
+            })
+            .sum();
+        assert!((a - 84.0).abs() < 1e-6, "{a}");
     }
 
     #[test]

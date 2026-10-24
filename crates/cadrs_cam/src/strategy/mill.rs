@@ -76,14 +76,14 @@ pub(super) fn fixture_footprint(input: &Input) -> Region {
         }
     }
     let key = h.finish();
-    let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((k, r)) = c.as_ref()
+    // (The lock only round the lookups: toolpaths calculated at once don't wait on the union.)
+    if let Some((k, r)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
         && *k == key
     {
         return r.clone();
     }
     let r = crate::model::Model::from_triangles("fixtures", input.fixtures.to_vec()).silhouette();
-    *c = Some((key, r.clone()));
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, r.clone()));
     r
 }
 

@@ -369,6 +369,8 @@ pub struct SheetResult {
     pub damage: f64,
     /// Pieces that are a part (inside its outline), cut free.
     pub parts_free: usize,
+    /// Which of `pieces` are a part cut free (the rest is scrap or the skeleton).
+    pub part_pieces: Vec<bool>,
     /// Total cut length (mm).
     pub cut_length: f64,
 }
@@ -410,18 +412,20 @@ pub fn simulate_sheet(stock: &Stock, model: &Model, ops: &[SimOp]) -> SheetResul
     let damage = region::area(&region::intersection(&kerf, &region::offset(&sil, -0.02)));
     // A part piece lies within the part's outline (allowing for the arc tolerance).
     let grown = region::offset(&sil, 0.05);
-    let parts_free = pieces
+    let part_pieces: Vec<bool> = pieces
         .iter()
-        .filter(|f| {
+        .map(|f| {
             let inside = region::area(&region::intersection(&f.rings(), &grown));
             (inside - f.area()).abs() < f.area() * 1e-3 + 1e-3
         })
-        .count();
+        .collect();
+    let parts_free = part_pieces.iter().filter(|p| **p).count();
     SheetResult {
         kerf,
         pieces,
         damage,
         parts_free,
+        part_pieces,
         cut_length,
     }
 }
