@@ -70,6 +70,15 @@ impl MachineKind {
     }
 }
 
+/// Indexing rotary axes (a trunnion table or a tilting head): the machine tilts the tool to
+/// a work plane and cuts 3-axis in it (3+2), its control working out the rotary axes from a
+/// tilted working plane (`G68.2`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Indexing {
+    /// The most the tool may tilt from the table's vertical (degrees).
+    pub max_tilt: f64,
+}
+
 /// A machine a job runs on.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Machine {
@@ -90,6 +99,9 @@ pub struct Machine {
     pub max_spindle: f64,
     /// Has an automatic tool changer (else the post stops for a manual change).
     pub tool_changer: bool,
+    /// Rotary axes for 3+2 machining (`None`: 3 axes only).
+    #[serde(default)]
+    pub indexing: Option<Indexing>,
     /// The post settings a job starts from.
     pub post: PostSettings,
 }
@@ -116,8 +128,21 @@ impl Machine {
             max_feed,
             max_spindle,
             tool_changer,
+            indexing: None,
             post: PostSettings::for_dialect(dialect, kind),
         }
+    }
+
+    fn indexing(mut self, max_tilt: f64) -> Machine {
+        self.indexing = Some(Indexing { max_tilt });
+        self
+    }
+
+    /// Whether it can cut in a work plane whose Z is `z` (setup coordinates): along the
+    /// setup's Z on any machine, tilted within its limit with indexing.
+    pub fn can_tilt_to(&self, z: crate::geom::P3) -> bool {
+        let tilt = z[2].clamp(-1.0, 1.0).acos().to_degrees();
+        tilt < 1e-6 || self.indexing.is_some_and(|i| tilt <= i.max_tilt + 1e-9)
     }
 
     /// "Generic 3-axis mill — Fanuc".
@@ -246,6 +271,28 @@ pub fn catalog() -> Vec<Machine> {
             1.0,
             false,
         ),
+        Machine::new(
+            "5-axis trunnion mill (3+2) — Fanuc",
+            Mill,
+            Fanuc,
+            [650.0, 520.0, 475.0],
+            30_000.0,
+            15_000.0,
+            15_000.0,
+            true,
+        )
+        .indexing(110.0),
+        Machine::new(
+            "5-axis trunnion mill (3+2) — Haas-style",
+            Mill,
+            Haas,
+            [762.0, 508.0, 508.0],
+            25_400.0,
+            16_500.0,
+            8_100.0,
+            true,
+        )
+        .indexing(110.0),
     ]
 }
 

@@ -222,6 +222,42 @@ pub struct NcOperation {
     pub stop_before: bool,
     /// Make the tool change even when the same tool is in.
     pub force_tool_change: bool,
+    /// Cut in a tilted working plane (3+2): its moves are in that plane's coordinates.
+    pub tilt: Option<Tilt>,
+}
+
+/// A tilted working plane (3+2): where an operation's coordinates are, in the setup's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tilt {
+    /// The plane's origin in the setup's coordinates.
+    pub origin: P3,
+    /// Its orientation as Euler angles (degrees): about Z, then the new X, then the new Z,
+    /// as `G68.2 … I J K` takes them.
+    pub euler: [f64; 3],
+    /// Its Z axis in the setup's coordinates (the tool's axis).
+    pub z: P3,
+}
+
+impl Tilt {
+    /// The tilt of a frame given in the setup's coordinates.
+    pub fn of(f: &crate::Frame) -> Tilt {
+        // Columns of the rotation: the frame's axes. R = Rz(a) Rx(b) Rz(c).
+        let r = |i: usize, j: usize| [f.x, f.y, f.z][j][i];
+        let b = r(2, 2).clamp(-1.0, 1.0).acos();
+        let (a, c) = if b.sin().abs() > 1e-9 {
+            (r(0, 2).atan2(-r(1, 2)), r(2, 0).atan2(r(2, 1)))
+        } else if r(2, 2) > 0.0 {
+            // About Z only: a + c.
+            (0.0, r(1, 0).atan2(r(0, 0)))
+        } else {
+            (0.0, (-r(0, 1)).atan2(r(0, 0)))
+        };
+        Tilt {
+            origin: f.origin,
+            euler: [a.to_degrees(), b.to_degrees(), c.to_degrees()],
+            z: f.z,
+        }
+    }
 }
 
 /// What to post.
@@ -240,6 +276,8 @@ pub enum PostError {
     WrongTool(String),
     /// A move leaves the machine's travel.
     OutOfTravel(String),
+    /// An operation tilts the tool where the machine can't.
+    CantTilt(String),
 }
 
 impl std::fmt::Display for PostError {
@@ -248,6 +286,7 @@ impl std::fmt::Display for PostError {
             PostError::Empty => write!(f, "There is nothing to post"),
             PostError::WrongTool(s) => write!(f, "{s}"),
             PostError::OutOfTravel(s) => write!(f, "{s}"),
+            PostError::CantTilt(s) => write!(f, "{s}"),
         }
     }
 }
@@ -451,6 +490,23 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         }
     }
     let d = machine.dialect;
+    for op in &program.operations {
+        if let Some(t) = op.tilt {
+            if !matches!(d, Dialect::Fanuc | Dialect::Haas) {
+                return Err(PostError::CantTilt(format!(
+                    "{}: tilted work planes are posted for Fanuc and Haas-style controls \
+                     (G68.2)",
+                    op.name
+                )));
+            }
+            if !machine.can_tilt_to(t.z) {
+                return Err(PostError::CantTilt(format!(
+                    "{}: the work plane tilts the tool further than the machine can",
+                    op.name
+                )));
+            }
+        }
+    }
     let mut w = Writer::new(s, d);
     if d.program_number() {
         w.raw("%");
@@ -484,6 +540,7 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
         w.no_z = true;
     }
     let mut tool_in: Option<u32> = None;
+    let mut tilted: Option<Tilt> = None;
     let mut datum: Option<u32> = None;
     let mut coolant = Coolant::Off;
     let beam = machine.kind.is_cutting();
@@ -492,6 +549,13 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             continue;
         }
         w.comment(&op.name);
+        // Out of a tilted plane that isn't this one's: up clear, then cancel it.
+        if tilted.is_some() && tilted != op.tilt {
+            retract_home(&mut w, d);
+            w.block("G69");
+            tilted = None;
+            w.at = [None; 3];
+        }
         // Tool change.
         if machine.kind.is_milling() && (tool_in != Some(op.tool_number) || op.force_tool_change) {
             if tool_in.is_some() {
@@ -541,9 +605,33 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
             datum = Some(want);
             w.at = [None; 3];
         }
+        // Into the tilted plane: up clear first, the plane, then the rotary axes to it.
+        if let Some(t) = op.tilt
+            && tilted.is_none()
+        {
+            retract_home(&mut w, d);
+            let line = format!(
+                "G68.2 X{} Y{} Z{} I{} J{} K{}",
+                w.num(t.origin[0]),
+                w.num(t.origin[1]),
+                w.num(t.origin[2]),
+                decimal(t.euler[0], 4, s.decimal_point),
+                decimal(t.euler[1], 4, s.decimal_point),
+                decimal(t.euler[2], 4, s.decimal_point)
+            );
+            w.block(&line);
+            w.block("G53.1");
+            tilted = Some(t);
+            w.at = [None; 3];
+            w.mode = None;
+        }
         post_moves(&mut w, op, machine, s, beam, &mut coolant);
     }
     // End.
+    if tilted.is_some() {
+        retract_home(&mut w, d);
+        w.block("G69");
+    }
     if qtplasmac(machine) {
         w.block("M5 $0");
     } else if beam {
@@ -1026,6 +1114,7 @@ mod tests {
             datum: 1,
             stop_before: false,
             force_tool_change: false,
+            tilt: None,
         }
     }
 
@@ -1140,6 +1229,7 @@ mod tests {
             datum: 1,
             stop_before: false,
             force_tool_change: false,
+            tilt: None,
         };
         let p = NcProgram {
             name: "Holes".into(),
@@ -1388,6 +1478,7 @@ mod tests {
                 datum: 1,
                 stop_before: false,
                 force_tool_change: false,
+                tilt: None,
             });
         }
         for d in Dialect::ALL {
@@ -1411,5 +1502,107 @@ mod tests {
                 assert!(e < 0.01, "{d:?}: {q:?} is {e} mm off the toolpath");
             }
         }
+    }
+
+    #[test]
+    fn tilt_angles_rebuild_the_frame() {
+        use crate::Frame;
+        let rz = |a: f64| {
+            let (s, c) = a.to_radians().sin_cos();
+            [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
+        };
+        let rx = |a: f64| {
+            let (s, c) = a.to_radians().sin_cos();
+            [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]]
+        };
+        let mul = |a: [[f64; 3]; 3], b: [[f64; 3]; 3]| {
+            let mut m = [[0.0; 3]; 3];
+            for i in 0..3 {
+                for j in 0..3 {
+                    m[i][j] = (0..3).map(|k| a[i][k] * b[k][j]).sum();
+                }
+            }
+            m
+        };
+        for f in [
+            Frame::from_zx([1.0, 2.0, 3.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+            Frame::from_zx([0.0; 3], [1.0, 1.0, 1.0], [0.0, 0.0, 1.0]),
+            Frame::from_zx([0.0; 3], [0.3, -0.2, -0.9], [1.0, 0.5, 0.0]),
+            Frame::from_zx([0.0; 3], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+        ] {
+            let t = Tilt::of(&f);
+            let [a, b, c] = t.euler;
+            let r = mul(mul(rz(a), rx(b)), rz(c));
+            for (j, axis) in [f.x, f.y, f.z].iter().enumerate() {
+                for i in 0..3 {
+                    assert!((r[i][j] - axis[i]).abs() < 1e-9, "{f:?} → {:?}", t.euler);
+                }
+            }
+        }
+        // Tipped 90° about X: the front of the part up to the spindle.
+        let f = Frame::from_zx([0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+        let e = Tilt::of(&f).euler;
+        assert!(
+            e[0].abs() < 1e-9 && (e[1] - 90.0).abs() < 1e-9 && e[2].abs() < 1e-9,
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn tilted_planes_post_as_g68_2() {
+        let five = catalog()
+            .into_iter()
+            .find(|m| m.indexing.is_some() && m.dialect == Dialect::Fanuc)
+            .unwrap();
+        let frame = crate::Frame::from_zx([0.0, -20.0, 5.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+        let mut tilted = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+        tilted.tilt = Some(Tilt::of(&frame));
+        tilted.name = "Side".into();
+        let flat = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+        let p = NcProgram {
+            name: "Block".into(),
+            number: 7,
+            operations: vec![flat.clone(), tilted.clone(), flat.clone()],
+        };
+        let nc = post(&p, &five, &five.post).unwrap();
+        let lines: Vec<&str> = nc
+            .lines()
+            .map(|l| {
+                l.split_once(' ')
+                    .filter(|(n, _)| n.starts_with('N'))
+                    .map_or(l, |(_, r)| r)
+            })
+            .collect();
+        let at = |code: &str| {
+            lines
+                .iter()
+                .position(|l| l.starts_with(code))
+                .unwrap_or_else(|| panic!("{code} in {nc}"))
+        };
+        assert!(lines.contains(&"G68.2 X0. Y-20. Z5. I0. J90. K0."), "{nc}");
+        let g68 = at("G68.2");
+        assert_eq!(lines[g68 + 1], "G53.1");
+        // Up clear before tilting and before cancelling.
+        assert!(lines[g68 - 2].starts_with("G91 G28 Z0."), "{nc}");
+        let g69 = at("G69");
+        assert!(
+            g69 > g68 && lines[g69 - 2].starts_with("G91 G28 Z0."),
+            "{nc}"
+        );
+        // The tilted operation's moves come between them, in its own coordinates.
+        assert!(lines[g68..g69].iter().any(|l| l.contains("X10.")));
+        assert_eq!(lines.iter().filter(|l| l.starts_with("G68.2")).count(), 1);
+        // Not on a 3-axis machine, nor on LinuxCNC.
+        let three = machine(MachineKind::Mill, Dialect::Fanuc);
+        assert!(matches!(
+            post(&p, &three, &three.post),
+            Err(PostError::CantTilt(_))
+        ));
+        let mut lcnc = five.clone();
+        lcnc.dialect = Dialect::LinuxCnc;
+        assert!(matches!(
+            post(&p, &lcnc, &lcnc.post),
+            Err(PostError::CantTilt(_))
+        ));
     }
 }

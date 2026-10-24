@@ -20,6 +20,7 @@
 //!   holes before outlines), Etch (marking along edges) and Fill (laser hatching).
 
 pub mod beam;
+pub mod collision;
 pub mod finish;
 pub mod holes;
 pub mod link;
@@ -627,6 +628,17 @@ impl Default for BeamCut {
     }
 }
 
+/// The Axis tab: the direction the tool cuts along.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub enum ToolAxis {
+    /// The work plane's Z (the setup's, or the work plane above the toolpath's).
+    #[default]
+    WorkPlane,
+    /// A direction of its own in model coordinates (a picked face's normal): the toolpath is
+    /// worked out in the work plane turned to it, cut on a 3+2 machine.
+    Direction(crate::geom::P3),
+}
+
 /// Everything a toolpath's dialog sets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Params {
@@ -678,6 +690,12 @@ pub struct Params {
     pub smooth_corners: f64,
     /// Chordal accuracy (mm).
     pub tolerance: f64,
+    /// The Collision tab.
+    #[serde(default)]
+    pub collision: collision::Collision,
+    /// The Axis tab.
+    #[serde(default)]
+    pub axis: ToolAxis,
 }
 
 fn yes() -> bool {
@@ -717,6 +735,8 @@ impl Params {
             steep_angle: 30.0,
             tabs: Tabs::default(),
             links: Links::default(),
+            collision: collision::Collision::default(),
+            axis: ToolAxis::WorkPlane,
             speeds: Speeds {
                 spindle_rpm: c.spindle_rpm,
                 feed: c.feed,
@@ -1115,6 +1135,11 @@ pub fn generate(input: &Input) -> Result<Toolpath, String> {
         Pattern::Etch => beam::etch(input),
         Pattern::Fill => beam::fill(input),
     }?;
+    let tp = if input.machine.is_milling() {
+        collision::apply(input, tp)
+    } else {
+        tp
+    };
     if tp.is_empty() {
         return Err(format!(
             "{} found nothing to cut{}",

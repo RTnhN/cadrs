@@ -34,7 +34,7 @@ pub mod tool;
 pub mod toolpath;
 
 pub use geom::{Aabb, Frame, P2, P3};
-pub use machine::{Machine, MachineKind};
+pub use machine::{Indexing, Machine, MachineKind};
 pub use model::Model;
 pub use post::{Dialect, NcOperation, NcProgram, PostSettings, post};
 pub use strategy::{Input, Params, Pattern, Stock, Type, generate};

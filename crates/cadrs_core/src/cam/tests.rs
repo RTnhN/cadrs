@@ -65,6 +65,12 @@ impl Fixture {
 
     /// Inserts the plate, creates a job, a machine of `kind` and a setup; returns (job, setup).
     fn job(&mut self, kind: MachineKind) -> (CamId, CamId) {
+        let machine = catalog().into_iter().find(|m| m.kind == kind).unwrap();
+        self.job_on(machine)
+    }
+
+    /// [`Fixture::job`] on `machine`.
+    fn job_on(&mut self, machine: cadrs_cam::Machine) -> (CamId, CamId) {
         let c =
             workspace_component(&self.doc, self.studio, with_hole::PLATE_PART, Role::Part).unwrap();
         self.run(Edit::AddComponents {
@@ -84,7 +90,6 @@ impl Fixture {
         };
         let jid = job.id;
         self.run(Edit::AddJob(Box::new(job))).unwrap();
-        let machine = catalog().into_iter().find(|m| m.kind == kind).unwrap();
         self.run(Edit::SetMachine {
             job: jid,
             machine: Some(Box::new(machine)),
@@ -486,4 +491,84 @@ fn saved_and_loaded() {
     let back: Document = ron::from_str(&text).unwrap();
     let el = back.element(f.cam).unwrap();
     assert_eq!(el.cam().unwrap(), f.cam());
+}
+
+/// 3+2: a profile round the plate's front face, from a Dynamic work plane tipped 90° on a
+/// trunnion mill; it posts as a tilted working plane and Verify leaves it out.
+#[test]
+fn dynamic_work_plane_posts_a_tilted_plane() {
+    let mut f = Fixture::new();
+    let five = catalog()
+        .into_iter()
+        .find(|m| m.indexing.is_some() && m.dialect == cadrs_cam::Dialect::Fanuc)
+        .unwrap();
+    let (job, setup) = f.job_on(five);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let top = f.add_toolpath(
+        setup,
+        Params::new(Pattern::Profile2D, &em, MachineKind::Mill),
+    );
+    let wp = Operation {
+        id: CamId::new(),
+        name: "Front".into(),
+        kind: OpKind::WorkPlane(Box::new(WorkPlane {
+            z: [0.0, -1.0, 0.0],
+            x: [1.0, 0.0, 0.0],
+            kind: WorkPlaneType::Dynamic,
+            ..WorkPlane::default()
+        })),
+        suppressed: false,
+        hidden: false,
+    };
+    f.run(Edit::AddOperation {
+        setup,
+        after: None,
+        op: Box::new(wp),
+    })
+    .unwrap();
+    let mut p = Params::new(Pattern::Face, &em, MachineKind::Mill);
+    p.step_down = 0.5;
+    let front = f.add_toolpath(setup, p.clone());
+    // The right end faced on the Axis tab's own direction.
+    p.axis = cadrs_cam::strategy::ToolAxis::Direction([1.0, 0.0, 0.0]);
+    let right = f.add_toolpath(setup, p);
+    let mut paths = HashMap::new();
+    paths.insert(top, f.compute(top).unwrap());
+    paths.insert(front, f.compute(front).unwrap());
+    paths.insert(right, f.compute(right).unwrap());
+    let parts = f.parts();
+    let cam = f.cam();
+    let j = cam.job(job).unwrap();
+    let s = &j.setups[0];
+    let run = program::setup_run(cam, j, s, &parts, &paths, None).unwrap();
+    assert!(!run.ops[0].tilted && run.ops[1].tilted && run.ops[2].tilted);
+    // The right end's facing runs over x = 30 and out.
+    let right_cuts =
+        cadrs_cam::Aabb::of(run.ops[2].toolpath.steps.iter().filter_map(|s| match s {
+            Step::Feed {
+                to,
+                kind: cadrs_cam::toolpath::FeedKind::Cut,
+                ..
+            } => Some(*to),
+            _ => None,
+        }));
+    assert!(right_cuts.min[0] > 29.9, "{right_cuts:?}");
+    // In the setup's coordinates the facing runs over the plate's front (y = −20 and out).
+    let cuts = cadrs_cam::Aabb::of(run.ops[1].toolpath.steps.iter().filter_map(|s| match s {
+        Step::Feed {
+            to,
+            kind: cadrs_cam::toolpath::FeedKind::Cut,
+            ..
+        } => Some(*to),
+        _ => None,
+    }));
+    assert!(cuts.max[1] < -19.9 && cuts.min[1] > -30.0, "{cuts:?}");
+    let nc = program::post_setup(s, j, &run).unwrap();
+    let g68 = nc.lines().find(|l| l.contains("G68.2")).expect(&nc);
+    assert!(g68.contains("I0. J90. K0."), "{g68}");
+    assert_eq!(nc.matches("G68.2").count(), 2, "{nc}");
+    assert!(nc.contains("G53.1") && nc.contains("G69"), "{nc}");
+    // Verify runs, the tilted facing left out.
+    assert!(program::simulate(cam, j, &run, &parts, None, 0.2).is_ok());
 }

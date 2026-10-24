@@ -71,6 +71,10 @@ struct OpSpan {
     first: usize,
     name: String,
     tool: Tool,
+    /// In a tilted work plane (3+2): shown, but not simulated on the height map.
+    tilted: bool,
+    /// The tool's axis (the run's coordinates).
+    axis: P3,
 }
 
 /// The open preview.
@@ -175,15 +179,14 @@ impl PreviewState {
         };
         while self.applied < done {
             let s = self.timeline.segments[self.applied];
-            if !s.is_rapid() {
-                let tool = &self
-                    .ops
-                    .iter()
-                    .rev()
-                    .find(|o| o.first <= self.applied)
-                    .map(|o| o.tool.clone())
-                    .unwrap_or_else(|| self.ops[0].tool.clone());
-                map.cut(tool, s.from, s.to);
+            let op = self
+                .ops
+                .iter()
+                .rev()
+                .find(|o| o.first <= self.applied)
+                .unwrap_or(&self.ops[0]);
+            if !s.is_rapid() && !op.tilted {
+                map.cut(&op.tool, s.from, s.to);
             }
             self.applied += 1;
             self.mesh_dirty = true;
@@ -292,6 +295,11 @@ pub fn open_for_selection(world: &mut World) {
             first: segments.len(),
             name: o.name.to_string(),
             tool: o.tool.clone(),
+            tilted: o.tilted,
+            axis: o
+                .plane
+                .as_ref()
+                .map_or([0.0, 0.0, 1.0], |(wf, _, _)| run.frame.dir_to_local(wf.z)),
         });
         let m = o.toolpath.motion(at, machine.rapid_rate);
         if let Some(l) = m.last() {
@@ -383,6 +391,9 @@ fn analyse(
     beam: bool,
     cell: f64,
 ) -> Analysis {
+    // Simulated in the run's order; a tilted operation (3+2) is left out, its moves cut
+    // nothing on a height map along the setup's Z. (Kept as an empty op so collisions keep
+    // their operation's index.)
     let ops: Vec<SimOp> = spans
         .iter()
         .enumerate()
@@ -390,10 +401,20 @@ fn analyse(
             let end = spans.get(k + 1).map_or(segments.len(), |n| n.first);
             SimOp {
                 tool: &sp.tool,
-                segments: &segments[sp.first..end],
+                segments: if sp.tilted {
+                    &[]
+                } else {
+                    &segments[sp.first..end]
+                },
             }
         })
         .collect();
+    let tilted = spans.iter().filter(|s| s.tilted).count();
+    let not_simulated = match tilted {
+        0 => String::new(),
+        1 => " · 1 tilted operation not simulated".into(),
+        n => format!(" · {n} tilted operations not simulated"),
+    };
     if beam {
         let r = sim::simulate_sheet(stock, model, &ops);
         let summary = format!(
@@ -425,7 +446,7 @@ fn analyse(
     for (k, p) in r.holder_hits.iter() {
         collisions.push((
             time_near(&tl, spans, *k, *p),
-            format!("{}: the cut is deeper than the flutes", spans[*k].name),
+            format!("{}: the shank or holder meets the stock", spans[*k].name),
         ));
     }
     collisions.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -451,7 +472,7 @@ fn analyse(
         } else {
             String::new()
         }
-    );
+    ) + &not_simulated;
     let mut part = r.stock.blank();
     part.rasterize(&model.triangles, false);
     Analysis {
@@ -944,7 +965,7 @@ fn draw(
     let Some(op) = s.op_at(i) else { return };
     let tool = &op.tool;
     let f = &s.frame;
-    let axis = v3(f.z);
+    let axis = v3(f.dir_to_world(op.axis));
     let tip = v3(f.to_world(p));
     let iso = Isometry3d::new(tip, Quat::from_rotation_arc(Vec3::Z, axis));
     let r = tool.radius() as f32;

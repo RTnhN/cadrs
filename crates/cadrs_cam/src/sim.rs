@@ -32,7 +32,8 @@ pub struct MillResult {
     pub gouge_depth: f64,
     /// Rapids into material: (operation, where).
     pub rapid_hits: Vec<(usize, P3)>,
-    /// Cuts with more material over the tip than the flutes are long: (operation, where).
+    /// Cuts with more material over the tip than the flutes are long, or with the holder
+    /// (or arbor) meeting the stock: (operation, where).
     pub holder_hits: Vec<(usize, P3)>,
     /// The most material left on the part (mm).
     pub excess: f64,
@@ -89,6 +90,18 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
     for (k, op) in ops.iter().enumerate() {
         let r = op.tool.radius();
         let flutes = op.tool.cutting_length.max(0.1);
+        // The holder and arbor: discs above the stick-out (the shank is the flutes' check).
+        let holder: Vec<(f64, f64)> = crate::strategy::collision::assembly_discs(
+            op.tool,
+            &crate::strategy::collision::Collision {
+                shank_clearance: 0.0,
+                holder_clearance: 0.0,
+                ..Default::default()
+            },
+        )
+        .into_iter()
+        .filter(|d| d.1 >= op.tool.overall_length - 1e-9)
+        .collect();
         for s in op.segments {
             let len =
                 dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]).max((s.to[2] - s.from[2]).abs());
@@ -119,7 +132,11 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
                 let p = crate::geom::lerp(s.from, s.to, i as f64 / pieces as f64);
                 if !hit {
                     let top = max_in_disc(&map, [p[0], p[1]], r * 0.95);
-                    if top != EMPTY && top as f64 - p[2] > flutes + 0.01 {
+                    let holder_hit = holder.iter().any(|(hr, hh)| {
+                        let t = max_in_disc(&map, [p[0], p[1]], *hr);
+                        t != EMPTY && t as f64 > p[2] + hh + 0.01
+                    });
+                    if holder_hit || (top != EMPTY && top as f64 - p[2] > flutes + 0.01) {
                         if holder_hits.len() < MAX_REPORTED {
                             holder_hits.push((k, p));
                         }
@@ -464,5 +481,42 @@ mod tests {
         assert_eq!(r.parts_free, 1);
         assert_eq!(r.pieces.len(), 2);
         assert!((r.cut_length - 120.0).abs() < 8.0, "{}", r.cut_length);
+    }
+
+    /// A Ø30 holder 20 above the tip: down a hole 25 deep (the flutes 30 long), it sits on
+    /// the stock.
+    #[test]
+    fn holder_meets_the_stock() {
+        let m = Model::from_triangles(
+            "b",
+            box_triangles(&Aabb::new([0.0, 0.0, 0.0], [10.0, 10.0, 1.0])),
+        );
+        let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [60.0, 20.0, 40.0]));
+        let mut tool = Tool::new(ToolKind::EndMill, 6.0);
+        tool.cutting_length = 30.0;
+        tool.overall_length = 20.0;
+        tool.holder = Some(crate::tool::Profile::cylinder("h", 30.0, 40.0));
+        let down = vec![feed([40.0, 10.0, 45.0], [40.0, 10.0, 15.0])];
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &down,
+            }],
+            0.2,
+        );
+        assert!(!r.holder_hits.is_empty());
+        tool.holder = None;
+        let r = simulate_mill(
+            &stock,
+            &m,
+            &[SimOp {
+                tool: &tool,
+                segments: &down,
+            }],
+            0.2,
+        );
+        assert!(r.holder_hits.is_empty(), "{:?}", r.holder_hits);
     }
 }

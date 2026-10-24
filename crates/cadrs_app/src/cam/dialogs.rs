@@ -1100,6 +1100,19 @@ impl Draft {
                         "Automatic tool changer",
                         machine.tool_changer,
                     ));
+                    f.push(Field::check(
+                        "indexing",
+                        "Indexing rotary axes (3+2)",
+                        machine.indexing.is_some(),
+                    ));
+                    if let Some(ix) = machine.indexing {
+                        f.push(Field::number(
+                            "max-tilt",
+                            "Largest tilt",
+                            ix.max_tilt,
+                            Unit::Deg,
+                        ));
+                    }
                 } else if machine.kind == MachineKind::Laser {
                     f.push(Field::number(
                         "max-spindle",
@@ -1528,18 +1541,22 @@ impl Draft {
                 let tool = tool_above(ctx.cam, *setup, op.id);
                 let tk = tool.as_ref().map_or(ToolKind::EndMill, |t| t.kind);
                 let beam = tk.is_beam();
-                let mut tabs = vec!["Tool path", "Link", "Misc"];
-                if beam {
-                    tabs.push("Beam");
-                }
+                let tabs: &[&str] = if beam {
+                    &["Tool path", "Link", "Misc", "Beam"]
+                } else {
+                    &["Tool path", "Link", "Axis", "Collision", "Misc"]
+                };
+                let selected = tab.min(tabs.len() - 1);
                 f.push(Field::Tabs {
                     key: "tab".into(),
                     labels: tabs.iter().map(|s| s.to_string()).collect(),
-                    selected: tab.min(tabs.len() - 1),
+                    selected,
                 });
-                match tab {
-                    1 => link_fields(&mut f, p, beam),
-                    2 => {
+                match tabs[selected] {
+                    "Link" => link_fields(&mut f, p, beam),
+                    "Axis" => axis_fields(&mut f, ctx, *setup, p, picking),
+                    "Collision" => collision_fields(&mut f, p, tool.as_ref()),
+                    "Misc" => {
                         f.push(Field::section("Quality"));
                         f.push(Field::number(
                             "tolerance",
@@ -1557,7 +1574,7 @@ impl Draft {
                             ));
                         }
                     }
-                    3 if beam => {
+                    "Beam" => {
                         f.push(Field::section("Beam"));
                         f.push(Field::number(
                             "beam-power",
@@ -1620,6 +1637,127 @@ impl Draft {
 
 fn fmt(v: f64) -> String {
     form::fmt_num(v, Unit::None)
+}
+
+/// The Axis tab: the tool's axis, the work plane's or a picked face's normal (3+2).
+fn axis_fields(f: &mut Vec<Field>, ctx: &Ctx, setup: CamId, p: &Params, picking: Option<&str>) {
+    use cadrs_core::cam::cadrs_cam::strategy::ToolAxis;
+    f.push(Field::section("Tool axis"));
+    f.push(Field::select(
+        "axis",
+        "Tool axis",
+        vec!["Work plane Z", "Normal of a picked face"],
+        usize::from(p.axis != ToolAxis::WorkPlane),
+    ));
+    let ToolAxis::Direction(z) = p.axis else {
+        f.push(Field::note(
+            "The tool cuts along the Z of the work plane above the toolpath (or the setup's).",
+        ));
+        return;
+    };
+    f.push(Field::picks(
+        "axis-face",
+        "Planar face for the tool axis",
+        vec![format!("Z ({:.3}, {:.3}, {:.3})", z[0], z[1], z[2])],
+        picking == Some("axis-face"),
+    ));
+    // How far it tilts from the setup's Z, and whether the machine can.
+    let Some((job, s)) = ctx.cam.setup(setup) else {
+        return;
+    };
+    let frame = cadrs_core::cam::program::setup_frame(ctx.cam, job, s, ctx.parts);
+    let local = frame.dir_to_local(z);
+    let tilt = local[2].clamp(-1.0, 1.0).acos().to_degrees();
+    f.push(Field::note(format!(
+        "Tilted {tilt:.1}° from the setup's Z: cut in a tilted working plane (3+2)"
+    )));
+    if let Some(m) = &job.machine
+        && !m.can_tilt_to(local)
+    {
+        f.push(Field::error(if m.indexing.is_none() {
+            "The machine has no indexing axes to tilt the tool"
+        } else {
+            "The machine can't tilt the tool that far"
+        }));
+    }
+}
+
+/// The Collision tab: the shank and holder checked against the part.
+fn collision_fields(f: &mut Vec<Field>, p: &Params, tool: Option<&Tool>) {
+    use cadrs_core::cam::cadrs_cam::strategy::collision::CollisionAction;
+    let c = &p.collision;
+    f.push(Field::section("Tool assembly"));
+    f.push(Field::check("coll", "Check the shank and holder", c.check));
+    if !c.check {
+        return;
+    }
+    f.push(Field::number(
+        "coll-shank",
+        "Shank clearance",
+        c.shank_clearance,
+        Unit::Mm,
+    ));
+    f.push(Field::number(
+        "coll-holder",
+        "Holder clearance",
+        c.holder_clearance,
+        Unit::Mm,
+    ));
+    f.push(Field::select(
+        "coll-action",
+        "Where they'd hit",
+        labels(&CollisionAction::ALL, CollisionAction::label),
+        index_of(&CollisionAction::ALL, c.action),
+    ));
+    if let Some(t) = tool {
+        f.push(Field::note(match &t.holder {
+            Some(h) => format!(
+                "{}: flutes {} mm, stick-out {} mm, in {}",
+                t.name,
+                fmt(t.cutting_length),
+                fmt(t.overall_length),
+                h.name
+            ),
+            None => format!(
+                "{}: flutes {} mm, stick-out {} mm, no holder",
+                t.name,
+                fmt(t.cutting_length),
+                fmt(t.overall_length)
+            ),
+        }));
+    }
+}
+
+/// The Z a toolpath's work plane gives it (model coordinates): the work plane above it, or
+/// the setup's.
+fn op_axis(cam: &CamStudio, setup: CamId, op: CamId) -> [f64; 3] {
+    cam.work_plane_for(op)
+        .map(|(_, w)| w.z)
+        .or_else(|| cam.setup(setup).map(|(_, s)| s.wcs.z))
+        .unwrap_or([0.0, 0.0, 1.0])
+}
+
+/// A picked planar face's normal (model coordinates, unit).
+fn face_normal(ctx: &Ctx, pick: Pick) -> Option<[f64; 3]> {
+    let Pick::Face(part, name) = pick else {
+        return None;
+    };
+    let n = ctx
+        .parts
+        .iter()
+        .find(|p| p.id == part)
+        .and_then(|p| p.solid.faces.iter().find(|f| f.name == name))
+        .and_then(|f| f.plane)
+        .map(|pl| {
+            let (u, v) = (pl.u, pl.v);
+            [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ]
+        })?;
+    let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    (l > 1e-9).then(|| [n[0] / l, n[1] / l, n[2] / l])
 }
 
 fn machine_of(cam: &CamStudio, setup: CamId) -> MachineKind {
@@ -2242,6 +2380,16 @@ impl Draft {
                     ("max-feed", Value::Number(n)) => machine.max_feed = *n,
                     ("max-spindle", Value::Number(n)) => machine.max_spindle = *n,
                     ("changer", Value::Bool(b)) => machine.tool_changer = *b,
+                    ("indexing", Value::Bool(b)) => {
+                        machine.indexing = b.then_some(cadrs_core::cam::cadrs_cam::Indexing {
+                            max_tilt: machine.indexing.map_or(110.0, |i| i.max_tilt),
+                        })
+                    }
+                    ("max-tilt", Value::Number(n)) => {
+                        if let Some(i) = &mut machine.indexing {
+                            i.max_tilt = n.clamp(0.0, 180.0)
+                        }
+                    }
                     ("unit", Value::Index(i)) => {
                         s.output_unit = if *i == 1 { LenUnit::Inch } else { LenUnit::Mm }
                     }
@@ -2455,6 +2603,7 @@ impl Draft {
             } => {
                 let machine = machine_of(ctx_cam, *setup);
                 let tool = tool_above(ctx_cam, *setup, op.id);
+                let op_id = op.id;
                 let name_edited = matches!(&op.kind, OpKind::Toolpath(t) if t.name_edited);
                 let OpKind::Toolpath(tp) = &mut op.kind else {
                     return;
@@ -2586,6 +2735,27 @@ impl Draft {
                     ("lead-in", Value::Index(i)) => p.links.lead_in = LeadKind::ALL[(*i).min(2)],
                     ("lead-out", Value::Index(i)) => p.links.lead_out = LeadKind::ALL[(*i).min(2)],
                     ("lead-r", Value::Number(n)) => p.links.lead_radius = n.max(0.0),
+                    ("axis", Value::Index(i)) => {
+                        use cadrs_core::cam::cadrs_cam::strategy::ToolAxis;
+                        p.axis = if *i == 0 {
+                            ToolAxis::WorkPlane
+                        } else {
+                            // Until a face is picked: the work plane's own Z.
+                            match p.axis {
+                                ToolAxis::Direction(z) => ToolAxis::Direction(z),
+                                ToolAxis::WorkPlane => {
+                                    ToolAxis::Direction(op_axis(ctx_cam, *setup, op_id))
+                                }
+                            }
+                        };
+                    }
+                    ("coll", Value::Bool(b)) => p.collision.check = *b,
+                    ("coll-shank", Value::Number(n)) => p.collision.shank_clearance = n.max(0.0),
+                    ("coll-holder", Value::Number(n)) => p.collision.holder_clearance = n.max(0.0),
+                    ("coll-action", Value::Index(i)) => {
+                        use cadrs_core::cam::cadrs_cam::strategy::collision::CollisionAction;
+                        p.collision.action = CollisionAction::ALL[(*i).min(1)];
+                    }
                     ("overlap", Value::Number(n)) => p.links.overlap = n.max(0.0),
                     ("tolerance", Value::Number(n)) => p.tolerance = n.clamp(0.0005, 1.0),
                     ("smooth", Value::Number(n)) => p.smooth_corners = n.max(0.0),
@@ -2651,6 +2821,13 @@ impl Draft {
                 let OpKind::Toolpath(tp) = &mut op.kind else {
                     return;
                 };
+                if key == "axis-face" {
+                    if let Some(n) = face_normal(ctx, pick) {
+                        tp.params.axis =
+                            cadrs_core::cam::cadrs_cam::strategy::ToolAxis::Direction(n);
+                    }
+                    return;
+                }
                 let d = &mut tp.params.drive;
                 let toggle = |v: &mut Vec<String>, k: String| match v.iter().position(|x| *x == k) {
                     Some(i) => {
@@ -2814,7 +2991,7 @@ impl Draft {
                 faces: true,
                 ..none
             },
-            (_, "p-face") => crate::parts::PickFilter {
+            (_, "p-face" | "axis-face") => crate::parts::PickFilter {
                 faces: true,
                 planar_only: true,
                 ..none
@@ -2871,29 +3048,10 @@ impl Draft {
 
 /// Points a work plane's Z along a picked planar face's normal.
 fn face_z(w: &mut WorkPlane, ctx: &Ctx, pick: Pick) {
-    let Pick::Face(part, name) = pick else { return };
-    let Some(n) = ctx
-        .parts
-        .iter()
-        .find(|p| p.id == part)
-        .and_then(|p| p.solid.faces.iter().find(|f| f.name == name))
-        .and_then(|f| f.plane)
-        .map(|pl| {
-            let (u, v) = (pl.u, pl.v);
-            [
-                u[1] * v[2] - u[2] * v[1],
-                u[2] * v[0] - u[0] * v[2],
-                u[0] * v[1] - u[1] * v[0],
-            ]
-        })
-    else {
+    let Some(n) = face_normal(ctx, pick) else {
         return;
     };
-    let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-    if l < 1e-9 {
-        return;
-    }
-    w.z = [n[0] / l, n[1] / l, n[2] / l];
+    w.z = n;
     if (w.z[0] * w.x[0] + w.z[1] * w.x[1] + w.z[2] * w.x[2]).abs() > 0.9 {
         w.x = if w.z[0].abs() > 0.5 {
             [0.0, 1.0, 0.0]
@@ -3027,6 +3185,10 @@ fn apply_changes(world: &mut World, changes: Vec<FieldChange>, files: Vec<std::p
             ("p-z", Value::Index(i)) if *i >= AXES.len() => {
                 d.picking = Some("p-face".into());
             }
+            ("axis", Value::Index(1)) => {
+                d.draft.set(world, &c.key, &c.value, &cam);
+                d.picking = Some("axis-face".into());
+            }
             _ => {
                 d.draft.set(world, &c.key, &c.value, &cam);
             }
@@ -3043,7 +3205,10 @@ fn is_button_key(k: &str) -> bool {
 }
 
 fn is_pick_key(k: &str) -> bool {
-    matches!(k, "bodies" | "workholdings" | "drive" | "p-face")
+    matches!(
+        k,
+        "bodies" | "workholdings" | "drive" | "p-face" | "axis-face"
+    )
 }
 
 fn take_picks(
@@ -3070,7 +3235,7 @@ fn apply_picks(world: &mut World, picks: Vec<Pick>) {
         with_ctx(world, |w, ctx| {
             if let Some(mut d) = w.remove_resource::<CamDialog>() {
                 d.draft.pick(ctx, &key, pick, frame);
-                if key == "p-face" {
+                if key == "p-face" || key == "axis-face" {
                     d.picking = None;
                 }
                 d.changed = Some(std::time::Instant::now());
@@ -3087,8 +3252,9 @@ fn op_frame(world: &mut World, ctx: &Ctx) -> Option<cadrs_core::cam::cadrs_cam::
     let (cam, op) = d.draft.applied(ctx.cam)?;
     let (job, _, _) = cam.operation(op)?;
     let (_, wp) = cam.work_plane_for(op)?;
-    Some(cadrs_core::cam::program::work_frame(
-        &cam, job, wp, ctx.parts,
+    let params = cam.operation(op)?.2.toolpath()?.params.clone();
+    Some(cadrs_core::cam::program::toolpath_frame(
+        &cam, job, wp, &params, ctx.parts,
     ))
 }
 

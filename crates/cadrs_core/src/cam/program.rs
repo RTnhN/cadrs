@@ -201,6 +201,22 @@ pub fn work_frame(cam: &CamStudio, job: &Job, wp: &WorkPlane, parts: &[Part]) ->
     Frame { origin, ..axes }
 }
 
+/// The frame a toolpath is worked out in: its work plane's, turned to its own tool axis when
+/// the Axis tab sets one (the work plane's origin, its X kept as near as it can be).
+pub fn toolpath_frame(
+    cam: &CamStudio,
+    job: &Job,
+    wp: &WorkPlane,
+    params: &cadrs_cam::Params,
+    parts: &[Part],
+) -> Frame {
+    let wf = work_frame(cam, job, wp, parts);
+    match params.axis {
+        cadrs_cam::strategy::ToolAxis::WorkPlane => wf,
+        cadrs_cam::strategy::ToolAxis::Direction(z) => Frame::from_zx(wf.origin, z, wf.x),
+    }
+}
+
 /// The setup's work coordinate system.
 pub fn setup_frame(cam: &CamStudio, job: &Job, setup: &Setup, parts: &[Part]) -> Frame {
     work_frame(cam, job, &setup.wcs, parts)
@@ -234,7 +250,7 @@ pub fn op_input(cam: &CamStudio, op: CamId, parts: &[Part]) -> Result<OpInput, S
         .tool_for(op)
         .ok_or("Create a tool above the toolpath first")?;
     let (_, wp) = cam.work_plane_for(op).ok_or("The toolpath is gone")?;
-    let frame = work_frame(cam, job, wp, parts);
+    let frame = toolpath_frame(cam, job, wp, &tp.params, parts);
     let shape = stock_shape(cam, job, parts).ok_or("The job has no bodies")?;
     let bodies = job_bodies(cam, job, parts);
     if bodies.is_empty() {
@@ -408,6 +424,10 @@ pub struct RunOp<'a> {
     pub plane: Option<(Frame, WorkPlaneType, Option<u32>)>,
     /// In its own work plane's coordinates.
     pub local: &'a Toolpath,
+    /// Its work plane tilts the tool off the setup's Z (3+2): `toolpath` is its moves as
+    /// straight lines in the setup's coordinates (to show and time; a height-map simulation
+    /// along the setup's Z can't cut it).
+    pub tilted: bool,
 }
 
 /// Collects a setup's operations (see [`SetupRun`]); `only`: just these operations.
@@ -435,13 +455,32 @@ pub fn setup_run<'a>(
             .tool_for(o.id)
             .ok_or_else(|| format!("{} has no tool above it", o.name))?;
         let (wid, wp) = cam.work_plane_for(o.id).ok_or("gone")?;
-        let (toolpath, plane) = match wid {
-            None => (local.clone(), None),
-            Some(_) => {
-                let wf = work_frame(cam, job, wp, parts);
+        let own_axis = tp.params.axis != cadrs_cam::strategy::ToolAxis::WorkPlane;
+        let (toolpath, plane, tilted) = if wid.is_none() && !own_axis {
+            (local.clone(), None, false)
+        } else {
+            let wf = toolpath_frame(cam, job, wp, &tp.params, parts);
+            // Its own axis is cut in a tilted working plane (in the work plane's datum
+            // when that's the setup's).
+            let kind = if own_axis && !wf.same_z(&frame) {
+                WorkPlaneType::Dynamic
+            } else if wid.is_none() {
+                WorkPlaneType::None
+            } else {
+                wp.kind
+            };
+            if wf.same_z(&frame) {
                 (
                     move_toolpath(local, &wf, &frame).map_err(|e| format!("{}: {e}", o.name))?,
-                    Some((wf, wp.kind, wp.datum)),
+                    Some((wf, kind, wp.datum)),
+                    false,
+                )
+            } else {
+                let rapid = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
+                (
+                    unroll_toolpath(local, &wf, &frame, rapid),
+                    Some((wf, kind, wp.datum)),
+                    true,
                 )
             }
         };
@@ -454,9 +493,35 @@ pub fn setup_run<'a>(
             toolpath,
             plane,
             local,
+            tilted,
         });
     }
     Ok(SetupRun { ops, frame })
+}
+
+/// A toolpath computed in `from` as straight moves in `to`'s coordinates (any tilt between
+/// them): arcs and cycles become the lines they move along.
+pub fn unroll_toolpath(tp: &Toolpath, from: &Frame, to: &Frame, rapid_rate: f64) -> Toolpath {
+    let rel = to.relative(from);
+    let Some(start) = tp.start() else {
+        return Toolpath::default();
+    };
+    let mut steps = vec![Step::Rapid(rel.to_world(start))];
+    for seg in tp.motion(start, rapid_rate) {
+        let p = rel.to_world(seg.to);
+        steps.push(match seg.feed {
+            None => Step::Rapid(p),
+            Some(feed) => Step::Feed {
+                to: p,
+                feed,
+                kind: seg.kind.unwrap_or(cadrs_cam::toolpath::FeedKind::Cut),
+            },
+        });
+    }
+    Toolpath {
+        steps,
+        warnings: tp.warnings.clone(),
+    }
 }
 
 /// What Verify found.
@@ -481,7 +546,10 @@ pub fn simulate(
     let start = [0.0, 0.0, stock.bounds.max[2] + 50.0];
     let mut motions = Vec::new();
     for o in &run.ops {
-        motions.push((o.tool, o.toolpath.motion(start, machine.rapid_rate)));
+        // (A tilted operation can't cut a height map along the setup's Z.)
+        if !o.tilted {
+            motions.push((o.tool, o.toolpath.motion(start, machine.rapid_rate)));
+        }
         if upto == Some(o.id) {
             break;
         }
@@ -510,11 +578,24 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
     let mut datums: HashMap<u64, u32> = HashMap::new();
     let mut operations = Vec::new();
     for o in &run.ops {
+        let mut tilt = None;
         let (toolpath, datum) = match &o.plane {
             None => (o.toolpath.clone(), base),
-            Some((_, WorkPlaneType::Dynamic, _)) => {
+            Some((wf, WorkPlaneType::Dynamic, _)) => {
+                if machine.indexing.is_none() {
+                    return Err(format!(
+                        "{}: a Dynamic work plane needs a machine with indexing (3+2)",
+                        o.name
+                    ));
+                }
+                // The control's tilted working plane, in the setup's datum.
+                tilt = Some(cadrs_cam::post::Tilt::of(&run.frame.relative(wf)));
+                (o.local.clone(), base)
+            }
+            Some((_, _, _)) if o.tilted => {
                 return Err(format!(
-                    "{}: a Dynamic work plane needs a 3+2 machine",
+                    "{}: its work plane tilts the tool; make it Dynamic to cut it with a 3+2 \
+                     machine's tilted working plane",
                     o.name
                 ));
             }
@@ -547,6 +628,7 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
             datum,
             stop_before: o.posting.stop_before,
             force_tool_change: o.posting.force_tool_change,
+            tilt,
         });
     }
     Ok(NcProgram {
