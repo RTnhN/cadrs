@@ -176,9 +176,22 @@ impl Pattern {
     /// The icon for the tree (icon-rs).
     pub fn icon(self) -> &'static str {
         match self {
-            Pattern::Drill | Pattern::Bore | Pattern::ThreadMill => "cam-drill-cycle",
+            Pattern::Face => "cam-face",
+            Pattern::Rough2D | Pattern::Rough3D => "cam-pocket",
+            Pattern::Adaptive => "cam-adaptive",
+            Pattern::Profile2D => "cam-profile",
+            Pattern::Chamfer2D => "cam-chamfer",
+            Pattern::Engrave => "cam-engrave",
+            Pattern::Flatlands => "cam-toolpath",
+            Pattern::Parallel => "cam-parallel",
+            Pattern::ConstantZ => "cam-waterline",
+            Pattern::Scallop => "cam-scallop",
+            Pattern::Spiral => "cam-spiral",
+            Pattern::Pencil => "cam-pencil",
+            Pattern::Drill => "cam-drill-cycle",
+            Pattern::Bore => "cam-bore",
+            Pattern::ThreadMill => "cam-thread",
             Pattern::Cut | Pattern::Etch | Pattern::Fill => "cam-cut-path",
-            _ => "cam-toolpath",
         }
     }
 

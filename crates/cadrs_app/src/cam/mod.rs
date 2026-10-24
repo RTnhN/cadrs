@@ -1440,3 +1440,21 @@ mod number_tests {
         assert_eq!(f.read("six", Unit::Mm), None);
     }
 }
+
+#[cfg(test)]
+mod icon_tests {
+    use cadrs_core::cam::cadrs_cam::{MachineKind, Pattern, ToolKind};
+
+    /// Every pattern, tool and machine names an icon icon-rs has.
+    #[test]
+    fn cam_icons_exist() {
+        let names = Pattern::ALL
+            .iter()
+            .map(|p| p.icon())
+            .chain(ToolKind::ALL.iter().map(|t| t.icon()))
+            .chain(MachineKind::ALL.iter().map(|m| m.icon()));
+        for n in names {
+            assert!(cadrs_ui::icon::has_icon(n), "{n}");
+        }
+    }
+}
