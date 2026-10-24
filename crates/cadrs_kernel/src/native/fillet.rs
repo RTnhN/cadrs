@@ -11123,16 +11123,63 @@ fn collapse(nb: &mut Body, out: &mut Pieces, tol: f64) {
     for v in out.section_edges.values_mut() {
         *v = map(*v);
     }
+    // A rail of no length at a new cone's apex (a chamfer round a convex corner as wide as the
+    // corner's radius: the rail on the face it runs over shrinks to the corner's centre): a
+    // degenerate edge along the apex's line on the cone, which needs it to close its loop in
+    // (u, v) (the faces it cuts only have a vertex there).
+    let mut apexes: Vec<usize> = Vec::new();
+    for nf in out.new_faces.iter_mut() {
+        let Surface::Cone { f, r, a } = &nf.surf else {
+            continue;
+        };
+        let (f, r, a) = (*f, *r, *a);
+        if a.sin().abs() < tol::ANGULAR_POINT {
+            continue;
+        }
+        for &e in nf.edges.iter().filter(|e| short.contains(e)) {
+            let ed = &nb.edges[e];
+            let Curve::Circle { x, y, .. } = &ed.curve else {
+                continue;
+            };
+            let l = f.local(&nb.verts[ed.v[0]].p);
+            // At the apex, the rail's circle about the cone's axis: u = φ₀ ± t (φ₀ its x's
+            // angle in the cone's frame, the sign the way round it turns).
+            let turn = x.cross(y).dot(&f.z);
+            if (l.x * l.x + l.y * l.y).sqrt() > tol || turn.abs() < 1.0 - tol::ANGULAR_POINT {
+                continue;
+            }
+            let phi0 = x.dot(&f.y).atan2(x.dot(&f.x));
+            let v_apex = -r / a.sin();
+            nf.pcurves.push((
+                e,
+                Curve::Line {
+                    o: P3::new(phi0, v_apex, 0.0),
+                    d: V3::x() * turn.signum(),
+                },
+            ));
+            apexes.push(e);
+        }
+    }
+    for &e in &apexes {
+        let ed = &mut nb.edges[e];
+        let p = nb.verts[ed.v[0]].p;
+        ed.curve = Curve::Line {
+            o: p,
+            d: V3::zeros(),
+        };
+        ed.degenerate = true;
+    }
     for nf in out.new_faces.iter_mut() {
         nf.edges = nf
             .edges
             .iter()
             .copied()
-            .filter(|e| !short.contains(e))
+            .filter(|e| !short.contains(e) || apexes.contains(e))
             .map(map)
             .collect();
-        nf.pcurves
-            .retain(|x| !short.contains(&x.0) && !dup.contains_key(&x.0));
+        nf.pcurves.retain(|x| {
+            (!short.contains(&x.0) || apexes.contains(&x.0)) && !dup.contains_key(&x.0)
+        });
     }
     // A face with no area left: its edges no more than one other edge, or each twice.
     out.new_faces.retain(|nf| {
@@ -12308,7 +12355,19 @@ fn assemble(
             let ce = &nb.edges[coedges[i].edge];
             let start_fwd = coedges[i].pc.point(ce.t[0]);
             let start_back = coedges[i].pc.point(ce.t[1]);
-            coedges[i].fwd = (start_fwd - at).norm() <= (start_back - at).norm();
+            // (Round a surface periodic in u, a whole turn apart is no gap: [`align`] moves the
+            // p-curves so.)
+            let pu = if nf.surf.u_periodic() {
+                Some(TAU)
+            } else {
+                nf.u_period
+            };
+            let gap = |q: P3| {
+                let du = q.x - at.x;
+                let du = pu.map_or(du, |p| du - (du / p).round() * p);
+                V3::new(du, q.y - at.y, 0.0).norm()
+            };
+            coedges[i].fwd = gap(start_fwd) <= gap(start_back);
         }
         align(&nf.surf, &nb, &mut coedges, nf.u_period);
         // A degenerate edge's given p-curve the other way where the loop doesn't close in
