@@ -65,10 +65,11 @@ jobs:
           if-no-files-found: error
 
   # Cross-built with MinGW (its windres compiles the icon into cadrs.exe), on the nightly pinned
-  # in rust-toolchain.toml, which carries the Windows target.
+  # in rust-toolchain.toml, which carries the Windows target. On Ubuntu 26.04, for MinGW's
+  # binutils 2.45: the cadrs.exe that 24.04's binutils 2.41 linked doesn't start on Windows.
   windows:
     name: Build (Windows)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -86,6 +87,12 @@ jobs:
           sudo -E apt-get update
           sudo -E apt-get install -y --no-install-recommends \
             clang mold gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 zip < /dev/null
+
+      - name: Check the MinGW linker
+        run: |
+          x86_64-w64-mingw32-ld --version | head -1
+          ld="$(x86_64-w64-mingw32-ld --version | sed -n '1s/.* \([0-9]*\.[0-9]*\).*/\1/p')"
+          [[ "$(printf '%s\n' 2.45 "$ld" | sort -V | head -1)" == 2.45 ]] || { echo "MinGW binutils $ld is older than 2.45"; exit 1; }
 
       - name: Rust toolchain
         run: rustup toolchain install && rustc -V
