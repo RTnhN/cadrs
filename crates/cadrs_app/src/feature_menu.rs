@@ -205,8 +205,18 @@ pub fn show_all_sketches(world: &mut World) {
     doc.squash_element_since(mark, element, "Show all sketches");
 }
 
-/// Whether a sketch is shown in the view.
+/// Whether a sketch is shown in the view, or a Plane (by its eye alone, #66).
 pub fn sketch_shown(world: &World, id: FeatureId) -> bool {
+    let el = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element());
+    if let Some(el) = el
+        && el
+            .feature(id)
+            .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)))
+    {
+        return el.sketch_visibility(id) != Some(false);
+    }
     !world
         .resource::<crate::parts::PartCache>()
         .hidden_sketches
