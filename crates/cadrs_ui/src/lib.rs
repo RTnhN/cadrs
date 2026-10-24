@@ -126,7 +126,9 @@ pub use inline_edit::{
     DoubleClick, DoubleClickable, InlineEdit, InlineEditCancel, InlineEditCommit, InlineEditLabel,
     InlineEditOptions, begin_inline_edit,
 };
-pub use input::{CaretBlinkOverride, TextCancel, TextInput, TextInputField, TextSubmit};
+pub use input::{
+    CaretBlinkOverride, KeyboardField, TextCancel, TextInput, TextInputField, TextSubmit,
+};
 pub use list::{GridItem, ListItem};
 pub use menu::{
     ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuItem,

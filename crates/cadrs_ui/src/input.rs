@@ -90,8 +90,15 @@ struct FrameColors {
 /// The editable text entity inside a [`TextInputFrame`] (and of the other text fields: number
 /// fields, dimension and quick-dimension boxes). Hovering one shows the I-beam cursor.
 #[derive(Component, Debug, Clone, Copy, Default)]
-#[require(Hovered)]
+#[require(Hovered, KeyboardField)]
 pub struct TextInputField;
+
+/// A text entity that takes the keyboard while it has the focus, so the app's shortcuts are
+/// off (an edit field, and selectable text, whose Ctrl+C copies its selection). Hovering one
+/// shows the I-beam cursor.
+#[derive(Component, Debug, Clone, Copy, Default)]
+#[require(Hovered)]
+pub struct KeyboardField;
 
 /// The placeholder label, shown while the field is empty.
 #[derive(Component, Debug, Clone, Copy, Default)]

@@ -25,6 +25,7 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::text::{EditableText, EditableTextSystems, FontWeight, TextCursorStyle, TextEdit};
 
+use crate::shortcut_key::ShortcutKey;
 use crate::theme::Theme;
 use crate::tooltip::Tooltip;
 
@@ -62,6 +63,7 @@ pub struct ReadOnlyText;
 
 /// The text entity of a [`SelectableText`].
 #[derive(Component, Debug, Clone, Copy, Default)]
+#[require(crate::input::KeyboardField)]
 pub struct SelectableTextField;
 
 /// A [`SelectableText`]'s copy icon, and when it last copied.
@@ -187,7 +189,6 @@ impl SelectableText {
                     TextLayout::new(justify, LineBreak::NoWrap),
                     cursor,
                     TabIndex(0),
-                    Hovered::default(),
                     Node {
                         flex_grow: 1.0,
                         min_width: Val::Px(0.0),
@@ -262,7 +263,7 @@ fn on_field_escape(
 ) {
     if q.contains(ev.focused_entity)
         && ev.input.state == ButtonState::Pressed
-        && ev.input.key_code == KeyCode::Escape
+        && ev.input.shortcut_code() == KeyCode::Escape
     {
         focus.clear();
     }
