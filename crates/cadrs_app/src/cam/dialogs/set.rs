@@ -509,6 +509,39 @@ impl Draft {
                     ("overlap", Value::Number(n)) => p.links.overlap = n.max(0.0),
                     ("tolerance", Value::Number(n)) => p.tolerance = n.clamp(0.0005, 1.0),
                     ("smooth", Value::Number(n)) => p.smooth_corners = n.max(0.0),
+                    ("repeat", Value::Index(i)) => {
+                        use cadrs_core::cam::cadrs_cam::strategy::Repeat;
+                        p.repeat = match i {
+                            1 => Repeat::Linear {
+                                count: 2,
+                                step: [50.0, 0.0],
+                            },
+                            2 => Repeat::Circular {
+                                count: 4,
+                                center: [0.0, 0.0],
+                                angle: 90.0,
+                            },
+                            _ => Repeat::None,
+                        };
+                    }
+                    (
+                        k @ ("rep-count" | "rep-dx" | "rep-dy" | "rep-cx" | "rep-cy" | "rep-angle"),
+                        Value::Number(n),
+                    ) => {
+                        use cadrs_core::cam::cadrs_cam::strategy::Repeat;
+                        match (&mut p.repeat, k) {
+                            (
+                                Repeat::Linear { count, .. } | Repeat::Circular { count, .. },
+                                "rep-count",
+                            ) => *count = n.clamp(1.0, 1000.0) as u32,
+                            (Repeat::Linear { step, .. }, "rep-dx") => step[0] = *n,
+                            (Repeat::Linear { step, .. }, "rep-dy") => step[1] = *n,
+                            (Repeat::Circular { center, .. }, "rep-cx") => center[0] = *n,
+                            (Repeat::Circular { center, .. }, "rep-cy") => center[1] = *n,
+                            (Repeat::Circular { angle, .. }, "rep-angle") => *angle = *n,
+                            _ => {}
+                        }
+                    }
                     ("beam-power", Value::Number(n)) => p.beam.power = n.clamp(0.0, 100.0),
                     ("beam-passes", Value::Number(n)) => p.beam.passes = n.clamp(1.0, 50.0) as u32,
                     ("pass-depth", Value::Number(n)) => p.beam.pass_depth = n.max(0.0),

@@ -929,6 +929,7 @@ impl Draft {
                                 Unit::Mm,
                             ));
                         }
+                        repeat_fields(&mut f, &p.repeat);
                     }
                     "Beam" => {
                         f.push(Field::section("Beam"));
@@ -1656,4 +1657,48 @@ pub fn pick_of_key(key: &str) -> Option<Pick> {
     ron::from_str::<cadrs_core::solid::EdgeName>(rest)
         .ok()
         .map(|e| Pick::Edge(part, e))
+}
+
+/// The Misc tab's pattern: the toolpath repeated in a line or round a centre.
+fn repeat_fields(f: &mut Vec<Field>, r: &cadrs_core::cam::cadrs_cam::strategy::Repeat) {
+    use cadrs_core::cam::cadrs_cam::strategy::Repeat;
+    f.push(Field::section("Pattern"));
+    f.push(Field::select(
+        "repeat",
+        "Repeat",
+        vec!["None", "Linear", "Circular"],
+        match r {
+            Repeat::None => 0,
+            Repeat::Linear { .. } => 1,
+            Repeat::Circular { .. } => 2,
+        },
+    ));
+    match *r {
+        Repeat::None => {}
+        Repeat::Linear { count, step } => {
+            f.push(Field::count("rep-count", "Instances", count as i64));
+            f.push(Field::number("rep-dx", "Spacing X", step[0], Unit::Mm));
+            f.push(Field::number("rep-dy", "Spacing Y", step[1], Unit::Mm));
+        }
+        Repeat::Circular {
+            count,
+            center,
+            angle,
+        } => {
+            f.push(Field::count("rep-count", "Instances", count as i64));
+            f.push(Field::number("rep-cx", "Centre X", center[0], Unit::Mm));
+            f.push(Field::number("rep-cy", "Centre Y", center[1], Unit::Mm));
+            f.push(Field::number(
+                "rep-angle",
+                "Angle between",
+                angle,
+                Unit::Deg,
+            ));
+        }
+    }
+    if *r != Repeat::None {
+        f.push(Field::note(
+            "In the toolpath's work plane; each copy is checked for collisions like the first.",
+        ));
+    }
 }

@@ -672,6 +672,101 @@ pub enum ToolAxis {
     Direction(crate::geom::P3),
 }
 
+/// A toolpath repeated (the Misc tab's pattern): the same moves at more places.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub enum Repeat {
+    #[default]
+    None,
+    /// `count` copies in all, each `step` (mm) on from the one before.
+    Linear { count: u32, step: [f64; 2] },
+    /// `count` copies in all round `center`, each turned `angle` (degrees) on.
+    Circular {
+        count: u32,
+        center: [f64; 2],
+        angle: f64,
+    },
+}
+
+impl Repeat {
+    /// The copies' placements (the first is the toolpath itself): a point's image under each.
+    fn placements(&self) -> Vec<Box<dyn Fn(crate::geom::P2) -> crate::geom::P2>> {
+        match *self {
+            Repeat::None => vec![Box::new(|p| p)],
+            Repeat::Linear { count, step } => (0..count.max(1))
+                .map(|k| {
+                    let d = [step[0] * k as f64, step[1] * k as f64];
+                    Box::new(move |p: crate::geom::P2| [p[0] + d[0], p[1] + d[1]])
+                        as Box<dyn Fn(crate::geom::P2) -> crate::geom::P2>
+                })
+                .collect(),
+            Repeat::Circular {
+                count,
+                center: c,
+                angle,
+            } => (0..count.max(1))
+                .map(|k| {
+                    let (sn, cs) = (angle * k as f64).to_radians().sin_cos();
+                    Box::new(move |p: crate::geom::P2| {
+                        let (x, y) = (p[0] - c[0], p[1] - c[1]);
+                        [c[0] + x * cs - y * sn, c[1] + x * sn + y * cs]
+                    }) as Box<dyn Fn(crate::geom::P2) -> crate::geom::P2>
+                })
+                .collect(),
+        }
+    }
+
+    /// The toolpath with its copies, one after another (each starts and ends at the clearance
+    /// height, as a toolpath does).
+    pub fn apply(&self, tp: Toolpath) -> Toolpath {
+        let places = self.placements();
+        if places.len() <= 1 {
+            return tp;
+        }
+        let mut steps = Vec::with_capacity(tp.steps.len() * places.len());
+        for (k, f) in places.iter().enumerate() {
+            let p3 = |q: crate::geom::P3| {
+                let xy = f([q[0], q[1]]);
+                [xy[0], xy[1], q[2]]
+            };
+            for s in &tp.steps {
+                steps.push(match s {
+                    // The spindle and the comment once.
+                    Step::Spindle { .. } | Step::Comment(_) if k > 0 => continue,
+                    Step::Rapid(q) => Step::Rapid(p3(*q)),
+                    Step::Feed { to, feed, kind } => Step::Feed {
+                        to: p3(*to),
+                        feed: *feed,
+                        kind: *kind,
+                    },
+                    Step::Arc {
+                        to,
+                        center,
+                        cw,
+                        feed,
+                        kind,
+                    } => Step::Arc {
+                        to: p3(*to),
+                        center: f(*center),
+                        cw: *cw,
+                        feed: *feed,
+                        kind: *kind,
+                    },
+                    Step::Drill(c) => {
+                        let mut c = *c;
+                        c.at = f(c.at);
+                        Step::Drill(c)
+                    }
+                    other => other.clone(),
+                });
+            }
+        }
+        Toolpath {
+            steps,
+            warnings: tp.warnings,
+        }
+    }
+}
+
 /// Everything a toolpath's dialog sets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Params {
@@ -738,6 +833,9 @@ pub struct Params {
     /// Adaptive clearing: the fine levels' spacing between the deep ones (mm; 0 = none).
     #[serde(default)]
     pub fine_step_down: f64,
+    /// The Misc tab's pattern: the toolpath repeated.
+    #[serde(default)]
+    pub repeat: Repeat,
 }
 
 fn yes() -> bool {
@@ -782,6 +880,7 @@ impl Params {
             thread_diameter: 0.0,
             left_hand_thread: false,
             fine_step_down: 0.0,
+            repeat: Repeat::None,
             speeds: Speeds {
                 spindle_rpm: c.spindle_rpm,
                 feed: c.feed,
@@ -1225,6 +1324,8 @@ pub fn generate(input: &Input) -> Result<Toolpath, String> {
         Pattern::Etch => beam::etch(input),
         Pattern::Fill => beam::fill(input),
     }?;
+    // Repeated, then every copy checked.
+    let tp = p.repeat.apply(tp);
     let mut tp = if input.machine.is_milling() {
         collision::apply(input, tp)
     } else {
@@ -1446,5 +1547,46 @@ mod tests {
         assert_eq!(*l.last().unwrap(), 0.0);
         assert!(l.iter().any(|z| (z - 12.0).abs() < 1e-9), "{l:?}");
         assert!(l.windows(2).all(|w| w[0] > w[1]));
+    }
+
+    #[test]
+    fn repeats_place_copies() {
+        let tp = Toolpath {
+            steps: vec![
+                Step::Spindle {
+                    rpm: 1000.0,
+                    cw: true,
+                },
+                Step::Rapid([10.0, 0.0, 5.0]),
+                Step::Arc {
+                    to: [10.0, 0.0, -1.0],
+                    center: [5.0, 0.0],
+                    cw: false,
+                    feed: 100.0,
+                    kind: crate::toolpath::FeedKind::Cut,
+                },
+            ],
+            warnings: vec![],
+        };
+        let lin = Repeat::Linear {
+            count: 3,
+            step: [20.0, 0.0],
+        }
+        .apply(tp.clone());
+        assert_eq!(lin.steps.len(), 1 + 2 * 3, "the spindle once");
+        assert!(matches!(lin.steps[5], Step::Rapid(p) if (p[0] - 50.0).abs() < 1e-9));
+        let circ = Repeat::Circular {
+            count: 4,
+            center: [0.0, 0.0],
+            angle: 90.0,
+        }
+        .apply(tp);
+        // The second copy turned 90°: (10, 0) to (0, 10), its arc's centre with it.
+        assert!(
+            matches!(circ.steps[3], Step::Rapid(p) if p[0].abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9)
+        );
+        assert!(
+            matches!(circ.steps[4], Step::Arc { center, .. } if center[0].abs() < 1e-9 && (center[1] - 5.0).abs() < 1e-9)
+        );
     }
 }

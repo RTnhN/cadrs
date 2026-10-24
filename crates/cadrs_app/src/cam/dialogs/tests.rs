@@ -240,3 +240,28 @@ fn thread_mill_fields() {
             if key == "pattern" && options.iter().any(|o| o == "Thread mill")))
     );
 }
+
+#[test]
+fn misc_tab_repeats_the_toolpath() {
+    use cadrs_core::cam::cadrs_cam::strategy::Repeat;
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let s = studio(mill(false), em.clone());
+    let mut d = toolpath(&s, Pattern::Profile2D, &em, MachineKind::Mill);
+    let misc = 4;
+    assert!(has_key(&fields(&s, &d, misc), "repeat"));
+    assert!(!has_key(&fields(&s, &d, misc), "rep-count"));
+    let mut world = World::new();
+    d.set(&mut world, "repeat", &Value::Index(2), &s.cam);
+    d.set(&mut world, "rep-count", &Value::Number(6.0), &s.cam);
+    d.set(&mut world, "rep-angle", &Value::Number(60.0), &s.cam);
+    assert_eq!(
+        params(&d).repeat,
+        Repeat::Circular {
+            count: 6,
+            center: [0.0, 0.0],
+            angle: 60.0
+        }
+    );
+    let f = fields(&s, &d, misc);
+    assert!(has_key(&f, "rep-cx") && !has_key(&f, "rep-dx"));
+}
