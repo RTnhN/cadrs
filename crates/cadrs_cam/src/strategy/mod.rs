@@ -169,6 +169,44 @@ impl Input<'_> {
     /// Whether the part lies inside a closed contour at height `z`: probed just either side of
     /// its longest segment (a loop round a pocket has the part outside it even though the
     /// part's material is below the pocket's floor).
+    /// An open chain at `z` moved `dist` off it, to the side `side` asks for: Automatic and
+    /// Outside away from the material beside it, Inside towards it (beside neither or both:
+    /// left for Automatic and Outside, right for Inside). With whether its free side (the tool's)
+    /// is left of its way.
+    pub fn offset_open_chain(
+        &self,
+        c: &path::Contour,
+        z: f64,
+        dist: f64,
+        side: Side,
+    ) -> (Vec<P2>, bool) {
+        let n = c.pts.len();
+        let material_left = (0..n.saturating_sub(1))
+            .max_by(|a, b| {
+                let la = crate::geom::dist2(c.pts[*a], c.pts[*a + 1]);
+                let lb = crate::geom::dist2(c.pts[*b], c.pts[*b + 1]);
+                la.total_cmp(&lb)
+            })
+            .and_then(|i| {
+                let (a, b) = (c.pts[i], c.pts[i + 1]);
+                let m = crate::geom::lerp2(a, b, 0.5);
+                let t = path::unit(crate::geom::sub2(b, a));
+                let e = 0.05;
+                let left = [m[0] - t[1] * e, m[1] + t[0] * e];
+                let right = [m[0] + t[1] * e, m[1] - t[0] * e];
+                let solid = |p: P2| self.model.top_at(p).is_some_and(|top| top >= z - 1e-3);
+                let (l, r) = (solid(left), solid(right));
+                (l != r).then_some(l)
+            });
+        let inside = side == Side::Inside;
+        let free_left = match material_left {
+            Some(m) => m == inside,
+            None => !inside,
+        };
+        let d = if free_left { dist } else { -dist };
+        (path::offset_open(&c.pts, d), free_left)
+    }
+
     pub fn part_inside(&self, c: &path::Contour, z: f64) -> bool {
         let n = c.pts.len();
         let Some(i) = (0..n).max_by(|a, b| {

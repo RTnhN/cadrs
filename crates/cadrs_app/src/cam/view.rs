@@ -4,7 +4,7 @@
 //!   coordinates): rapids faint red, cuts blue, plunges and ramps green, leads cyan, links yellow,
 //!   retracts purple, beam cuts orange. The selected toolpath's lines are wider and brighter; one
 //!   that is out of date is grey. While the toolpath dialog is open its live preview is drawn
-//!   in its place.
+//!   alone.
 //! - **Stock**: the active job's stock, see-through (Show stock on the toolbar).
 //! - **Work coordinate systems**: each setup's and each shown work plane's triad (X red, Y green,
 //!   Z blue).
@@ -124,7 +124,10 @@ fn sync_toolpaths(
             super::dialogs::Draft::Toolpath { op, .. } => Some(op.id),
             _ => None,
         });
-        for s in job.setups.iter().filter(|s| !s.suppressed) {
+        // While a toolpath is edited, its live preview alone: clear to see, and never mixed
+        // with the others' lines (whose drawing order over it isn't fixed).
+        let others = if editing.is_some() { 0 } else { usize::MAX };
+        for s in job.setups.iter().filter(|s| !s.suppressed).take(others) {
             for o in &s.operations {
                 if o.hidden || o.suppressed || !matches!(o.kind, OpKind::Toolpath(_)) {
                     continue;
@@ -168,6 +171,10 @@ fn sync_toolpaths(
         }
     }
     let Some(cam) = cam else { return };
+    // Drawn in a fixed order (the map's isn't): the others first, the selected or previewed
+    // one last, over them.
+    let mut want: Vec<(CamId, (u64, bool, bool, bool))> = want.into_iter().collect();
+    want.sort_by_key(|(op, k)| (k.1, k.3, *op));
     for (op, key) in want {
         if have.contains_key(&op) {
             continue;
@@ -207,7 +214,9 @@ fn sync_toolpaths(
                     joints: GizmoLineJoint::Round(4),
                     ..default()
                 },
-                depth_bias: -0.0005,
+                // The selected (or previewed) toolpath over the others, always: with one bias
+                // for all, which is drawn over which changed from run to run.
+                depth_bias: if key.1 { -0.001 } else { -0.0005 },
             },
             Transform::default(),
             DespawnOnExit(AppState::Document),

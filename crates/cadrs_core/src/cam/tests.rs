@@ -825,13 +825,18 @@ fn work_offsets_are_never_shared() {
     let em = Tool::new(ToolKind::EndMill, 6.0);
     let mut paths = HashMap::new();
     let mut planes = vec![];
-    for (x, datum) in [([0.0, 1.0, 0.0], None), ([-1.0, 0.0, 0.0], Some(2))] {
+    // (Each at an origin of its own: a work offset is an origin.)
+    for (x, datum, at) in [
+        ([0.0, 1.0, 0.0], None, [10.0, 0.0, 10.0]),
+        ([-1.0, 0.0, 0.0], Some(2), [20.0, 0.0, 10.0]),
+    ] {
         let wp = Operation {
             id: CamId::new(),
             name: format!("Plane {}", planes.len() + 1),
             kind: OpKind::WorkPlane(Box::new(WorkPlane {
                 x,
                 datum,
+                origin: Origin::Manual(at),
                 ..WorkPlane::default()
             })),
             suppressed: false,
@@ -895,6 +900,7 @@ fn a_turned_work_plane_posts_in_the_setups_axes() {
         name: "Turned".into(),
         kind: OpKind::WorkPlane(Box::new(WorkPlane {
             x: [0.0, 1.0, 0.0],
+            origin: Origin::Manual([5.0, 5.0, 10.0]),
             ..WorkPlane::default()
         })),
         suppressed: false,
@@ -967,4 +973,58 @@ fn a_toolpath_is_recalculated_for_a_new_spindle_limit() {
     let before = program::op_key(&input, 0);
     input.machine.max_spindle /= 2.0;
     assert_ne!(program::op_key(&input, 0), before);
+}
+
+/// A work offset is an origin: two planes at one origin (turned differently) share one, and a
+/// plane at the setup's own origin uses the setup's.
+#[test]
+fn planes_at_one_origin_share_its_work_offset() {
+    let mut f = Fixture::new();
+    let fanuc = catalog()
+        .into_iter()
+        .find(|m| m.kind == MachineKind::Mill && m.dialect == cadrs_cam::Dialect::Fanuc)
+        .unwrap();
+    let (job, setup) = f.job_on(fanuc);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let mut paths = HashMap::new();
+    for (x, origin) in [
+        ([1.0, 0.0, 0.0], Origin::Manual([10.0, 0.0, 10.0])),
+        ([0.0, 1.0, 0.0], Origin::Manual([10.0, 0.0, 10.0])),
+        ([0.0, -1.0, 0.0], WorkPlane::default().origin),
+    ] {
+        let wp = Operation {
+            id: CamId::new(),
+            name: "Plane".into(),
+            kind: OpKind::WorkPlane(Box::new(WorkPlane {
+                x,
+                origin,
+                ..WorkPlane::default()
+            })),
+            suppressed: false,
+            hidden: false,
+        };
+        let last = f.cam().job(job).unwrap().setups[0]
+            .operations
+            .last()
+            .map(|o| o.id);
+        f.run(Edit::AddOperation {
+            setup,
+            after: last,
+            op: Box::new(wp),
+        })
+        .unwrap();
+        let op = f.add_toolpath(
+            setup,
+            Params::new(Pattern::Profile2D, &em, MachineKind::Mill),
+        );
+        paths.insert(op, f.compute(op).unwrap());
+    }
+    let parts = f.parts();
+    let cam = f.cam();
+    let j = cam.job(job).unwrap();
+    let run = program::setup_run(cam, j, &j.setups[0], &parts, &paths, None).unwrap();
+    let p = program::nc_program(&j.setups[0], j, &run).unwrap();
+    let datums: Vec<u32> = p.operations.iter().map(|o| o.datum).collect();
+    assert_eq!(datums, vec![2, 2, 1]);
 }

@@ -603,11 +603,14 @@ fn sync_bar(
             BorderColor::all(t.border),
         ))
         .with_children(|b| {
-            b.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                ..default()
-            })
+            b.spawn((
+                Name::new("cam-pv-controls"),
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+            ))
             .with_children(|r| {
                 for (name, label, m) in [
                     ("cam-pv-backplot", "Back plot", Mode::BackPlot),
@@ -622,10 +625,13 @@ fn sync_bar(
                     };
                     r.spawn(bt.build(&t));
                 }
-                r.spawn(Node {
-                    width: Val::Px(12.0),
-                    ..default()
-                });
+                r.spawn((
+                    Name::new("cam-pv-gap"),
+                    Node {
+                        width: Val::Px(12.0),
+                        ..default()
+                    },
+                ));
                 r.spawn(t.text("Speed", 11.0, FontWeight::NORMAL, t.muted_foreground));
                 r.spawn(
                     Slider::new("cam-pv-speed")
@@ -634,10 +640,13 @@ fn sync_bar(
                         .tooltip("Playback speed")
                         .build(&t),
                 );
-                r.spawn(Node {
-                    flex_grow: 1.0,
-                    ..default()
-                });
+                r.spawn((
+                    Name::new("cam-pv-spacer"),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
                 for (name, icon, tip) in [
                     ("cam-pv-back", "chevron-left", "Step back"),
                     (
@@ -660,11 +669,14 @@ fn sync_bar(
                     .tooltip("Drag to move through the program")
                     .build(&t),
             );
-            b.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            })
+            b.spawn((
+                Name::new("cam-pv-options"),
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },
+            ))
             .with_children(|r| {
                 r.spawn(
                     Checkbox::new("cam-pv-tool")

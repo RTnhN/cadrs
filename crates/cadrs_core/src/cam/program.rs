@@ -881,10 +881,17 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
     let machine = job.machine.as_ref().ok_or("The job has no machine")?;
     let s = &machine.post;
     let base = setup.wcs.datum.unwrap_or(1).max(1);
+    // A work offset is an origin (it doesn't turn: the moves are posted in the setup's
+    // axes), to a micron in the setup's coordinates.
     let key = |f: &Frame| {
-        let b = blake3::hash(format!("{f:?}").as_bytes());
+        let o = run
+            .frame
+            .to_local(f.origin)
+            .map(|v| (v * 1000.0).round() as i64);
+        let b = blake3::hash(format!("{o:?}").as_bytes());
         u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
     };
+    let base_key = key(&run.frame);
     // Each work offset is one origin: the setup's own, then the planes' overrides, reserved
     // before the automatic planes take the free numbers after them.
     let mut datums: HashMap<u64, u32> = HashMap::new();
@@ -955,6 +962,8 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
                     let n = match (d, datums.get(&k)) {
                         (Some(d), _) => *d,
                         (None, Some(n)) => *n,
+                        // At the setup's own origin: its offset.
+                        (None, None) if k == base_key => base,
                         (None, None) => {
                             let mut n = base + 1;
                             while owner.contains_key(&n) {

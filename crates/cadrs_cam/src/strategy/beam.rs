@@ -62,12 +62,18 @@ fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
             .filter_map(|n| input.model.edge(n))
             .map(|e| e.points.clone())
             .collect();
+        let z = input.selection_z().unwrap_or(input.model.bounds().max[2]);
         for c in chain(&polys, 1e-3) {
-            if !c.closed || p.side == Side::On {
+            if p.side == Side::On {
                 out.push((c, false));
                 continue;
             }
-            let z = input.selection_z().unwrap_or(input.model.bounds().max[2]);
+            if !c.closed {
+                // The kerf off the edge, away from the part.
+                let (pts, _) = input.offset_open_chain(&c, z, k, p.side);
+                out.push((Contour::open(pts), false));
+                continue;
+            }
             let part_inside = input.part_inside(&c, z);
             let mut ring = c.pts.clone();
             if ring_area2(&ring) < 0.0 {
@@ -95,7 +101,8 @@ fn cut_contours(input: &Input) -> Result<Vec<(Contour, bool)>, String> {
     }
     let off = match p.side {
         Side::On => sil,
-        Side::Inside => region::offset(&sil, -k),
+        // Inside the part's outline is the part: inside its through holes only.
+        Side::Inside => region::offset(&region::holes(&sil), -k),
         _ => region::offset(&sil, k),
     };
     for c in region_contours(&off) {

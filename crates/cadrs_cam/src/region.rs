@@ -94,6 +94,14 @@ pub fn intersection(a: &[Ring], b: &[Ring]) -> Region {
 }
 
 /// The region grown by `delta` (shrunk when negative), with round corners.
+/// The holes of a region (its clockwise rings), each as the region inside it.
+pub fn holes(r: &[Ring]) -> Region {
+    r.iter()
+        .filter(|ring| crate::geom::ring_area2(ring) < 0.0)
+        .map(|ring| ring.iter().rev().copied().collect())
+        .collect()
+}
+
 pub fn offset(r: &[Ring], delta: f64) -> Region {
     if delta == 0.0 {
         return normalize(r);

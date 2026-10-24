@@ -509,7 +509,8 @@ fn profile_paths(input: &Input, dist: f64) -> Vec<Contour> {
         // The model's outline: outside the part, inside its through holes.
         let sil = input.model.silhouette();
         let off = match p.side {
-            Side::Inside => region::offset(&sil, -dist),
+            // Inside the part's outline is the part: inside its through holes only.
+            Side::Inside => region::offset(&region::holes(&sil), -dist),
             Side::On => sil,
             _ => region::offset(&sil, dist),
         };
@@ -520,8 +521,18 @@ fn profile_paths(input: &Input, dist: f64) -> Vec<Contour> {
         return cs;
     }
     for (c, z) in cs {
-        if !c.closed || p.side == Side::On {
+        if p.side == Side::On {
             out.push(c);
+            continue;
+        }
+        if !c.closed {
+            // Off the edge, on the side away from the material, the free side where the
+            // cutting direction wants it.
+            let (mut pts, free_left) = input.offset_open_chain(&c, z, dist, p.side);
+            if free_left != (free_side(p.direction) > 0.0) {
+                pts.reverse();
+            }
+            out.push(Contour::open(pts));
             continue;
         }
         let part_inside = input.part_inside(&c, z);
@@ -603,6 +614,13 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         })
         .collect();
     if pass_paths.iter().all(|c| c.is_empty()) {
+        if p.side == Side::Inside && p.drive.edges.is_empty() {
+            return Err(
+                "The part has no through holes to cut inside: pick the edges of a contour to \
+                 cut inside it"
+                    .into(),
+            );
+        }
         return Err("No contour to profile".into());
     }
     let side = (p.side != Side::On).then_some(free_side(p.direction));
@@ -701,17 +719,6 @@ pub fn profile(input: &Input) -> Result<Toolpath, String> {
         ));
         b
     };
-    let mut b = b;
-    if p.compensation == super::Compensation::Wear
-        && p.side != Side::On
-        && p.links.lead_out == super::LeadKind::None
-    {
-        b.warnings.push(
-            "Wear compensation without a lead-out: G40 comes with the retract, not on a move \
-             off the wall (set a lead-out)"
-                .into(),
-        );
-    }
     Ok(b.finish())
 }
 

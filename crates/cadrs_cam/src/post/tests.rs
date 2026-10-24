@@ -970,6 +970,14 @@ fn wear_compensation_is_all_or_nothing_per_contour() {
             nc.matches("G40").count() - 1,
             "{nc}"
         );
+        // Cancelled on a straight move across, never a Z-only one (the window has no room to
+        // run out: back along the cut).
+        for l in nc.lines().skip(10).filter(|l| l.contains("G40")) {
+            assert!(
+                l.contains("G1") && (l.contains('X') || l.contains('Y')),
+                "{l}"
+            );
+        }
     }
     // Plunged in, the window has no straight start at any depth: never compensated.
     let (tp, nc) = post_with(to_size, Entry::Plunge);

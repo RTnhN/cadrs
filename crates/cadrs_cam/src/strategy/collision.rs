@@ -320,9 +320,12 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
     }
     let mut warnings = tp.warnings;
     if cancelled {
+        // A contour compensated in places and not in others would step its wall by the wear:
+        // the whole toolpath without it.
+        out.retain(|s| !matches!(s, Step::Compensation(_)));
         warnings.push(
-            "Wear compensation is cancelled where the tool lifts clear of a collision: the \
-             rest of those contours is cut without it"
+            "Wear compensation is off for this toolpath: the tool lifts clear of a collision \
+             in a compensated contour (G41/G42 can't run through the lift and back)"
                 .into(),
         );
     }
@@ -513,13 +516,27 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(started > 0);
+        // Compensated in places and not others would step the wall: none at all, and said.
+        assert_eq!(started, 0);
         assert!(
             tp.warnings
                 .iter()
-                .any(|w| w.contains("cancelled where the tool lifts")),
+                .any(|w| w.contains("Wear compensation is off")),
             "{:?}",
             tp.warnings
+        );
+        // Without the holder in the way, the same profile is compensated.
+        let mut free = tool.clone();
+        free.holder = None;
+        let input = Input {
+            tool: &free,
+            ..input
+        };
+        let tp = generate(&input).unwrap();
+        assert!(
+            tp.steps
+                .iter()
+                .any(|s| matches!(s, Step::Compensation(Some(_))))
         );
     }
 

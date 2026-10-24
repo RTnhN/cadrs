@@ -285,8 +285,13 @@ impl<'a> Builder<'a> {
             if use_ramp {
                 let from = self.at.map_or(cut.material_top, |a| a[2]);
                 let pts = ramp_along(c, from, z, l.ramp_angle);
-                // Compensated from the ramp's first straight leg along the contour: above the
-                // depth, and cut again at it as the pass goes round.
+                // Compensated from the ramp's first straight leg along a closed contour: above
+                // the depth, and cut again at it as the pass goes round. (An open one's ramp
+                // goes back and forth: no compensation through its turns.)
+                let comp = comp.filter(|_| c.closed);
+                if comp_wanted.is_some() && !c.closed {
+                    self.comp_missed.insert(self.contour);
+                }
                 if let Some(side) = comp {
                     self.steps.push(Step::Compensation(Some(side > 0.0)));
                 }
@@ -374,14 +379,18 @@ impl<'a> Builder<'a> {
     fn end_compensation(&mut self, z: f64, cut: &Cut<'_>) {
         let l = &self.input.params.links;
         self.steps.push(Step::Compensation(None));
-        if let (Some(a), Some(h)) = (self.at, self.heading)
-            && l.lead_out != LeadKind::None
-        {
-            let e = [a[0] + h[0] * l.lead_radius, a[1] + h[1] * l.lead_radius];
-            if self.lead_clear(&[[a[0], a[1]], e], cut) {
-                self.feed([e[0], e[1], z], FeedKind::LeadOut);
-            }
-        }
+        let Some((a, h)) = self.at.zip(self.heading) else {
+            return;
+        };
+        let on = [a[0] + h[0] * l.lead_radius, a[1] + h[1] * l.lead_radius];
+        let e = if l.lead_out != LeadKind::None && self.lead_clear(&[[a[0], a[1]], on], cut) {
+            on
+        } else {
+            // No room to run on: a hair back along the way just cut (cleared), so the cancel
+            // is still a straight move across, never with the retract.
+            [a[0] - h[0] * 0.2, a[1] - h[1] * 0.2]
+        };
+        self.feed([e[0], e[1], z], FeedKind::LeadOut);
     }
 
     /// Down to `z` from where the tool is, back and forth along `stretch` (from its start) at

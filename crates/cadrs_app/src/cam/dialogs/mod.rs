@@ -1052,14 +1052,17 @@ fn sync_dialog(world: &mut World) {
                 .valid(valid)
                 .width(330.0)
                 .body(move |b| {
-                    b.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(2.0),
-                        width: Val::Percent(100.0),
-                        max_height: Val::Vh(82.0),
-                        overflow: Overflow::scroll_y(),
-                        ..default()
-                    })
+                    b.spawn((
+                        Name::new("cam-dialog-body"),
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(2.0),
+                            width: Val::Percent(100.0),
+                            max_height: Val::Vh(82.0),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                    ))
                     .with_children(|c| form::spawn_fields(c, &t2, super::FORM_PREFIX, &fs));
                 })
                 .build(&theme),

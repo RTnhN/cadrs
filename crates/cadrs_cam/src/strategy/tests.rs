@@ -1,7 +1,9 @@
 //! Tests of the strategies' shared settings: patterns, levels and repeats.
 
 use super::*;
+use crate::geom::P3;
 use crate::machine::MachineKind;
+use crate::toolpath::FeedKind;
 
 #[test]
 fn patterns_by_type_and_tool() {
@@ -88,4 +90,140 @@ fn repeats_place_copies() {
     assert!(
         matches!(circ.steps[4], Step::Arc { center, .. } if center[0].abs() < 1e-9 && (center[1] - 5.0).abs() < 1e-9)
     );
+}
+
+/// A profile along two picked bottom edges of a block (an L, open): the tool runs a radius off
+/// them, outside the block, on whichever side the material isn't, and cuts nothing of it.
+/// Inside with nothing picked means the part's through holes; a block has none.
+#[test]
+fn a_profile_on_open_edges_keeps_off_the_part() {
+    use crate::model::{Edge, Model, box_triangles};
+    use crate::sim::{SimOp, simulate_mill_on};
+    let mut m = Model::from_triangles(
+        "block",
+        box_triangles(&Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 12.0])),
+    );
+    for (name, a, b) in [
+        ("e1", [0.0, 0.0, 0.0], [60.0, 0.0, 0.0]),
+        ("e2", [60.0, 0.0, 0.0], [60.0, 40.0, 0.0]),
+    ] {
+        m.edges.push(Edge {
+            name: name.into(),
+            body: 0,
+            points: vec![a, b],
+            circle: None,
+        });
+    }
+    let tool = Tool::new(ToolKind::EndMill, 6.0);
+    let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [65.0, 45.0, 12.0]));
+    for (side, picked) in [
+        (Side::Auto, true),
+        (Side::Outside, true),
+        (Side::Auto, false),
+    ] {
+        let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+        p.side = side;
+        // (Both orders of the picks: the side comes from the material, not the order.)
+        if picked {
+            p.drive.edges = vec!["e2".into(), "e1".into()];
+        }
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Mill,
+            params: &p,
+            rest: None,
+            fixtures: &[],
+        };
+        let tp = generate(&input).unwrap();
+        let cuts: Vec<P3> = tp
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed {
+                    to,
+                    kind: FeedKind::Cut,
+                    ..
+                } => Some(*to),
+                _ => None,
+            })
+            .collect();
+        assert!(!cuts.is_empty());
+        if picked {
+            // Along the bottom edge a radius below it, along the right one a radius right.
+            assert!(cuts.iter().any(|q| (q[1] + 3.0).abs() < 0.05), "{side:?}");
+            assert!(cuts.iter().any(|q| (q[0] - 63.0).abs() < 0.05), "{side:?}");
+        }
+        let segs = tp.motion([0.0, 0.0, 60.0], 5_000.0);
+        let r = simulate_mill_on(
+            stock.height_map(0.25),
+            &m,
+            &[],
+            &[SimOp {
+                tool: &tool,
+                segments: &segs,
+            }],
+        );
+        assert_eq!(r.gouge_cells, 0, "{side:?} {picked}: {}", r.gouge_depth);
+    }
+    let mut p = Params::new(Pattern::Profile2D, &tool, MachineKind::Mill);
+    p.side = Side::Inside;
+    let input = Input {
+        model: &m,
+        stock: &stock,
+        tool: &tool,
+        machine: MachineKind::Mill,
+        params: &p,
+        rest: None,
+        fixtures: &[],
+    };
+    let e = generate(&input).unwrap_err();
+    assert!(e.contains("no through holes"), "{e}");
+}
+
+/// A laser cut along a picked open edge: the beam runs half its kerf off it, outside the part.
+#[test]
+fn a_cut_on_an_open_edge_keeps_its_kerf_off_the_part() {
+    use crate::model::{Edge, Model, box_triangles};
+    let mut m = Model::from_triangles(
+        "plate",
+        box_triangles(&Aabb::new([0.0, 0.0, 0.0], [60.0, 40.0, 3.0])),
+    );
+    m.edges.push(Edge {
+        name: "e1".into(),
+        body: 0,
+        points: vec![[60.0, 0.0, 3.0], [0.0, 0.0, 3.0]],
+        circle: None,
+    });
+    let laser = Tool::new(ToolKind::Laser, 0.2);
+    let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [65.0, 45.0, 3.0]));
+    let mut p = Params::new(Pattern::Cut, &laser, MachineKind::Laser);
+    p.drive.edges = vec!["e1".into()];
+    let input = Input {
+        model: &m,
+        stock: &stock,
+        tool: &laser,
+        machine: MachineKind::Laser,
+        params: &p,
+        rest: None,
+        fixtures: &[],
+    };
+    let tp = generate(&input).unwrap();
+    let ys: Vec<f64> = tp
+        .steps
+        .iter()
+        .filter_map(|s| match s {
+            Step::Feed {
+                to,
+                kind: FeedKind::Cut,
+                ..
+            } => Some(to[1]),
+            _ => None,
+        })
+        .collect();
+    assert!(!ys.is_empty());
+    for y in ys {
+        assert!((y + 0.1).abs() < 1e-6, "{y}");
+    }
 }
