@@ -43,6 +43,8 @@ pub struct ExportSession {
     pub inch: bool,
     /// Write the setup sheet beside the program.
     pub sheet: bool,
+    /// Post although it runs beyond the machine's travel (the operator ticked it).
+    pub beyond_travel: bool,
 }
 
 #[derive(Component)]
@@ -126,6 +128,7 @@ pub fn open_for_selection(world: &mut World) {
         ops: (!ops.is_empty()).then_some(ops),
         inch,
         sheet: true,
+        beyond_travel: false,
     });
     open_dialog(world);
 }
@@ -143,6 +146,8 @@ struct Program {
     sheet: String,
     /// What the operator should know before running it.
     notes: Vec<String>,
+    /// Where it runs beyond the machine's travel: posted only when the operator says so.
+    travel: Vec<String>,
 }
 
 fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
@@ -174,10 +179,12 @@ fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
     let sheet = cadrs_core::cam::sheet::setup_sheet(cam, job, setup, &run, &parts, &file);
     let mut notes = Vec::new();
     // Where the machine mating puts it on the table: inside the travel?
-    if let Some(shape) = program::stock_shape(cam, job, &parts) {
-        let stock = program::stock_in(&shape, &run.frame);
-        notes.extend(program::travel_warnings(job, setup, &run, &stock));
-    }
+    let travel = program::stock_shape(cam, job, &parts)
+        .map(|shape| {
+            let stock = program::stock_in(&shape, &run.frame);
+            program::travel_warnings(job, setup, &run, &stock)
+        })
+        .unwrap_or_default();
     if m.kind == cadrs_core::cam::cadrs_cam::MachineKind::Plasma
         && m.dialect == post::Dialect::LinuxCnc
         && run.ops.iter().any(|o| o.tool.beam.material == 0)
@@ -195,6 +202,7 @@ fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
         names,
         sheet,
         notes,
+        travel,
     })
 }
 
@@ -208,6 +216,7 @@ fn open_dialog(world: &mut World) {
         machine,
         names,
         notes,
+        travel,
         ..
     } = match program_text(world, &s) {
         Ok(x) => x,
@@ -349,11 +358,19 @@ fn open_dialog(world: &mut World) {
                     Name::new("cam-export-summary"),
                     t.text(&summary, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
                 ));
-                for n in &notes {
+                for n in travel.iter().chain(&notes) {
                     b.spawn((
                         Name::new("cam-export-note"),
                         t.text(n, t.font_sm, FontWeight::NORMAL, t.danger),
                     ));
+                }
+                if !travel.is_empty() {
+                    b.spawn(
+                        Checkbox::new("cam-export-beyond-travel")
+                            .label("Post anyway: I've checked where it runs on the machine")
+                            .checked(s.beyond_travel)
+                            .build(t),
+                    );
                 }
             })
             .footer(move |f| {
@@ -409,10 +426,12 @@ fn on_select(ev: On<cadrs_ui::SelectChange>, q: Query<&Name>, mut commands: Comm
 }
 
 fn on_check(ev: On<CheckboxChange>, q: Query<&Name>, session: Option<ResMut<ExportSession>>) {
-    if let (Ok(n), Some(mut s)) = (q.get(ev.entity), session)
-        && n.as_str() == "cam-export-sheet"
-    {
-        s.sheet = ev.checked;
+    if let (Ok(n), Some(mut s)) = (q.get(ev.entity), session) {
+        match n.as_str() {
+            "cam-export-sheet" => s.sheet = ev.checked,
+            "cam-export-beyond-travel" => s.beyond_travel = ev.checked,
+            _ => {}
+        }
     }
 }
 
@@ -486,6 +505,7 @@ pub fn post_now(world: &mut World) {
         nc,
         file: default_name,
         sheet,
+        travel,
         ..
     } = match program_text(world, &s) {
         Ok(x) => x,
@@ -494,6 +514,18 @@ pub fn post_now(world: &mut World) {
             return;
         }
     };
+    // Beyond the travel the machine stops on its limits mid-cut, or crashes on a soft limit
+    // set wrong: only when the operator has said so.
+    if !travel.is_empty() && !s.beyond_travel {
+        toast(
+            world,
+            &format!(
+                "{} (tick \"Post anyway\" once you've checked it on the machine)",
+                travel[0]
+            ),
+        );
+        return;
+    }
     if folder.is_empty() {
         toast(world, "Choose a folder to post to");
         return;

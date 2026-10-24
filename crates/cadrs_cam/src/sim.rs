@@ -253,6 +253,132 @@ pub fn simulate_mill_on(
     }
 }
 
+/// [`simulate_mill_on`] for a run with tilted operations (3+2): `frames[k]` is operation
+/// `k`'s own frame in the map's coordinates (`None`: along the map's Z). The operations along
+/// the map's Z cut it as usual; a tilted one cuts the stock as voxels seen down its own Z (its
+/// rapids and holder checked on that), carved back into the map. Positions found come back in
+/// the map's coordinates. Gouges are the setup's operations' only: check the tilted ones
+/// against the part with [`check_against_part`].
+pub fn simulate_mill_tilted(
+    start: HeightMap,
+    bottom: f32,
+    model: &Model,
+    fixtures: &[[P3; 3]],
+    ops: &[SimOp],
+    frames: &[Option<crate::geom::Frame>],
+) -> MillResult {
+    let mut cur = start;
+    let mut removed = 0.0;
+    let (mut rapid_hits, mut holder_hits, mut fixture_hits) = (vec![], vec![], vec![]);
+    let mut k = 0;
+    while k < ops.len() {
+        let Some(f) = frames.get(k).copied().flatten() else {
+            // A run of operations along the map's Z.
+            let end = (k..ops.len())
+                .find(|&e| frames.get(e).copied().flatten().is_some())
+                .unwrap_or(ops.len());
+            let group: Vec<SimOp> = ops[k..end]
+                .iter()
+                .map(|o| SimOp {
+                    tool: o.tool,
+                    segments: o.segments,
+                })
+                .collect();
+            let r = simulate_mill_on(cur, model, fixtures, &group);
+            removed += r.removed;
+            rapid_hits.extend(r.rapid_hits.iter().map(|(i, p)| (i + k, *p)));
+            holder_hits.extend(r.holder_hits.iter().map(|(i, p)| (i + k, *p)));
+            fixture_hits.extend(r.fixture_hits.iter().map(|(i, p)| (i + k, *p)));
+            cur = r.stock;
+            k = end;
+            continue;
+        };
+        // A tilted operation: the stock as voxels, seen down its Z.
+        let top = cur
+            .z
+            .iter()
+            .copied()
+            .filter(|z| *z != EMPTY)
+            .fold(bottom, f32::max);
+        let longest = (cur.nx.max(cur.ny) as f64 * cur.cell).max((top - bottom) as f64);
+        let vcell = (longest / 200.0).min(1.0).max(cur.cell);
+        let mut vox = crate::voxels::Voxels::of_height_map(&cur, bottom, vcell);
+        let lo = cur.point(0, 0);
+        let hi = cur.point(cur.nx - 1, cur.ny - 1);
+        let corners = (0..8).map(|c| {
+            f.to_local([
+                if c & 1 == 0 { lo[0] } else { hi[0] },
+                if c & 2 == 0 { lo[1] } else { hi[1] },
+                if c & 4 == 0 {
+                    bottom as f64
+                } else {
+                    top as f64
+                },
+            ])
+        });
+        let b = crate::geom::Aabb::of(corners);
+        let pad = 2.0 * vcell;
+        let area = crate::geom::Aabb::new(
+            [b.min[0] - pad, b.min[1] - pad, b.min[2]],
+            [b.max[0] + pad, b.max[1] + pad, b.max[2]],
+        );
+        let map = vox.height_map(&f, &area, vcell);
+        let segs: Vec<Segment> = ops[k]
+            .segments
+            .iter()
+            .map(|s| Segment {
+                from: f.to_local(s.from),
+                to: f.to_local(s.to),
+                ..*s
+            })
+            .collect();
+        // No part on this map: its gouges are checked exactly elsewhere.
+        let r = simulate_mill_on(
+            map,
+            &Model::from_triangles("none", Vec::new()),
+            &[],
+            &[SimOp {
+                tool: ops[k].tool,
+                segments: &segs,
+            }],
+        );
+        removed += r.removed;
+        rapid_hits.extend(r.rapid_hits.iter().map(|(_, p)| (k, f.to_world(*p))));
+        holder_hits.extend(r.holder_hits.iter().map(|(_, p)| (k, f.to_world(*p))));
+        vox.carve(&f, &r.stock);
+        // Back onto the map: lower only where the voxels lost material.
+        let seen = vox.height_map(
+            &crate::geom::Frame::WORLD,
+            &crate::geom::Aabb::new([lo[0], lo[1], bottom as f64], [hi[0], hi[1], top as f64]),
+            cur.cell,
+        );
+        for j in 0..cur.ny {
+            for i in 0..cur.nx {
+                let n = cur.index(i, j);
+                let v = seen.sample(cur.point(i, j));
+                if cur.z[n] != EMPTY && (v == EMPTY || v < cur.z[n]) {
+                    cur.z[n] = v;
+                    if v == EMPTY
+                        && let Some(fl) = cur.floor.as_mut()
+                    {
+                        fl[n] = EMPTY;
+                    }
+                }
+            }
+        }
+        k += 1;
+    }
+    // The gouges and excess on the final stock.
+    let tail = simulate_mill_on(cur, model, &[], &[]);
+    MillResult {
+        removed,
+        rapid_hits,
+        holder_hits,
+        fixture_hits,
+        ..tail
+    }
+}
+
 /// What checking an operation against the part (not the stock) found: for operations a height
 /// map along the setup's Z can't cut (a tilted work plane, 3+2), in their own coordinates.
 #[derive(Debug, Clone, Default)]
@@ -749,5 +875,57 @@ mod tests {
             0.1,
         );
         assert_eq!(r.rapid_hits.len(), 1, "{:?}", r.rapid_hits);
+    }
+
+    /// A 3+2 face on the block's +X end, then a plunge (a rapid) down into where it cut: the
+    /// rapid is clear; without the tilted cut it would run into the stock.
+    #[test]
+    fn a_tilted_cut_clears_the_stock_for_the_next_operation() {
+        let mut start = HeightMap::new([0.0, 0.0], [40.0, 40.0], 0.5);
+        start.z.iter_mut().for_each(|z| *z = 20.0);
+        let none = Model::from_triangles("none", Vec::new());
+        let seg = |from: P3, to: P3, feed: bool| Segment {
+            from,
+            to,
+            feed: feed.then_some(500.0),
+            kind: feed.then_some(crate::toolpath::FeedKind::Cut),
+            beam: false,
+            minutes: 0.0,
+        };
+        // Seen from +X (its X the model's Y, its Y the model's Z, its Z the model's X − 40):
+        // passes 5 deep over the end, z 10 and up.
+        let f = crate::geom::Frame::from_zx([40.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let mut face = Vec::new();
+        for y in [12.0, 16.0, 20.0, 24.0] {
+            face.push(seg(
+                f.to_world([-8.0, y, -5.0]),
+                f.to_world([48.0, y, -5.0]),
+                true,
+            ));
+        }
+        // (A millimetre clear of the face's wall: the voxels keep up to one of material.)
+        let plunge = [seg([38.0, 20.0, 30.0], [38.0, 20.0, 12.0], false)];
+        let face_tool = Tool::new(ToolKind::EndMill, 10.0);
+        let tool = Tool::new(ToolKind::EndMill, 4.0);
+        let ops = [
+            SimOp {
+                tool: &face_tool,
+                segments: &face,
+            },
+            SimOp {
+                tool: &tool,
+                segments: &plunge,
+            },
+        ];
+        let r = simulate_mill_tilted(start.clone(), 0.0, &none, &[], &ops, &[Some(f), None]);
+        assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
+        assert!(r.removed > 0.5 * 5.0 * 40.0 * 10.0, "{}", r.removed);
+        // The end is down to about z 10 now; the middle still 20.
+        let end = r.stock.sample([38.0, 20.0]);
+        assert!(end < 11.5, "{end}");
+        assert!((r.stock.sample([20.0, 20.0]) - 20.0).abs() < 1e-3);
+        // The plunge alone hits the stock.
+        let r = simulate_mill_tilted(start, 0.0, &none, &[], &ops[1..], &[None]);
+        assert_eq!(r.rapid_hits.len(), 1);
     }
 }

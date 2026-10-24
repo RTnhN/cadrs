@@ -348,7 +348,7 @@ fn mill_job_end_to_end() {
     // Verify the profile and bore (the chamfer cuts into the part by design: the model has no
     // chamfer): no gouges.
     let run = program::setup_run(cam, j, s, &parts, &paths, Some(&[profile, bore])).unwrap();
-    match program::simulate(cam, j, &run, &parts, None, 0.2).unwrap() {
+    match program::simulate(cam, j, s, &run, &parts, &paths, None, 0.2).unwrap() {
         program::SimResult::Mill(r) => {
             assert_eq!(r.gouge_cells, 0, "{:?}", &r.gouges[..r.gouges.len().min(4)]);
             assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
@@ -382,7 +382,7 @@ fn laser_job_cuts_the_hole_first() {
     let run = program::setup_run(cam, j, &j.setups[0], &parts, &paths, None).unwrap();
     let nc = program::post_setup(&j.setups[0], j, &run).unwrap();
     assert!(nc.contains("M4 S"), "{nc}");
-    match program::simulate(cam, j, &run, &parts, None, 0.2).unwrap() {
+    match program::simulate(cam, j, &j.setups[0], &run, &parts, &paths, None, 0.2).unwrap() {
         program::SimResult::Sheet(r) => {
             assert_eq!(r.parts_free, 1);
             assert!(r.damage < 0.01, "{}", r.damage);
@@ -629,8 +629,14 @@ fn dynamic_work_plane_posts_a_tilted_plane() {
     assert!(g68.contains("I0. J90. K0."), "{g68}");
     assert_eq!(nc.matches("G68.2").count(), 2, "{nc}");
     assert!(nc.contains("G53.1") && nc.contains("G69"), "{nc}");
-    // Verify runs, the tilted facing left out.
-    assert!(program::simulate(cam, j, &run, &parts, None, 0.2).is_ok());
+    // Verify runs, the tilted facing cut on voxels: nothing runs into the stock.
+    match program::simulate(cam, j, s, &run, &parts, &paths, None, 0.2).unwrap() {
+        program::SimResult::Mill(r) => {
+            assert!(r.rapid_hits.is_empty(), "{:?}", r.rapid_hits);
+            assert!(r.holder_hits.is_empty(), "{:?}", r.holder_hits);
+        }
+        _ => panic!("a mill simulates a height map"),
+    }
 }
 
 /// A second setup, the plate flipped over, starts from the stock the first left: the band the
@@ -789,4 +795,70 @@ fn a_side_setup_starts_from_the_first_ones_stock() {
     let q = frame.to_local([62.0, 20.0, 5.0]);
     let v = map.sample([q[0], q[1]]);
     assert!((v as f64 + 2.0).abs() < 0.7, "{v}");
+}
+
+/// Work planes never share a work offset: an automatic one skips the numbers the others
+/// override, and an override on another origin's number is refused.
+#[test]
+fn work_offsets_are_never_shared() {
+    let mut f = Fixture::new();
+    let fanuc = catalog()
+        .into_iter()
+        .find(|m| m.kind == MachineKind::Mill && m.dialect == cadrs_cam::Dialect::Fanuc)
+        .unwrap();
+    let (job, setup) = f.job_on(fanuc);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let mut paths = HashMap::new();
+    let mut planes = vec![];
+    for (x, datum) in [([0.0, 1.0, 0.0], None), ([-1.0, 0.0, 0.0], Some(2))] {
+        let wp = Operation {
+            id: CamId::new(),
+            name: format!("Plane {}", planes.len() + 1),
+            kind: OpKind::WorkPlane(Box::new(WorkPlane {
+                x,
+                datum,
+                ..WorkPlane::default()
+            })),
+            suppressed: false,
+            hidden: false,
+        };
+        planes.push(wp.id);
+        let last = f.cam().job(job).unwrap().setups[0]
+            .operations
+            .last()
+            .map(|o| o.id);
+        f.run(Edit::AddOperation {
+            setup,
+            after: last,
+            op: Box::new(wp),
+        })
+        .unwrap();
+        let op = f.add_toolpath(
+            setup,
+            Params::new(Pattern::Profile2D, &em, MachineKind::Mill),
+        );
+        paths.insert(op, f.compute(op).unwrap());
+    }
+    let parts = f.parts();
+    let post = |f: &Fixture| {
+        let cam = f.cam();
+        let j = cam.job(job).unwrap();
+        let run = program::setup_run(cam, j, &j.setups[0], &parts, &paths, None).unwrap();
+        program::post_setup(&j.setups[0], j, &run)
+    };
+    // The first (automatic) plane would have taken G55, which the second overrides.
+    let nc = post(&f).unwrap();
+    assert!(nc.contains("G56") && nc.contains("G55"), "{nc}");
+    let g56 = nc.find("G56").unwrap();
+    let g55 = nc.find("G55").unwrap();
+    assert!(g56 < g55, "{nc}");
+    // The second plane on the setup's own G54: refused.
+    let mut second = f.cam().operation(planes[1]).unwrap().2.clone();
+    if let OpKind::WorkPlane(w) = &mut second.kind {
+        w.datum = Some(1);
+    }
+    f.run(Edit::SetOperation(Box::new(second))).unwrap();
+    let err = post(&f).unwrap_err();
+    assert!(err.contains("work offset 1"), "{err}");
 }

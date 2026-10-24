@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use cadrs_cam::geom::{Aabb, Frame, P3, dot, normalize};
+use cadrs_cam::geom::{Aabb, Frame, P3, add, dot, normalize, sub};
 use cadrs_cam::model::Model;
 use cadrs_cam::sim::{self, MillResult, SheetResult, SimOp};
 use cadrs_cam::strategy::Stock;
@@ -666,8 +666,9 @@ fn stock_before_voxels(
     let tris = shape.triangles();
     let b = Aabb::of(tris.iter().flatten().copied());
     let s = b.size();
-    // A voxel a 200th of the stock's longest side, no finer than the maps.
-    let vcell = (s[0].max(s[1]).max(s[2]) / 200.0).max(cell);
+    // A voxel a 200th of the stock's longest side (at most a millimetre), no finer than the
+    // maps. The voxels err toward material, so a coarse one only costs air cut.
+    let vcell = (s[0].max(s[1]).max(s[2]) / 200.0).min(1.0).max(cell);
     let mut vox = cadrs_cam::voxels::Voxels::of_solid(&tris, vcell);
     for (si, st) in job.setups.iter().enumerate().take(target + 1) {
         if st.suppressed && si < target {
@@ -690,7 +691,10 @@ fn stock_before_voxels(
                 (Some((wf, _, _)), true) => (*wf, o.local),
                 _ => (run.frame, &o.toolpath),
             };
-            let area = stock_in(shape, &of).bounds;
+            // Room round the stock for the voxels' turned corners.
+            let b = stock_in(shape, &of).bounds;
+            let pad = [2.0 * vcell, 2.0 * vcell, 0.0];
+            let area = Aabb::new(sub(b.min, pad), add(b.max, pad));
             let mut map = vox.height_map(&of, &area, vcell);
             let start = tp.start().unwrap_or([0.0; 3]);
             for seg in tp.motion(start, rapid) {
@@ -710,12 +714,43 @@ pub enum SimResult {
     Sheet(Box<SheetResult>),
 }
 
-/// Simulates a setup's operations over its stock (all of them, or up to and including `upto`).
+/// Simulates operations (their motion in the setup's coordinates) over `stock`, from `start`
+/// (the stock the setups and toolpaths before left; `None`: the whole stock): a sheet for
+/// beam machines, else a height map, with each tilted operation (3+2, `frames[k]` its own
+/// frame in the setup's coordinates) cut on voxels in its frame. Verify runs this.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_ops(
+    stock: &Stock,
+    model: &Model,
+    fixtures: &[[P3; 3]],
+    start: Option<cadrs_cam::heightmap::HeightMap>,
+    ops: &[SimOp],
+    frames: &[Option<Frame>],
+    beam: bool,
+    cell: f64,
+) -> SimResult {
+    if beam {
+        return SimResult::Sheet(Box::new(sim::simulate_sheet(stock, model, ops)));
+    }
+    let first = start.unwrap_or_else(|| stock.height_map(cell));
+    SimResult::Mill(Box::new(if frames.iter().any(Option::is_some) {
+        let bottom = stock.bounds.min[2] as f32;
+        sim::simulate_mill_tilted(first, bottom, model, fixtures, ops, frames)
+    } else {
+        sim::simulate_mill_on(first, model, fixtures, ops)
+    }))
+}
+
+/// Simulates a setup's operations (all of them, or up to and including `upto`) as Verify does:
+/// from the stock the setups and toolpaths before them left.
+#[allow(clippy::too_many_arguments)]
 pub fn simulate(
     cam: &CamStudio,
     job: &Job,
+    setup: &Setup,
     run: &SetupRun,
     parts: &[Part],
+    paths: &HashMap<CamId, Toolpath>,
     upto: Option<CamId>,
     quality: f64,
 ) -> Result<SimResult, String> {
@@ -725,11 +760,15 @@ pub fn simulate(
     let model = super::geometry::model_from_parts(&job_bodies(cam, job, parts), &run.frame);
     let start = [0.0, 0.0, stock.bounds.max[2] + 50.0];
     let mut motions = Vec::new();
+    let mut frames = Vec::new();
     for o in &run.ops {
-        // (A tilted operation can't cut a height map along the setup's Z.)
-        if !o.tilted {
-            motions.push((o.tool, o.toolpath.motion(start, machine.rapid_rate)));
-        }
+        motions.push((o.tool, o.toolpath.motion(start, machine.rapid_rate)));
+        frames.push(
+            o.plane
+                .as_ref()
+                .filter(|_| o.tilted)
+                .map(|(wf, _, _)| run.frame.relative(wf)),
+        );
         if upto == Some(o.id) {
             break;
         }
@@ -741,15 +780,16 @@ pub fn simulate(
             segments: m,
         })
         .collect();
-    Ok(if machine.kind.is_cutting() {
-        SimResult::Sheet(Box::new(sim::simulate_sheet(&stock, &model, &ops)))
-    } else {
-        let cell = sim::sim_cell(&stock, quality);
-        let fixtures = workholding_triangles(job, parts, &run.frame);
-        SimResult::Mill(Box::new(sim::simulate_mill_with(
-            &stock, &model, &fixtures, &ops, cell,
-        )))
-    })
+    let beam = machine.kind.is_cutting();
+    let cell = sim::sim_cell(&stock, quality);
+    let first = run.ops.first().map(|o| o.id);
+    let before = (!beam)
+        .then(|| stock_before(cam, job, setup.id, first, parts, paths, &run.frame, cell))
+        .flatten();
+    let fixtures = workholding_triangles(job, parts, &run.frame);
+    Ok(simulate_ops(
+        &stock, &model, &fixtures, before, &ops, &frames, beam, cell,
+    ))
 }
 
 /// The program for a setup's operations (see the module docs).
@@ -757,8 +797,43 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
     let machine = job.machine.as_ref().ok_or("The job has no machine")?;
     let s = &machine.post;
     let base = setup.wcs.datum.unwrap_or(1).max(1);
-    let mut next_datum = base + 1;
+    let key = |f: &Frame| {
+        let b = blake3::hash(format!("{f:?}").as_bytes());
+        u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
+    };
+    // Each work offset is one origin: the setup's own, then the planes' overrides, reserved
+    // before the automatic planes take the free numbers after them.
     let mut datums: HashMap<u64, u32> = HashMap::new();
+    let mut owner: HashMap<u32, (u64, String)> = HashMap::new();
+    owner.insert(
+        base,
+        (key(&run.frame), format!("{}'s work offset", setup.name)),
+    );
+    fn claim(
+        owner: &mut HashMap<u32, (u64, String)>,
+        n: u32,
+        k: u64,
+        who: &str,
+    ) -> Result<(), String> {
+        match owner.get(&n) {
+            Some((o, _)) if *o == k => Ok(()),
+            Some((_, other)) => Err(format!(
+                "{who}: work offset {n} (G54 is 1) is already {other}; give it another"
+            )),
+            None => {
+                owner.insert(n, (k, format!("{who}'s work plane")));
+                Ok(())
+            }
+        }
+    }
+    if s.advanced_work_planes {
+        for o in &run.ops {
+            if let Some((wf, WorkPlaneType::Absolute, Some(d))) = &o.plane {
+                claim(&mut owner, *d, key(wf), o.name)?;
+                datums.entry(key(wf)).or_insert(*d);
+            }
+        }
+    }
     let mut operations = Vec::new();
     for o in &run.ops {
         let mut tilt = None;
@@ -785,17 +860,20 @@ pub fn nc_program(setup: &Setup, job: &Job, run: &SetupRun) -> Result<NcProgram,
             Some((_, WorkPlaneType::None, _)) => (o.toolpath.clone(), base),
             Some((wf, WorkPlaneType::Absolute, d)) => {
                 if s.advanced_work_planes {
-                    let key = {
-                        let b = blake3::hash(format!("{wf:?}").as_bytes());
-                        u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
-                    };
-                    let n = d.unwrap_or_else(|| {
-                        *datums.entry(key).or_insert_with(|| {
-                            let n = next_datum;
-                            next_datum += 1;
+                    let k = key(wf);
+                    let n = match (d, datums.get(&k)) {
+                        (Some(d), _) => *d,
+                        (None, Some(n)) => *n,
+                        (None, None) => {
+                            let mut n = base + 1;
+                            while owner.contains_key(&n) {
+                                n += 1;
+                            }
+                            claim(&mut owner, n, k, o.name)?;
+                            datums.insert(k, n);
                             n
-                        })
-                    });
+                        }
+                    };
                     (o.local.clone(), n)
                 } else {
                     (o.toolpath.clone(), base)
@@ -828,8 +906,11 @@ pub fn post_setup(setup: &Setup, job: &Job, run: &SetupRun) -> Result<String, St
     cadrs_cam::post(&program, machine, &machine.post).map_err(|e| e.to_string())
 }
 
-/// Moves outside the machine's travel, as warnings: the setup's toolpaths placed on the table
-/// by its machine mating (the stock's bottom centre on the table's centre, or offset).
+/// Moves outside the machine's travel: the setup's toolpaths placed on the table by its machine
+/// mating (the stock's bottom centre on the table's centre, or offset). The Post dialog posts
+/// such a program only when the operator says so. Z is the tool tip's span against the Z
+/// travel: the tool's length decides where in the travel that span sits (against the room
+/// between the table and the spindle, which the machine doesn't record), not how much of it.
 pub fn travel_warnings(job: &Job, setup: &Setup, run: &SetupRun, stock: &Stock) -> Vec<String> {
     let Some(m) = &job.machine else {
         return Vec::new();

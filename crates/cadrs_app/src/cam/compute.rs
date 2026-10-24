@@ -114,6 +114,8 @@ pub struct RestInput {
     op: CamId,
     parts: Vec<Part>,
     paths: HashMap<CamId, Toolpath>,
+    /// What the carried stock depends on ([`carry_key`]).
+    carry: u64,
 }
 
 /// The job cache and what's being computed.
@@ -663,28 +665,75 @@ fn rest_input(world: &World, cam: &Arc<CamStudio>, op: CamId, parts: &[Part]) ->
         op,
         parts: parts.to_vec(),
         paths: world.resource::<Computed>().paths(),
+        carry: carry_key(world, cam, job.id, setup.id, Some(op)),
     })
+}
+
+/// What the stock carried to `setup` (up to `upto`) depends on: the job (its setups, stock and
+/// operations) and the results its toolpaths have.
+pub fn carry_key(
+    world: &World,
+    cam: &CamStudio,
+    job: CamId,
+    setup: CamId,
+    upto: Option<CamId>,
+) -> u64 {
+    let Some(j) = cam.job(job) else { return 0 };
+    let latest = &world.resource::<Computed>().latest;
+    let keys: Vec<Option<u64>> = j
+        .setups
+        .iter()
+        .flat_map(|s| s.operations.iter())
+        .map(|o| latest.get(&o.id).map(|(k, _)| *k))
+        .collect();
+    hash64(&format!("{j:?}{keys:?}{setup:?}{upto:?}"))
+}
+
+/// The stock carried to a setup, worked out once for each `key` (with the frame and cell it
+/// is wanted in): rest machining and Verify ask for the same ones again and again.
+pub fn carried_stock(
+    key: u64,
+    frame: &Frame,
+    cell: f64,
+    work: impl FnOnce() -> Option<HeightMap>,
+) -> Option<HeightMap> {
+    static CARRIED: std::sync::Mutex<VecDeque<(u64, Option<HeightMap>)>> =
+        std::sync::Mutex::new(VecDeque::new());
+    let key = key ^ hash64(&format!("{frame:?}{}", cell.to_bits()));
+    if let Some((_, m)) = CARRIED
+        .lock()
+        .ok()
+        .and_then(|c| c.iter().find(|(k, _)| *k == key).cloned())
+    {
+        return m;
+    }
+    let m = work();
+    if let Ok(mut c) = CARRIED.lock() {
+        if c.len() >= 6 {
+            c.pop_front();
+        }
+        c.push_back((key, m.clone()));
+    }
+    m
 }
 
 /// The in-process stock `rest` leaves (on the worker thread); the stock itself when it can't
 /// be carried.
 fn rest_stock(input: &OpInput, rest: &RestInput) -> HeightMap {
     let cell = cadrs_core::cam::cadrs_cam::sim::sim_cell(&input.stock, 0.2);
-    rest.cam
-        .job(rest.job)
-        .and_then(|job| {
-            program::stock_before(
-                &rest.cam,
-                job,
-                rest.setup,
-                Some(rest.op),
-                &rest.parts,
-                &rest.paths,
-                &input.frame,
-                cell,
-            )
-        })
-        .unwrap_or_else(|| input.stock.height_map(cell))
+    carried_stock(rest.carry, &input.frame, cell, || {
+        program::stock_before(
+            &rest.cam,
+            rest.cam.job(rest.job)?,
+            rest.setup,
+            Some(rest.op),
+            &rest.parts,
+            &rest.paths,
+            &input.frame,
+            cell,
+        )
+    })
+    .unwrap_or_else(|| input.stock.height_map(cell))
 }
 
 #[cfg(test)]

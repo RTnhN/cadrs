@@ -167,6 +167,34 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
         let n = (dist(a, b) / step).ceil().max(1.0) as usize;
         (0..=n).any(|i| hits_at(lerp(a, b, i as f64 / n as f64), scratch) == Some(Hit::Fixture))
     };
+    // A drill cycle's tool goes down its own hole: against the part only what is wider than
+    // the tool (the holder, the arbor, a wider shank) can meet it.
+    let wide: Vec<(Tool, f64)> = probes
+        .iter()
+        .filter(|(t, _)| t.radius() > input.tool.radius() + 0.05)
+        .cloned()
+        .collect();
+    let drill_hit = |d: &crate::toolpath::DrillCycle, scratch: &mut Vec<u32>| {
+        let n = ((d.retract - d.bottom) / step).ceil().clamp(1.0, 10_000.0) as usize;
+        let mut worst = None;
+        for i in 0..=n {
+            let q = [d.at[0], d.at[1], lerp_z(d.retract, d.bottom, i, n)];
+            if hits_at(q, scratch) == Some(Hit::Fixture) {
+                return Some(Hit::Fixture);
+            }
+            if part_check
+                && q[2] + lowest < top
+                && wide.iter().any(|(t, h)| {
+                    q[2] + h < top
+                        && drop_point(t, &idx, [q[0], q[1]], f64::NEG_INFINITY, scratch)
+                            > q[2] + h + 1e-6
+                })
+            {
+                worst = Some(Hit::Part);
+            }
+        }
+        worst
+    };
     let mut scratch2 = Vec::new();
     let mut hits_move = |from: P3, s: &Step| -> Option<Hit> {
         let pts: Vec<P3> = match s {
@@ -263,6 +291,15 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
             }
             Step::Drill(d) => {
                 at = Some([d.at[0], d.at[1], d.retract]);
+                if let Some(hit) = drill_hit(d, &mut scratch2) {
+                    let k = (hit == Hit::Fixture) as usize;
+                    counts[k] += 1;
+                    first[k].get_or_insert([d.at[0], d.at[1], d.bottom]);
+                    // Retract: the hole left out.
+                    if retract {
+                        continue;
+                    }
+                }
                 out.push(s);
             }
             _ => out.push(s),
@@ -299,6 +336,10 @@ pub fn apply(input: &Input, tp: Toolpath) -> Toolpath {
         steps: out,
         warnings,
     }
+}
+
+fn lerp_z(a: f64, b: f64, i: usize, n: usize) -> f64 {
+    a + (b - a) * i as f64 / n as f64
 }
 
 /// Back over `from` (where the cut goes on with `next`) from the clearance height and in: by a
@@ -569,6 +610,66 @@ mod tests {
         let (g, _) = crate::strategy::testing::max_gouge(&clamp_model, &tool, &out);
         assert!(g < 1e-3);
         assert!(out.warnings.iter().any(|w| w.contains("workholding")));
+    }
+
+    /// A hole drilled beside a clamp: the drill would cut into it, so it is left out (Retract)
+    /// or kept and warned of; the hole clear of the clamp stays.
+    #[test]
+    fn drill_cycles_are_checked_against_the_workholding() {
+        let m = Model::from_triangles(
+            "block",
+            box_triangles(&Aabb::new([-20.0, -10.0, 0.0], [5.0, 10.0, 10.0])),
+        );
+        let clamp = box_triangles(&Aabb::new([6.0, -5.0, 0.0], [12.0, 5.0, 15.0]));
+        let stock = Stock::block(Aabb::new([-20.0, -10.0, 0.0], [5.0, 10.0, 10.0]));
+        let tool = Tool::new(ToolKind::Drill, 6.0);
+        let cycle = |x: f64| {
+            Step::Drill(crate::toolpath::DrillCycle {
+                at: [x, 0.0],
+                r_plane: 12.0,
+                bottom: -2.0,
+                retract: 20.0,
+                feed: 200.0,
+                kind: crate::toolpath::CycleKind::Drill,
+                peck: 0.0,
+                dwell: 0.0,
+                pitch: 0.0,
+            })
+        };
+        let drills = |action: CollisionAction| {
+            let mut p = Params::new(Pattern::Drill, &tool, MachineKind::Mill);
+            p.collision.action = action;
+            let input = Input {
+                model: &m,
+                stock: &stock,
+                tool: &tool,
+                machine: MachineKind::Mill,
+                params: &p,
+                rest: None,
+                fixtures: &clamp,
+            };
+            let tp = Toolpath {
+                steps: vec![Step::Rapid([-10.0, 0.0, 20.0]), cycle(-10.0), cycle(4.0)],
+                warnings: vec![],
+            };
+            apply(&input, tp)
+        };
+        let count = |tp: &Toolpath| {
+            tp.steps
+                .iter()
+                .filter(|s| matches!(s, Step::Drill(_)))
+                .count()
+        };
+        let kept = drills(CollisionAction::Retract);
+        assert_eq!(count(&kept), 1, "{:?}", kept.steps);
+        assert!(
+            kept.warnings.iter().any(|w| w.contains("workholding")),
+            "{:?}",
+            kept.warnings
+        );
+        let warned = drills(CollisionAction::Warn);
+        assert_eq!(count(&warned), 2);
+        assert!(warned.warnings.iter().any(|w| w.contains("workholding")));
     }
 
     /// Back in after a skipped stretch, onto a corner arc: the ramp follows the arc, never its

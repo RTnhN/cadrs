@@ -71,7 +71,8 @@ struct OpSpan {
     first: usize,
     name: String,
     tool: Tool,
-    /// In a tilted work plane (3+2): shown, but not simulated on the height map.
+    /// In a tilted work plane (3+2): its cuts aren't played on the height map shown (the
+    /// analysis cuts them on voxels in its own frame).
     tilted: bool,
     /// A tilted operation's own frame in the run's coordinates (it's checked in it).
     frame: Option<Frame>,
@@ -318,6 +319,7 @@ pub fn open_for_selection(world: &mut World) {
     // What it takes to work out that stock (on the worker thread).
     let carry = (!before.is_empty()).then(|| {
         (
+            super::compute::carry_key(world, &cam, job.id, setup.id, first_id),
             cam.clone(),
             job.id,
             setup.id,
@@ -392,17 +394,19 @@ pub fn open_for_selection(world: &mut World) {
             .name("cam-verify".into())
             .spawn(move || {
                 let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let start = carry.and_then(|(cam, job, setup, upto, parts, paths)| {
-                        program::stock_before(
-                            &cam,
-                            cam.job(job)?,
-                            setup,
-                            upto,
-                            &parts,
-                            &paths,
-                            &frame,
-                            cell,
-                        )
+                    let start = carry.and_then(|(key, cam, job, setup, upto, parts, paths)| {
+                        super::compute::carried_stock(key, &frame, cell, || {
+                            program::stock_before(
+                                &cam,
+                                cam.job(job)?,
+                                setup,
+                                upto,
+                                &parts,
+                                &paths,
+                                &frame,
+                                cell,
+                            )
+                        })
                     });
                     analyse(
                         &stock, &model, &fixtures, start, &segments, &spans, beam, cell,
@@ -466,9 +470,7 @@ fn analyse(
     beam: bool,
     cell: f64,
 ) -> Analysis {
-    // Simulated in the run's order; a tilted operation (3+2) is left out, its moves cut
-    // nothing on a height map along the setup's Z. (Kept as an empty op so collisions keep
-    // their operation's index.)
+    // Simulated in the run's order; a tilted operation (3+2) cuts the stock in its own frame.
     let ops: Vec<SimOp> = spans
         .iter()
         .enumerate()
@@ -476,54 +478,49 @@ fn analyse(
             let end = spans.get(k + 1).map_or(segments.len(), |n| n.first);
             SimOp {
                 tool: &sp.tool,
-                segments: if sp.tilted {
-                    &[]
-                } else {
-                    &segments[sp.first..end]
-                },
+                segments: &segments[sp.first..end],
             }
         })
         .collect();
-    let tilted = spans.iter().filter(|s| s.tilted).count();
-    let not_simulated = match tilted {
-        0 => String::new(),
-        1 => " · 1 tilted operation checked against the part only".into(),
-        n => format!(" · {n} tilted operations checked against the part only"),
-    };
-    if beam {
-        let r = sim::simulate_sheet(stock, model, &ops);
-        let summary = format!(
-            "Cut {} mm · {} part{} free{}",
-            fmt0(r.cut_length),
-            r.parts_free,
-            if r.parts_free == 1 { "" } else { "s" },
-            if r.damage > 0.01 {
-                format!(" · {} mm² cut from the part", fmt1(r.damage))
-            } else {
-                String::new()
-            }
-        );
-        let sheet = r
-            .pieces
-            .iter()
-            .zip(&r.part_pieces)
-            .map(|(f, part)| (f.rings(), *part))
-            .collect();
-        return Analysis {
-            summary,
-            collisions: Vec::new(),
-            part: None,
-            start: None,
-            sheet: Some(sheet),
-        };
-    }
-    // From the stock the toolpaths before leave.
-    let r = sim::simulate_mill_on(
-        start.clone().unwrap_or_else(|| stock.height_map(cell)),
+    let frames: Vec<_> = spans.iter().map(|s| s.frame.filter(|_| s.tilted)).collect();
+    let r = match program::simulate_ops(
+        stock,
         model,
         fixtures,
+        start.clone(),
         &ops,
-    );
+        &frames,
+        beam,
+        cell,
+    ) {
+        program::SimResult::Sheet(r) => {
+            let summary = format!(
+                "Cut {} mm · {} part{} free{}",
+                fmt0(r.cut_length),
+                r.parts_free,
+                if r.parts_free == 1 { "" } else { "s" },
+                if r.damage > 0.01 {
+                    format!(" · {} mm² cut from the part", fmt1(r.damage))
+                } else {
+                    String::new()
+                }
+            );
+            let sheet = r
+                .pieces
+                .iter()
+                .zip(&r.part_pieces)
+                .map(|(f, part)| (f.rings(), *part))
+                .collect();
+            return Analysis {
+                summary,
+                collisions: Vec::new(),
+                part: None,
+                start: None,
+                sheet: Some(sheet),
+            };
+        }
+        program::SimResult::Mill(r) => r,
+    };
     let tl = Timeline::new(segments.to_vec());
     let mut collisions = Vec::new();
     for (k, p) in r.rapid_hits.iter() {
@@ -613,7 +610,7 @@ fn analyse(
         } else {
             String::new()
         }
-    ) + &not_simulated;
+    );
     let mut part = r.stock.blank();
     part.rasterize(&model.triangles, false);
     Analysis {

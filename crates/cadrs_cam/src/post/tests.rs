@@ -729,3 +729,57 @@ fn tilted_planes_post_as_g68_2() {
         Err(PostError::CantTilt(_))
     ));
 }
+
+#[test]
+fn grbl_goes_up_before_it_goes_across() {
+    let mut m = machine(MachineKind::Mill, Dialect::Fanuc);
+    m.dialect = Dialect::Grbl;
+    m.tool_changer = false;
+    let s = PostSettings::for_dialect(Dialect::Grbl, MachineKind::Mill);
+    let mut op = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+    op.toolpath.steps[0] = Step::Rapid([30.0, 40.0, 5.0]);
+    let p = NcProgram {
+        name: "Plate".into(),
+        number: 1,
+        operations: vec![op],
+    };
+    let nc = post(&p, &m, &s).unwrap();
+    // After the M0 tool change, Z alone first: never a diagonal from the touch-off point.
+    let stop = nc.find("M0").expect(&nc);
+    let after = &nc[stop..];
+    let first = after
+        .lines()
+        .find(|l| l.contains("G0") || l.contains('X'))
+        .expect(&nc);
+    assert!(first.contains("Z5") && !first.contains('X'), "{nc}");
+    assert!(!nc.contains("G43"), "{nc}");
+}
+
+#[test]
+fn sequence_numbers_stay_five_digits() {
+    let m = machine(MachineKind::Mill, Dialect::Fanuc);
+    let mut op = square_op(Tool::new(ToolKind::EndMill, 6.0), false);
+    let last = op.toolpath.steps.pop().unwrap();
+    for i in 0..25_000 {
+        let x = (i % 2) as f64 * 10.0;
+        op.toolpath.steps.push(Step::Feed {
+            to: [x, 0.0, -1.0],
+            feed: 800.0,
+            kind: FeedKind::Cut,
+        });
+    }
+    op.toolpath.steps.push(last);
+    let p = NcProgram {
+        name: "Long".into(),
+        number: 1,
+        operations: vec![op],
+    };
+    let nc = post(&p, &m, &m.post).unwrap();
+    for l in nc.lines() {
+        if let Some(n) = l.strip_prefix('N') {
+            let digits = n.split(' ').next().unwrap();
+            assert!(digits.len() <= 5, "{l}");
+        }
+    }
+    assert!(nc.contains("M30"));
+}

@@ -281,8 +281,6 @@ pub enum PostError {
     Empty,
     /// An operation's tool doesn't fit the machine (a laser on a mill).
     WrongTool(String),
-    /// A move leaves the machine's travel.
-    OutOfTravel(String),
     /// An operation tilts the tool where the machine can't.
     CantTilt(String),
     /// A work offset the control doesn't have.
@@ -294,7 +292,6 @@ impl std::fmt::Display for PostError {
         match self {
             PostError::Empty => write!(f, "There is nothing to post"),
             PostError::WrongTool(s) => write!(f, "{s}"),
-            PostError::OutOfTravel(s) => write!(f, "{s}"),
             PostError::CantTilt(s) => write!(f, "{s}"),
             PostError::NoDatum(s) => write!(f, "{s}"),
         }
@@ -396,6 +393,10 @@ impl<'a> Writer<'a> {
         let numbered =
             self.s.sequence_numbers && (!self.s.numbers_at_tools_only || self.number_next);
         if numbered {
+            // Controls read five-digit N words: past N99999 the numbers start again.
+            if self.line > 99_999 {
+                self.line = self.s.block_start.min(99_999);
+            }
             let n = self.line;
             self.line += self.s.block_increment.max(1);
             let _ = writeln!(self.out, "N{n} {text}");
@@ -627,7 +628,7 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
                     _ => w.block(&format!("T{} M6", op.tool_number)),
                 }
             }
-            length_comp = d != Dialect::Grbl;
+            length_comp = d != Dialect::Grbl || machine.kind.is_milling();
             tool_in = Some(op.tool_number);
             w.at = [None; 3];
             w.mode = None;
@@ -683,6 +684,14 @@ pub fn post(program: &NcProgram, machine: &Machine, s: &PostSettings) -> Result<
                 _ => None,
             });
             match z {
+                // GRBL has no tool table: still up to the first height on its own first.
+                Some(z) if d == Dialect::Grbl => {
+                    let line = format!("G0 Z{}", w.num(z));
+                    w.block(&line);
+                    w.at[2] = Some(z);
+                    w.mode = Some(0);
+                }
+                None if d == Dialect::Grbl => {}
                 Some(z) => {
                     let line = format!("G0 G43 H{} Z{}", op.tool_number, w.num(z));
                     w.block(&line);
