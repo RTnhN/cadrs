@@ -359,6 +359,31 @@ impl EdgeFillet {
         Some(cur)
     }
 
+    /// Bisected between balls `a` (spine parameter, ball) where `keep` holds and `z` where it
+    /// doesn't, each step's ball from the last kept one's contacts: the last kept and the first
+    /// not (as they are where a ball is lost).
+    fn bisect(
+        &self,
+        b: &Body,
+        a: (f64, Ball),
+        z: (f64, Ball),
+        keep: impl Fn(&Ball) -> bool,
+    ) -> ((f64, Ball), (f64, Ball)) {
+        let (mut a, mut z) = (a, z);
+        for _ in 0..60 {
+            let m = 0.5 * (a.0 + z.0);
+            let Some(x) = self.ball(b, m, Some([a.1.q[0].uv, a.1.q[1].uv])) else {
+                break;
+            };
+            if keep(&x) {
+                a = (m, x);
+            } else {
+                z = (m, x);
+            }
+        }
+        (a, z)
+    }
+
     /// The ball at the edge's end j, or as near it as the ball gets (its contact may leave a
     /// face's surface before the end, where the rail leaves the face anyway).
     fn end_ball(&self, b: &Body, j: usize) -> Result<Ball> {
@@ -979,10 +1004,11 @@ struct Fan {
     face: usize,
     apex: P3,
     /// The rim: the corner's rail on its other faces (and those of the neighbours' pieces that
-    /// go), from the first neighbour's end to the second's; its parameters and points where it
-    /// passes from one of those faces (`walls`, in turn) to the next.
+    /// go), from the first neighbour's end to the second's, and its parameter range.
     rim: (Curve, f64, f64),
+    /// Where the rim passes from one of those faces to the next: its parameter and point.
     breaks: Vec<(f64, P3)>,
+    /// Those faces in turn (one more than `breaks`).
     walls: Vec<usize>,
 }
 
@@ -4241,106 +4267,100 @@ fn traced_roll(
     for i in 1..=n {
         let tb = t0 + (t1 - t0) * i as f64 / n as f64;
         let bb = ef.ball(b, tb, Some([ba.q[0].uv, ba.q[1].uv]))?;
-        if let Some(k) = (0..2).find(|&k| on(&ba, k) && !on(&bb, k)) {
-            // Bisected to where the contact leaves.
-            let (mut lo, mut hi, mut blo, mut bhi) = (ta, tb, ba, bb);
-            for _ in 0..50 {
-                let m = 0.5 * (lo + hi);
-                let Some(bm) = ef.ball(b, m, Some([blo.q[0].uv, blo.q[1].uv])) else {
-                    break;
-                };
-                if on(&bm, k) {
-                    (lo, blo) = (m, bm);
-                } else {
-                    (hi, bhi) = (m, bm);
-                }
-            }
-            // (At the end within a hair: the contact reaching its face's edge at the vertex,
-            // no strip beyond.)
-            if ef.spine_len(lo, t1) <= HAIR * (1.0 + ef.r()) {
-                return None;
-            }
-            // Over the face's edge nearest there, onto the face beyond, if smooth there: of
-            // those, the one the contact lands on just past (by a corner of the face, the nearest
-            // edge may be the other one there).
-            let fi = ef.faces[k];
-            let p = blo.q[k].p;
-            let dist = |x: usize| {
-                let xe = &b.edges[x];
-                (xe.point(xe.curve.closest(&p, xe.t[0], xe.t[1])) - p).norm()
-            };
-            let mut near: Vec<usize> = b.faces[fi]
-                .loops
-                .iter()
-                .flatten()
-                .map(|c| c.edge)
-                .filter(|&x| x != ef.e && !b.edges[x].degenerate && !is_seam(b, fi, x))
-                .collect();
-            near.sort_by(|&x, &y| dist(x).total_cmp(&dist(y)));
-            let landed =
-                |x: usize| beyond(b, x, fi).is_some_and(|g| point_in_face(b, g, &bhi.q[k].p));
-            let x = near
-                .iter()
-                .copied()
-                .take_while(|&x| dist(x) <= dist(near[0]) + tol::REL_POINT * (1.0 + ef.r()))
-                .find(|&x| landed(x))
-                .or_else(|| near.first().copied())?;
-            let into = beyond(b, x, fi)?;
-            let g = &b.faces[into];
-            let n = geom::contact(g, geom::foot(g, &p, None)).n;
-            if n.dot(&blo.q[k].n) < 1.0 - tol::ANGULAR_POINT {
-                return None;
-            }
-            // On the edge itself (the face test has its tolerance: a contact crossing at a
-            // shallow angle flips it short of the edge): bisected on the contact's signed
-            // distance from the edge across the face (signed by a side of the edge, the same
-            // all along it: only where it changes sign matters).
-            let xe = &b.edges[x];
-            let across = |bl: &Ball| {
-                let q = bl.q[k].p;
-                let tx = xe.curve.closest(&q, xe.t[0], xe.t[1]);
-                let (pe, de) = (xe.point(tx), xe.curve.tangent(tx));
-                let w = bl.q[k].n.cross(&de);
-                let d = (q - pe).norm();
-                if (q - pe).dot(&w) < 0.0 { -d } else { d }
-            };
-            let sa = across(&blo);
-            // (The face test flipped short of the edge: the bracket run on a step.)
-            let (h0, bh0) = if (across(&bhi) < 0.0) != (sa < 0.0) {
-                (hi, bhi)
-            } else {
-                let h = (hi + step).clamp(t0.min(t1), t0.max(t1));
-                match ef.ball_from(b, &bhi, hi, h) {
-                    Some(x) => (h, x),
-                    None => (hi, bhi),
-                }
-            };
-            if sa != 0.0 && (across(&bh0) < 0.0) != (sa < 0.0) {
-                let (mut l, mut h, mut bl) = (lo, h0, blo);
-                for _ in 0..60 {
-                    let m = 0.5 * (l + h);
-                    let Some(bm) = ef.ball(b, m, Some([bl.q[0].uv, bl.q[1].uv])) else {
-                        break;
-                    };
-                    if (across(&bm) < 0.0) == (sa < 0.0) {
-                        (l, bl) = (m, bm);
-                    } else {
-                        h = m;
-                    }
-                }
-                (lo, blo) = (l, bl);
-            }
-            debug(|| {
-                format!(
-                    "edge {}: traced: its contact leaves face {fi} over edge {x} at t {lo}",
-                    ef.e
-                )
-            });
-            return Some((k, into, blo, lo));
+        let Some(k) = (0..2).find(|&k| on(&ba, k) && !on(&bb, k)) else {
+            (ta, ba) = (tb, bb);
+            continue;
+        };
+        // Bisected to where the contact leaves.
+        let ((lo, blo), (hi, bhi)) = ef.bisect(b, (ta, ba), (tb, bb), |x| on(x, k));
+        // (At the end within a hair: the contact reaching its face's edge at the vertex, no
+        // strip beyond.)
+        if ef.spine_len(lo, t1) <= HAIR * (1.0 + ef.r()) {
+            return None;
         }
-        (ta, ba) = (tb, bb);
+        let fi = ef.faces[k];
+        let (x, into) = crossed_edge(b, ef, k, &blo, &bhi)?;
+        // On the edge itself (the face test has its tolerance: a contact crossing at a shallow
+        // angle flips it short of the edge): bisected on the contact's signed distance from the
+        // edge across the face (signed by a side of the edge, the same all along it: only where
+        // it changes sign matters).
+        let xe = &b.edges[x];
+        let across = |bl: &Ball| {
+            let q = bl.q[k].p;
+            let tx = xe.curve.closest(&q, xe.t[0], xe.t[1]);
+            let (pe, de) = (xe.point(tx), xe.curve.tangent(tx));
+            let d = (q - pe).norm();
+            if (q - pe).dot(&bl.q[k].n.cross(&de)) < 0.0 {
+                -d
+            } else {
+                d
+            }
+        };
+        let sa = across(&blo);
+        // (The face test flipped short of the edge: the bracket run on a step.)
+        let (h0, bh0) = if (across(&bhi) < 0.0) != (sa < 0.0) {
+            (hi, bhi)
+        } else {
+            let h = (hi + step).clamp(t0.min(t1), t0.max(t1));
+            ef.ball_from(b, &bhi, hi, h).map_or((hi, bhi), |x| (h, x))
+        };
+        let (t, ball) = if sa != 0.0 && (across(&bh0) < 0.0) != (sa < 0.0) {
+            ef.bisect(b, (lo, blo), (h0, bh0), |x| (across(x) < 0.0) == (sa < 0.0))
+                .0
+        } else {
+            (lo, blo)
+        };
+        debug(|| {
+            format!(
+                "edge {}: traced: its contact leaves face {fi} over edge {x} at t {t}",
+                ef.e
+            )
+        });
+        return Some((k, into, ball, t));
     }
     None
+}
+
+/// The distance from point p to edge x.
+fn edge_distance(b: &Body, x: usize, p: &P3) -> f64 {
+    let xe = &b.edges[x];
+    (xe.point(xe.curve.closest(p, xe.t[0], xe.t[1])) - p).norm()
+}
+
+/// Where strip `ef`'s contact on side k leaves its face between balls `inside` and `past`:
+/// over the face's edge nearest there onto the face beyond, if smooth there; of the edges as
+/// near, the one whose face the contact lands on just past (by a corner of the face, the
+/// nearest edge may be the other one there). The edge and the face.
+fn crossed_edge(
+    b: &Body,
+    ef: &EdgeFillet,
+    k: usize,
+    inside: &Ball,
+    past: &Ball,
+) -> Option<(usize, usize)> {
+    let fi = ef.faces[k];
+    let p = inside.q[k].p;
+    let mut near: Vec<(f64, usize)> = b.faces[fi]
+        .loops
+        .iter()
+        .flatten()
+        .map(|c| c.edge)
+        .filter(|&x| x != ef.e && !b.edges[x].degenerate && !is_seam(b, fi, x))
+        .map(|x| (edge_distance(b, x, &p), x))
+        .collect();
+    near.sort_by(|a, c| a.0.total_cmp(&c.0));
+    let nearest = near.first()?.0;
+    let landed = |x: usize| beyond(b, x, fi).is_some_and(|g| point_in_face(b, g, &past.q[k].p));
+    let x = near
+        .iter()
+        .take_while(|(d, _)| *d <= nearest + tol::REL_POINT * (1.0 + ef.r()))
+        .map(|&(_, x)| x)
+        .find(|&x| landed(x))
+        .unwrap_or(near[0].1);
+    let into = beyond(b, x, fi)?;
+    let g = &b.faces[into];
+    let n = geom::contact(g, geom::foot(g, &p, None)).n;
+    (n.dot(&inside.q[k].n) >= 1.0 - tol::ANGULAR_POINT).then_some((x, into))
 }
 
 /// Where the ball of strip `ef`, rolling over a smooth edge on side k onto face `into` (ball
@@ -4401,17 +4421,7 @@ fn pieces_of(
         // (Only where a face of the edge has a smooth edge to roll over, tangent at its middle.)
         let ed = &b.edges[e];
         // Whether edge x of face fi (not the filleted one) joins it smoothly to the face beyond.
-        let tangent = |fi: usize, x: usize| {
-            let xe = &b.edges[x];
-            let Some(g) =
-                beyond(b, x, fi).filter(|_| x != e && !xe.degenerate && !is_seam(b, fi, x))
-            else {
-                return false;
-            };
-            let p = xe.point(xe.mid_t());
-            let n = |f: &Face| geom::contact(f, geom::foot(f, &p, None)).n;
-            n(&b.faces[fi]).dot(&n(&b.faces[g])) > 1.0 - tol::ANGULAR_POINT
-        };
+        let tangent = |fi: usize, x: usize| x != e && smooth_neighbour(b, fi, x).is_some();
         let smooth = base.faces.iter().any(|&fi| {
             b.faces[fi]
                 .loops
@@ -4444,10 +4454,7 @@ fn pieces_of(
         // is a cliff, the face beyond cutting the strip.)
         let past_smooth = |k: usize| {
             let (fi, p) = (base.faces[k], base.mid.q[k].p);
-            let dist = |x: usize| {
-                let xe = &b.edges[x];
-                (xe.point(xe.curve.closest(&p, xe.t[0], xe.t[1])) - p).norm()
-            };
+            let dist = |x: usize| edge_distance(b, x, &p);
             !point_in_face(b, fi, &p)
                 && b.faces[fi]
                     .loops
@@ -4528,17 +4535,8 @@ fn pieces_of(
                 .loops
                 .iter()
                 .flatten()
-                .filter(|c| c.edge != e && !b.edges[c.edge].degenerate && !is_seam(b, f, c.edge))
-                .filter_map(|c| {
-                    let g = beyond(b, c.edge, f).filter(|&g| g != f)?;
-                    let xe = &b.edges[c.edge];
-                    let q = xe.point(xe.mid_t());
-                    let n = |h: usize| {
-                        let h = &b.faces[h];
-                        geom::contact(h, geom::foot(h, &q, None)).n
-                    };
-                    (n(f).dot(&n(g)) > 1.0 - tol::ANGULAR_POINT).then_some(g)
-                })
+                .filter(|c| c.edge != e)
+                .filter_map(|c| smooth_neighbour(b, f, c.edge))
                 .collect()
         };
         let mut seen = vec![fi, other];
@@ -4693,6 +4691,23 @@ fn pieces_of(
         f.at_vertex = [rs[0].is_none(), rs[1].is_none()];
     }
     Ok(out)
+}
+
+/// The face beyond edge x of face fi, where the two join smoothly (the same normal at the
+/// edge's middle): an edge a strip's ball may roll over. Not a degenerate edge or the face's
+/// seam.
+fn smooth_neighbour(b: &Body, fi: usize, x: usize) -> Option<usize> {
+    let xe = &b.edges[x];
+    if xe.degenerate || is_seam(b, fi, x) {
+        return None;
+    }
+    let g = beyond(b, x, fi).filter(|&g| g != fi)?;
+    let p = xe.point(xe.mid_t());
+    let n = |f: usize| {
+        let f = &b.faces[f];
+        geom::contact(f, geom::foot(f, &p, None)).n
+    };
+    (n(fi).dot(&n(g)) > 1.0 - tol::ANGULAR_POINT).then_some(g)
 }
 
 /// Strip `ef`'s contacts on its own faces at the points of `q` (in its order of faces): their
@@ -4882,7 +4897,12 @@ fn plan(
         if inside[s] || fan_verts.iter().any(|v| b.edges[efs[s].e].v.contains(v)) {
             continue;
         }
-        let Some((fan, nbrs, gone)) = fan_corner(b, &efs, &ends, &at, s) else {
+        let Some(FanPlan {
+            fan,
+            ends: nbrs,
+            gone,
+        }) = fan_corner(b, &efs, &ends, &at, s)
+        else {
             continue;
         };
         debug(|| {
@@ -4892,12 +4912,12 @@ fn plan(
             )
         });
         let c = fans.len();
-        for (side, (n, jn, end)) in nbrs.into_iter().enumerate() {
-            ends[n][jn] = Some(End::Fan {
+        for (side, x) in nbrs.into_iter().enumerate() {
+            ends[x.strip][x.end] = Some(End::Fan {
                 c,
                 side,
-                t: end.0,
-                balls: end.1,
+                t: x.t,
+                balls: x.balls,
             });
         }
         for g in gone {
@@ -5374,26 +5394,65 @@ fn plan(
     })
 }
 
-/// The fan at strip s ([`Fan`]), if it is one: a chamfer whose contact on one face lies past
-/// its edge's centre of curvature (its rail there would run back on itself round the turn),
-/// between two chamfers on that face. The corner is its edge's whole strip (its pieces between
-/// rolls, `ends` as far as the rolls set them); each neighbour is the piece of the edge's strip
-/// at that vertex the apex lies on, the pieces past it to the vertex going with the corner's.
-/// With each neighbour's (strip, end, (spine parameters, balls)), and the strips that go.
-#[allow(clippy::type_complexity)]
-fn fan_corner(
-    b: &Body,
-    efs: &[EdgeFillet],
-    ends: &[[Option<End>; 2]],
-    at: &HashMap<usize, Vec<(usize, usize)>>,
-    s: usize,
-) -> Option<(Fan, Vec<(usize, usize, ([f64; 2], [Ball; 2]))>, Vec<usize>)> {
-    let ef = &efs[s];
-    if !ef.flat || ef.closed {
-        return None;
+/// The strips' pieces between rolls ([`pieces_of`]): a piece's ends and the piece across a roll,
+/// as far as the rolls have set the ends (`ends`).
+struct StripPieces<'a> {
+    b: &'a Body,
+    efs: &'a [EdgeFillet],
+    ends: &'a [[Option<End>; 2]],
+}
+
+impl StripPieces<'_> {
+    /// Piece m's end j: its spine parameter (a roll's, or the edge's end) and its ball.
+    fn end(&self, m: usize, j: usize) -> Option<(f64, Ball)> {
+        let ef = &self.efs[m];
+        match &self.ends[m][j] {
+            Some(End::Section {
+                ball,
+                t,
+                key: SectionKey::Roll(_),
+            }) => Some((*t, *ball)),
+            _ if ef.at_vertex[j] => Some((self.b.edges[ef.e].t[j], ef.end_ball(self.b, j).ok()?)),
+            _ => None,
+        }
     }
-    // A contact on a face past the edge's centre of curvature, at the strip's middle or at any
-    // of a few stations along it (an edge whose turn tightens towards an end folds there).
+
+    /// The piece of the same edge beyond piece m's end j (across its roll there).
+    fn next(&self, m: usize, j: usize) -> Option<usize> {
+        if self.efs[m].at_vertex[j] {
+            return None;
+        }
+        let (t, _) = self.end(m, j)?;
+        (0..self.efs.len()).find(|&x| {
+            x != m
+                && self.efs[x].e == self.efs[m].e
+                && self
+                    .end(x, 1 - j)
+                    .is_some_and(|(tx, _)| (tx - t).abs() <= tol::REL_FINE * (1.0 + t.abs()))
+        })
+    }
+}
+
+/// A fan's neighbour's end ([`End::Fan`]): the piece, which end, and its rails' spine parameters
+/// and balls there.
+struct FanEnd {
+    strip: usize,
+    end: usize,
+    t: [f64; 2],
+    balls: [Ball; 2],
+}
+
+/// A fan with its neighbours' ends and the strips it takes the place of.
+struct FanPlan {
+    fan: Fan,
+    ends: [FanEnd; 2],
+    gone: Vec<usize>,
+}
+
+/// The side of strip `ef` whose contact lies past its edge's centre of curvature (its rail there
+/// would run back on itself round the turn), at the strip's middle or at any of a few stations
+/// along it (an edge whose turn tightens towards an end folds there).
+fn folds(b: &Body, ef: &EdgeFillet) -> Option<usize> {
     let tol = tol::REL_POINT * (1.0 + ef.r());
     let past = |t: f64, ball: &Ball| -> Option<usize> {
         let (p, _, dp, dtn) = ef.spine.at_d(t);
@@ -5406,11 +5465,10 @@ fn fan_corner(
         (0..2).find(|&k| (ball.q[k].p - p).dot(&inward) > 1.0 / curv + tol)
     };
     let ed = &b.edges[ef.e];
-    let kf = past(ef.tm, &ef.mid).or_else(|| {
+    past(ef.tm, &ef.mid).or_else(|| {
         let n = 8;
-        let mut cur = (ef.tm, ef.mid);
         [ed.t[0], ed.t[1]].iter().find_map(|&te| {
-            cur = (ef.tm, ef.mid);
+            let mut cur = (ef.tm, ef.mid);
             (1..n).find_map(|i| {
                 let t = ef.tm + (te - ef.tm) * i as f64 / n as f64;
                 let x = ef.ball_from(b, &cur.1, cur.0, t)?;
@@ -5418,46 +5476,40 @@ fn fan_corner(
                 past(t, &x)
             })
         })
-    })?;
-    let face = ef.faces[kf];
-    // A piece's end j: its spine parameter (a roll's, or the edge's end) and its ball.
-    let end_of = |m: usize, j: usize| -> Option<(f64, Ball)> {
-        match &ends[m][j] {
-            Some(End::Section {
-                ball,
-                t,
-                key: SectionKey::Roll(_),
-            }) => Some((*t, *ball)),
-            _ if efs[m].at_vertex[j] => Some((b.edges[efs[m].e].t[j], efs[m].end_ball(b, j).ok()?)),
-            _ => None,
-        }
-    };
-    // The piece of the same edge beyond piece m's end j (across its roll there).
-    let next = |m: usize, j: usize| -> Option<usize> {
-        if efs[m].at_vertex[j] {
-            return None;
-        }
-        let (t, _) = end_of(m, j)?;
-        (0..efs.len()).find(|&x| {
-            x != m
-                && efs[x].e == efs[m].e
-                && end_of(x, 1 - j)
-                    .is_some_and(|(tx, _)| (tx - t).abs() <= tol::REL_FINE * (1.0 + t.abs()))
-        })
-    };
+    })
+}
+
+/// The fan at strip s ([`Fan`]), if it is one: a chamfer that [`folds`] on one face, between two
+/// chamfers on that face. The corner is its edge's whole strip (its pieces between rolls); each
+/// neighbour is the piece of its edge's strip the apex lies on ([`fan_apex`]), the pieces past
+/// it to the vertex going with the corner's.
+fn fan_corner(
+    b: &Body,
+    efs: &[EdgeFillet],
+    ends: &[[Option<End>; 2]],
+    at: &HashMap<usize, Vec<(usize, usize)>>,
+    s: usize,
+) -> Option<FanPlan> {
+    let ef = &efs[s];
+    if !ef.flat || ef.closed {
+        return None;
+    }
+    let face = ef.faces[folds(b, ef)?];
+    let ps = StripPieces { b, efs, ends };
+    let ed = &b.edges[ef.e];
     // The corner's pieces from its first vertex to its second, all on the face.
     let mut corner = vec![s];
-    while let Some(x) = next(corner[0], 0) {
+    while let Some(x) = ps.next(corner[0], 0) {
         corner.insert(0, x);
     }
-    while let Some(x) = next(*corner.last()?, 1) {
+    while let Some(x) = ps.next(*corner.last()?, 1) {
         corner.push(x);
     }
     let k_of = |m: usize| efs[m].faces.iter().position(|&g| g == face);
-    if corner.iter().any(|&m| k_of(m).is_none()) {
-        return None;
-    }
-    if !efs[corner[0]].at_vertex[0] || !efs[*corner.last()?].at_vertex[1] {
+    if corner.iter().any(|&m| k_of(m).is_none())
+        || !efs[corner[0]].at_vertex[0]
+        || !efs[*corner.last()?].at_vertex[1]
+    {
         return None;
     }
     // Each side: the other strip at the vertex, and its edge's pieces from there back.
@@ -5472,41 +5524,100 @@ fn fan_corner(
             return None;
         }
         let mut c = vec![(n, jn)];
-        while let Some(x) = next(c.last()?.0, 1 - c.last()?.1) {
+        while let Some(x) = ps.next(c.last()?.0, 1 - c.last()?.1) {
             c.push((x, jn));
         }
         chains.push(c);
     }
-    // Their rails on the face cross at the apex, short of the vertex: Gauss–Newton on the two
-    // spine parameters, each piece's ball run on from its end's; where the parameter leaves a
-    // piece, the one before.
+    let chains = [chains[0].clone(), chains[1].clone()];
+    let tol = tol::REL_POINT * (1.0 + ef.r());
+    let (pick, ts, balls) = fan_apex(&ps, &chains, face, tol)?;
+    let ks = [k_of(chains[0][pick[0]].0)?, k_of(chains[1][pick[1]].0)?];
+    let apex = P3::from((balls[0].q[ks[0]].p.coords + balls[1].q[ks[1]].p.coords) * 0.5);
+    // Short of each picked piece's end towards the vertex, on the piece.
+    let mut fan_ends = Vec::new();
+    let mut gone = corner.clone();
+    for i in 0..2 {
+        let (m, jm) = chains[i][pick[i]];
+        let en = &efs[m];
+        let (te, end) = ps.end(m, jm)?;
+        if (ts[i] - te) * (te - en.tm) >= 0.0 || (ts[i] - en.tm) * (te - en.tm) <= 0.0 {
+            return None;
+        }
+        let mut t = [te; 2];
+        let mut bs = [end; 2];
+        t[ks[i]] = ts[i];
+        bs[ks[i]] = balls[i];
+        fan_ends.push(FanEnd {
+            strip: m,
+            end: jm,
+            t,
+            balls: bs,
+        });
+        gone.extend(chains[i][..pick[i]].iter().map(|x| x.0));
+    }
+    // The rim from the picked pieces' wall contacts at their ends: the other rails of the pieces
+    // that go, the first side's from its picked piece out to the vertex, the corner's, and the
+    // second side's from its vertex out.
+    let mut pieces: Vec<(usize, usize)> = chains[0][..pick[0]]
+        .iter()
+        .rev()
+        .map(|&(m, jm)| (m, 1 - jm))
+        .collect();
+    pieces.extend(corner.iter().map(|&m| (m, 0)));
+    pieces.extend(chains[1][..pick[1]].iter().copied());
+    let w = [0, 1].map(|i| fan_ends[i].balls[1 - ks[i]].q[1 - ks[i]].p);
+    let (rim, breaks, walls) = fan_rim(&ps, &pieces, face, w, tol)?;
+    let [e0, e1]: [FanEnd; 2] = fan_ends.try_into().ok()?;
+    Some(FanPlan {
+        fan: Fan {
+            face,
+            apex,
+            rim,
+            breaks,
+            walls,
+            edge: ef.e,
+        },
+        ends: [e0, e1],
+        gone,
+    })
+}
+
+/// Where the rails on `face` of a fan's two sides cross (the apex), short of the vertex:
+/// Gauss–Newton on the two spine parameters, each piece's ball run on from its end's; where a
+/// parameter leaves a piece, the one before it (or back, the one after). Each side's piece
+/// there (its index in `chains`), the parameters and the balls.
+fn fan_apex(
+    ps: &StripPieces,
+    chains: &[Vec<(usize, usize)>; 2],
+    face: usize,
+    tol: f64,
+) -> Option<([usize; 2], [f64; 2], [Ball; 2])> {
+    let efs = ps.efs;
+    let k_of = |m: usize| efs[m].faces.iter().position(|&g| g == face);
     let mut pick = [0usize; 2];
     let mut ts = [0.0; 2];
     let mut balls = [dummy_ball(); 2];
     for i in 0..2 {
         let (m, jm) = chains[i][0];
-        let (t, bl) = end_of(m, jm)?;
-        ts[i] = t;
-        balls[i] = bl;
+        (ts[i], balls[i]) = ps.end(m, jm)?;
     }
     let ball_at = |pick: &[usize; 2], i: usize, t: f64| -> Option<Ball> {
         let (m, jm) = chains[i][pick[i]];
-        let (te, end) = end_of(m, jm)?;
-        efs[m].ball_from(b, &end, te, t)
+        let (te, end) = ps.end(m, jm)?;
+        efs[m].ball_from(ps.b, &end, te, t)
     };
-    let mut found = false;
     for _ in 0..60 {
         let ks = [k_of(chains[0][pick[0]].0)?, k_of(chains[1][pick[1]].0)?];
         let q = [balls[0].q[ks[0]].p, balls[1].q[ks[1]].p];
         let r = q[0] - q[1];
         if r.norm() <= tol {
-            found = true;
-            break;
+            return Some((pick, ts, balls));
         }
         let cols: Vec<V3> = (0..2)
             .map(|i| {
                 let (m, jm) = chains[i][pick[i]];
-                let te = end_of(m, jm)?.0;
+                let te = ps.end(m, jm)?.0;
                 let h = 1e-6 * (1.0 + ts[i].abs()) * (te - efs[m].tm).signum();
                 let x = ball_at(&pick, i, ts[i] + h)?;
                 Some((x.q[ks[i]].p - q[i]) / h * if i == 0 { 1.0 } else { -1.0 })
@@ -5516,12 +5627,10 @@ fn fan_corner(
         let dx = (mm.transpose() * mm).lu().solve(&(-(mm.transpose() * r)))?;
         for i in 0..2 {
             ts[i] += dx[i];
-            // Past the piece's start: the piece before; back past its end (the vertex's
-            // side): the piece after.
             loop {
                 let (m, jm) = chains[i][pick[i]];
-                let (te, _) = end_of(m, jm)?;
-                let start = end_of(m, 1 - jm).map(|x| x.0);
+                let (te, _) = ps.end(m, jm)?;
+                let start = ps.end(m, 1 - jm).map(|x| x.0);
                 let before = start.is_some_and(|t0| (ts[i] - t0) * (te - t0) < 0.0);
                 let after = pick[i] > 0 && start.is_some_and(|t0| (ts[i] - te) * (te - t0) > 0.0);
                 if before && pick[i] + 1 < chains[i].len() {
@@ -5535,94 +5644,54 @@ fn fan_corner(
             balls[i] = ball_at(&pick, i, ts[i])?;
         }
     }
-    if !found {
-        return None;
-    }
-    let ks = [k_of(chains[0][pick[0]].0)?, k_of(chains[1][pick[1]].0)?];
-    let apex = P3::from((balls[0].q[ks[0]].p.coords + balls[1].q[ks[1]].p.coords) * 0.5);
-    // Short of each picked piece's end towards the vertex, on the piece.
-    let mut out = Vec::new();
-    let mut gone = corner.clone();
-    for i in 0..2 {
-        let (m, jm) = chains[i][pick[i]];
-        let en = &efs[m];
-        let (te, end) = end_of(m, jm)?;
-        if (ts[i] - te) * (te - en.tm) >= 0.0 || (ts[i] - en.tm) * (te - en.tm) <= 0.0 {
-            return None;
-        }
-        let mut t = [te; 2];
-        let mut bs = [end; 2];
-        t[ks[i]] = ts[i];
-        bs[ks[i]] = balls[i];
-        out.push((m, jm, (t, bs)));
-        gone.extend(chains[i][..pick[i]].iter().map(|x| x.0));
-    }
-    // The fan's rim: the other rails of the pieces that go and of the corner's, from the first
-    // picked piece's end to the second's: their contacts there (each with its face), fitted as
-    // one curve (exact at the ends), in pieces by face.
+    None
+}
+
+/// A fan's rim: the rails not on `face` of `pieces` (each piece from its end given), their
+/// contacts fitted as one curve from `w[0]` to `w[1]` (exact there); where it passes from one
+/// face to the next, its parameter and point; and the faces in turn.
+#[allow(clippy::type_complexity)]
+fn fan_rim(
+    ps: &StripPieces,
+    pieces: &[(usize, usize)],
+    face: usize,
+    w: [P3; 2],
+    tol: f64,
+) -> Option<((Curve, f64, f64), Vec<(f64, P3)>, Vec<usize>)> {
     let mut pts: Vec<(P3, usize)> = Vec::new();
-    let mut walk = |m: usize, from: usize| -> Option<()> {
-        let wk = 1 - k_of(m)?;
-        let (t0, b0) = end_of(m, from)?;
-        let (t1, _) = end_of(m, 1 - from)?;
-        let n = ACROSS;
-        let mut cur = b0;
-        let mut tc = t0;
-        for i in 0..=n {
-            let t = t0 + (t1 - t0) * i as f64 / n as f64;
-            cur = efs[m].ball_from(b, &cur, tc, t)?;
-            tc = t;
-            let q = cur.q[wk].p;
-            match pts.last() {
-                // (A roll's point once, on the face before.)
-                Some(l) if (l.0 - q).norm() <= tol => {}
-                _ => pts.push((q, efs[m].faces[wk])),
+    for &(m, from) in pieces {
+        let ef = &ps.efs[m];
+        let wk = 1 - ef.faces.iter().position(|&g| g == face)?;
+        let (t0, b0) = ps.end(m, from)?;
+        let (t1, _) = ps.end(m, 1 - from)?;
+        let mut cur = (t0, b0);
+        for i in 0..=ACROSS {
+            let t = t0 + (t1 - t0) * i as f64 / ACROSS as f64;
+            cur = (t, ef.ball_from(ps.b, &cur.1, cur.0, t)?);
+            let q = cur.1.q[wk].p;
+            // (A roll's point once, on the face before.)
+            if pts.last().is_none_or(|l| (l.0 - q).norm() > tol) {
+                pts.push((q, ef.faces[wk]));
             }
         }
-        Some(())
-    };
-    for &(m, jm) in chains[0][..pick[0]].iter().rev() {
-        walk(m, 1 - jm)?;
-    }
-    for &m in &corner {
-        walk(m, 0)?;
-    }
-    for &(m, jm) in chains[1][..pick[1]].iter() {
-        walk(m, jm)?;
     }
     if pts.len() < 2 {
         return None;
     }
-    // (Exactly the picked pieces' wall contacts at their ends.)
-    let w0 = out[0].2.1[1 - ks[0]].q[1 - ks[0]].p;
-    let w1 = out[1].2.1[1 - ks[1]].q[1 - ks[1]].p;
     let last = pts.len() - 1;
-    pts[0].0 = w0;
-    pts[last].0 = w1;
+    (pts[0].0, pts[last].0) = (w[0], w[1]);
     let xs: Vec<P3> = pts.iter().map(|x| x.0).collect();
     let (rim, c0, c1) = fit_cut(&xs, None, [None, None]);
-    // Where the rim passes from one face to the next: its parameter there, and the faces.
-    let mut breaks: Vec<(f64, P3)> = Vec::new();
+    let mut breaks = Vec::new();
     let mut walls = vec![pts[0].1];
-    for w in pts.windows(2) {
-        if w[1].1 != w[0].1 {
-            let c = rim.closest(&w[0].0, c0.min(c1), c0.max(c1));
+    for p in pts.windows(2) {
+        if p[1].1 != p[0].1 {
+            let c = rim.closest(&p[0].0, c0.min(c1), c0.max(c1));
             breaks.push((c, rim.point(c)));
-            walls.push(w[1].1);
+            walls.push(p[1].1);
         }
     }
-    Some((
-        Fan {
-            face,
-            apex,
-            rim: (rim, c0, c1),
-            breaks,
-            walls,
-            edge: ef.e,
-        },
-        out,
-        gone,
-    ))
+    Some(((rim, c0, c1), breaks, walls))
 }
 
 /// The set-back corner at vertex v where the strips `here` (index, end) end ([`hole_corner`]):

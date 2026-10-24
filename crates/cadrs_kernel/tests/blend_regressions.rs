@@ -284,7 +284,7 @@ fn shell_opening_chamfer_fillet4() {
 /// Tangent propagation over the same opening (rounded all over: most of its edges are smooth,
 /// their faces tangent): a chain from a sharp edge runs on along sharp edges only. A smooth
 /// edge has nothing to blend; a chamfer's chain ran on from the opening's rim along every
-/// smooth edge of the rounded body (Onshape's stops there too).
+/// smooth edge of the rounded body.
 #[test]
 fn tangent_chains_skip_smooth_edges() {
     let mut k = NativeKernel::new();
