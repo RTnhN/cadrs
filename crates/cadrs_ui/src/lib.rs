@@ -93,8 +93,8 @@ pub use color_picker::{
     ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected,
 };
 pub use color_scheme::{
-    ActiveTheme, Appearance, ColorScheme, KeepColors, Mapped, SchemeMap, SchemePreference,
-    SchemeToggle, authored, by_scheme, dark_in_force, scheme_toggle,
+    ActiveTheme, Appearance, ColorScheme, KeepColors, KeepFill, Mapped, RaisedSurface, SchemeMap,
+    SchemePreference, SchemeToggle, authored, by_scheme, dark_in_force, scheme_toggle,
 };
 pub use command_palette::{
     CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row,

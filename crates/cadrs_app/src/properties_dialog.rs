@@ -345,6 +345,7 @@ fn spawn(world: &mut World) {
                                     ..default()
                                 },
                                 BackgroundColor(c),
+                                cadrs_ui::KeepFill,
                                 BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.3)),
                             ));
                             let hex = appearance

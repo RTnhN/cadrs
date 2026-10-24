@@ -49,6 +49,7 @@ impl Plugin for ColorSchemePlugin {
                     apply_scheme::<TextColor>,
                     apply_scheme::<ImageNode>,
                     apply_scheme::<TextCursorStyle>,
+                    apply_scheme::<BoxShadow>,
                     finish_scheme,
                 )
                     .chain()
@@ -226,7 +227,7 @@ impl SchemeMap {
             return color;
         };
         let lightness = match role {
-            ColorRole::Fill | ColorRole::Raised | ColorRole::Line
+            ColorRole::Fill | ColorRole::Raised | ColorRole::Floating | ColorRole::Line
                 if o.chroma < GREY && o.lightness < INKY && c.alpha > 0.99 =>
             {
                 // Near-black drawn as a fill or line is ink (a marker, a dot, a rule): it turns
@@ -236,7 +237,7 @@ impl SchemeMap {
                     _ => return color,
                 }
             }
-            ColorRole::Fill | ColorRole::Raised | ColorRole::Line => {
+            ColorRole::Fill | ColorRole::Raised | ColorRole::Floating | ColorRole::Line => {
                 if o.chroma > STRONG {
                     return color;
                 }
@@ -448,11 +449,13 @@ fn resolve_scheme(
 
 /// A UI component whose colors the scheme maps.
 pub trait SchemeColors: Component<Mutability = bevy::ecs::component::Mutable> {
-    type Value: Copy + PartialEq + Send + Sync + 'static;
+    type Value: Clone + PartialEq + Send + Sync + 'static;
+    /// Whether this is a node's fill, which [`KeepFill`] keeps.
+    const FILL: bool = false;
     fn get(&self) -> Self::Value;
     fn set(&mut self, v: Self::Value);
-    /// The value in the dark scheme. `raised` is a surface above the page (a menu or dialog).
-    fn dark(v: Self::Value, map: &SchemeMap, raised: bool) -> Self::Value;
+    /// The value in the dark scheme, for a node on `surface`.
+    fn dark(v: Self::Value, map: &SchemeMap, surface: Surface) -> Self::Value;
     /// When `current` is the mapped `dark` value with only its alpha changed (code fading the
     /// color it read back), the light value with that alpha.
     fn refade(
@@ -470,8 +473,30 @@ fn refade(light: Color, dark: Color, current: Color) -> Option<Color> {
     (d.with_alpha(0.0) == c.with_alpha(0.0)).then(|| light.with_alpha(c.alpha))
 }
 
+/// How high a UI node's surface sits: its fill is mapped to that surface's dark color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    Page,
+    /// A dialog, a floating panel: any node with a `GlobalZIndex` below the menus', or marked
+    /// [`RaisedSurface`].
+    Raised,
+    /// Menus, popups and toasts: `GlobalZIndex` of [`crate::z::MENU`] and above.
+    Floating,
+}
+
+impl Surface {
+    fn role(self) -> ColorRole {
+        match self {
+            Surface::Page => ColorRole::Fill,
+            Surface::Raised => ColorRole::Raised,
+            Surface::Floating => ColorRole::Floating,
+        }
+    }
+}
+
 impl SchemeColors for BackgroundColor {
     type Value = Color;
+    const FILL: bool = true;
     fn refade(light: Color, dark: Color, current: Color) -> Option<Color> {
         refade(light, dark, current)
     }
@@ -481,15 +506,8 @@ impl SchemeColors for BackgroundColor {
     fn set(&mut self, v: Color) {
         self.0 = v;
     }
-    fn dark(v: Color, map: &SchemeMap, raised: bool) -> Color {
-        map.dark(
-            v,
-            if raised {
-                ColorRole::Raised
-            } else {
-                ColorRole::Fill
-            },
-        )
+    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
+        map.dark(v, surface.role())
     }
 }
 
@@ -506,7 +524,7 @@ impl SchemeColors for BorderColor {
             left,
         };
     }
-    fn dark(v: [Color; 4], map: &SchemeMap, _: bool) -> [Color; 4] {
+    fn dark(v: [Color; 4], map: &SchemeMap, _: Surface) -> [Color; 4] {
         v.map(|c| map.dark(c, ColorRole::Line))
     }
 }
@@ -522,7 +540,7 @@ impl SchemeColors for Outline {
     fn set(&mut self, v: Color) {
         self.color = v;
     }
-    fn dark(v: Color, map: &SchemeMap, _: bool) -> Color {
+    fn dark(v: Color, map: &SchemeMap, _: Surface) -> Color {
         map.dark(v, ColorRole::Line)
     }
 }
@@ -538,7 +556,7 @@ impl SchemeColors for TextColor {
     fn set(&mut self, v: Color) {
         self.0 = v;
     }
-    fn dark(v: Color, map: &SchemeMap, _: bool) -> Color {
+    fn dark(v: Color, map: &SchemeMap, _: Surface) -> Color {
         map.dark(v, ColorRole::Ink)
     }
 }
@@ -554,7 +572,7 @@ impl SchemeColors for ImageNode {
     fn set(&mut self, v: Color) {
         self.color = v;
     }
-    fn dark(v: Color, map: &SchemeMap, _: bool) -> Color {
+    fn dark(v: Color, map: &SchemeMap, _: Surface) -> Color {
         map.dark(v, ColorRole::Ink)
     }
 }
@@ -568,13 +586,31 @@ impl SchemeColors for TextCursorStyle {
         self.color = color;
         self.selected_text_color = selected;
     }
-    fn dark((color, selected): Self::Value, map: &SchemeMap, _: bool) -> Self::Value {
+    fn dark((color, selected): Self::Value, map: &SchemeMap, _: Surface) -> Self::Value {
         (map.dark(color, ColorRole::Ink), selected)
     }
 }
 
+impl SchemeColors for BoxShadow {
+    type Value = Vec<Color>;
+    fn get(&self) -> Vec<Color> {
+        self.0.iter().map(|s| s.color).collect()
+    }
+    fn set(&mut self, v: Vec<Color>) {
+        for (s, c) in self.0.iter_mut().zip(v) {
+            s.color = c;
+        }
+    }
+    /// A shadow on a dark page needs to be deeper to show.
+    fn dark(v: Vec<Color>, _: &SchemeMap, _: Surface) -> Vec<Color> {
+        v.into_iter()
+            .map(|c| c.with_alpha((c.alpha() * 2.5).min(0.6)))
+            .collect()
+    }
+}
+
 /// The light color a component was given and the dark one the scheme wrote over it.
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone)]
 pub struct Mapped<T: SchemeColors> {
     light: T::Value,
     dark: T::Value,
@@ -584,22 +620,34 @@ pub struct Mapped<T: SchemeColors> {
 /// back (to restore it later): with the dark scheme on, `c` holds the mapped color.
 pub fn authored<T: SchemeColors>(c: &T, mapped: Option<&Mapped<T>>) -> T::Value {
     match mapped {
-        Some(m) if c.get() == m.dark => m.light,
+        Some(m) if c.get() == m.dark => m.light.clone(),
         _ => c.get(),
     }
 }
 
-/// Marks a UI node whose colors are already the scheme's own, such as
-/// the scheme toggle's preview swatches: [`apply_scheme`] leaves it alone.
+/// Marks a UI node whose colors are already the scheme's own (the sketch's labels, drawn in the
+/// sketch's colors for the scheme): [`apply_scheme`] leaves it alone.
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct KeepColors;
+
+/// Marks a UI node whose fill is data, not decoration (a color swatch, a material's chip, a
+/// label's dot): its fill is shown as it is in both schemes. Its border and text are mapped.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct KeepFill;
+
+/// Marks a UI node as a raised surface (a dialog's panel), like one with a `GlobalZIndex`.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct RaisedSurface;
 
 /// The scheme the UI's colors were last mapped for.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MappedScheme(ColorScheme);
 
-type Raised = Or<(With<GlobalZIndex>, With<crate::dialog::DialogRoot>)>;
-type Item<'a, T> = (Entity, Mut<'a, T>, Option<Mut<'a, Mapped<T>>>, bool);
+/// What the scheme maps: UI nodes and their text spans (not world-space `Text2d`, like a
+/// drawing sheet's text, which sits on paper).
+type UiColor = Or<(With<Node>, With<TextSpan>)>;
+type Keep = (Has<KeepColors>, Has<KeepFill>);
+type Item<'a, T> = (Entity, Mut<'a, T>, Option<Mut<'a, Mapped<T>>>, (bool, bool));
 
 /// Maps the colors of `T` to the scheme in force: the ones changed since the last frame, or all
 /// of them when the scheme changes.
@@ -609,16 +657,25 @@ pub fn apply_scheme<T: SchemeColors>(
     mapped_for: Option<Res<MappedScheme>>,
     map: Res<SchemeMap>,
     mut q: ParamSet<(
-        Query<(Entity, &mut T, Option<&mut Mapped<T>>, Has<KeepColors>), Changed<T>>,
-        Query<(Entity, &mut T, Option<&mut Mapped<T>>, Has<KeepColors>)>,
+        Query<(Entity, &mut T, Option<&mut Mapped<T>>, Keep), (Changed<T>, UiColor)>,
+        Query<(Entity, &mut T, Option<&mut Mapped<T>>, Keep), UiColor>,
     )>,
-    raised: Query<(), Raised>,
+    surfaces: Query<(
+        Option<&GlobalZIndex>,
+        Has<RaisedSurface>,
+        Has<crate::dialog::DialogRoot>,
+    )>,
     mut commands: Commands,
 ) {
     let scheme = appearance.scheme();
     let switched = mapped_for.is_none_or(|m| m.0 != scheme);
-    let mut visit = |(e, mut c, mapped, keep): Item<T>| {
-        if keep {
+    let surface = |e: Entity| match surfaces.get(e) {
+        Ok((Some(z), ..)) if z.0 >= crate::z::MENU => Surface::Floating,
+        Ok((Some(_), ..) | (_, true, _) | (_, _, true)) => Surface::Raised,
+        _ => Surface::Page,
+    };
+    let mut visit = |(e, mut c, mapped, (keep, keep_fill)): Item<T>| {
+        if keep || (T::FILL && keep_fill) {
             return;
         }
         let current = c.get();
@@ -628,10 +685,11 @@ pub fn apply_scheme<T: SchemeColors>(
                 if !switched {
                     return;
                 }
-                m.light
+                m.light.clone()
             }
-            Some(m) => T::refade(m.light, m.dark, current).unwrap_or(current),
-            None => current,
+            Some(m) => T::refade(m.light.clone(), m.dark.clone(), current.clone())
+                .unwrap_or(current.clone()),
+            None => current.clone(),
         };
         match scheme {
             ColorScheme::Light => {
@@ -645,11 +703,11 @@ pub fn apply_scheme<T: SchemeColors>(
             ColorScheme::Dark => {
                 // Code that writes its light color every frame: the same dark one.
                 let dark = match &mapped {
-                    Some(m) if m.light == light && !switched => m.dark,
-                    _ => T::dark(light, &map, raised.contains(e)),
+                    Some(m) if m.light == light && !switched => m.dark.clone(),
+                    _ => T::dark(light.clone(), &map, surface(e)),
                 };
                 if current != dark {
-                    c.set(dark);
+                    c.set(dark.clone());
                 }
                 match mapped {
                     Some(mut m) => *m = Mapped { light, dark },

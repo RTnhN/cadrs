@@ -256,6 +256,7 @@ impl ColorEditor {
                             ..default()
                         },
                         BackgroundColor(rgba_color(rgba)),
+                        crate::color_scheme::KeepFill,
                         BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
                     ));
                     r.spawn((

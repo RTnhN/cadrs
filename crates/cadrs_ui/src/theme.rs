@@ -38,8 +38,10 @@ fn hex(s: &str) -> Color {
 pub enum ColorRole {
     /// Backgrounds of panels, rows and buttons.
     Fill,
-    /// Backgrounds of surfaces above the page: menus, dialogs, tooltips, inputs.
+    /// Backgrounds of surfaces above the page: dialogs, floating panels.
     Raised,
+    /// Backgrounds of surfaces above everything: menus, popups, toasts.
+    Floating,
     /// Text and icons.
     Ink,
     /// Borders, outlines and separators.
@@ -56,6 +58,8 @@ pub struct Theme {
     pub sidebar: Color,
     pub viewport_background: Color,
     pub popover: Color,
+    /// Menus and popups, over dialogs and the 3D view alike.
+    pub floating: Color,
     pub overlay: Color,
     pub shadow: Color,
 
@@ -82,6 +86,9 @@ pub struct Theme {
     pub primary_active: Color,
     pub primary_disabled: Color,
     pub primary_foreground: Color,
+    /// A disabled primary button's label: white to the eye in light, but its own token so the
+    /// dark theme can dim it.
+    pub primary_disabled_foreground: Color,
     pub secondary: Color,
     pub secondary_hover: Color,
     pub secondary_active: Color,
@@ -215,6 +222,7 @@ impl Theme {
             sidebar: hex("#ffffff"),
             viewport_background: hex("#ffffff"),
             popover: hex("#ffffff"),
+            floating: hex("#ffffff"),
             // UI blends in linear space: 0.79 alpha dims white to about #7f7f7f, like the browser's 50%.
             overlay: Color::srgba(0.0, 0.0, 0.0, 0.79),
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.18),
@@ -238,6 +246,7 @@ impl Theme {
             primary_active: hex("#0f4491"),
             primary_disabled: hex("#9bb6dc"),
             primary_foreground: hex("#ffffff"),
+            primary_disabled_foreground: hex("#f8fafd"),
             secondary: hex("#dadada"),
             secondary_hover: hex("#cecece"),
             secondary_active: hex("#bfbfbf"),
@@ -346,14 +355,15 @@ impl Theme {
             title_bar: hex("#2a2b2f"),
             tab_bar: hex("#18191b"),
             sidebar: hex("#1f2023"),
-            viewport_background: hex("#2e3035"),
-            popover: hex("#2a2b2f"),
+            viewport_background: hex("#393c42"),
+            popover: hex("#2c2e33"),
+            floating: hex("#44474e"),
             overlay: Color::srgba(0.0, 0.0, 0.0, 0.79),
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.45),
 
             foreground: hex("#e3e4e6"),
             muted_foreground: hex("#a9abb0"),
-            subtle_foreground: hex("#80838a"),
+            subtle_foreground: hex("#8b8e95"),
             disabled_foreground: hex("#5c5f66"),
             link: hex("#7aaaf0"),
 
@@ -370,6 +380,7 @@ impl Theme {
             primary_active: hex("#2861b8"),
             primary_disabled: hex("#2c4469"),
             primary_foreground: hex("#ffffff"),
+            primary_disabled_foreground: hex("#8c9bb4"),
             secondary: hex("#3a3c41"),
             secondary_hover: hex("#45474d"),
             secondary_active: hex("#50535a"),
@@ -446,12 +457,14 @@ impl Theme {
     /// themes ([`crate::color_scheme`]). Where two tokens share a light color in one role, the
     /// earlier one decides its dark color.
     pub fn colors(&self) -> Vec<(ColorRole, Color)> {
-        use ColorRole::{Fill, Ink, Line, Raised};
+        use ColorRole::{Fill, Floating, Ink, Line, Raised};
         let mut v = vec![
             (Fill, self.background),
             (Fill, self.title_bar),
             (Fill, self.tab_bar),
             (Fill, self.sidebar),
+            (Floating, self.floating),
+            (Floating, self.tooltip_background),
             (Raised, self.popover),
             (Raised, self.input_background),
             (Raised, self.tooltip_background),
@@ -505,6 +518,7 @@ impl Theme {
             (Ink, self.link),
             (Ink, self.primary),
             (Ink, self.primary_foreground),
+            (Ink, self.primary_disabled_foreground),
             (Ink, self.selection_foreground),
             (Ink, self.tooltip_foreground),
             (Ink, self.toast_foreground),
@@ -537,16 +551,19 @@ impl Theme {
             (Line, self.primary_open_border),
             (Line, self.tree_guide),
             (Line, self.primary),
+            (Line, self.primary_hover),
+            (Line, self.primary_active),
+            (Line, self.primary_disabled),
             (Line, self.checkbox_checked),
             (Line, self.list_selected_bar),
             (Line, self.tab_underline),
             (Line, self.plane_edge),
         ];
-        // A raised surface (a menu, a dialog) takes the fills it doesn't name itself.
+        // Raised and floating surfaces take the fills they don't name themselves.
         let fills: Vec<_> = v
             .iter()
             .filter(|(r, _)| *r == Fill)
-            .map(|&(_, c)| (Raised, c))
+            .flat_map(|&(_, c)| [(Raised, c), (Floating, c)])
             .collect();
         v.extend(fills);
         v

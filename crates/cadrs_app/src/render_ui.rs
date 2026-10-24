@@ -1164,6 +1164,7 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
                         ..default()
                     },
                     BackgroundColor(Color::srgb_u8(rgb[0], rgb[1], rgb[2])),
+                    cadrs_ui::KeepFill,
                     BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
                 ));
                 r.spawn(Node {

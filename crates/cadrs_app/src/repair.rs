@@ -254,7 +254,6 @@ fn target_image(size: UVec2) -> Image {
 fn spawn_cameras(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    theme: Res<Theme>,
     mut repair: ResMut<Repair>,
 ) {
     let image = images.add(target_image(UVec2::new(64, 64)));
@@ -268,7 +267,8 @@ fn spawn_cameras(
         Camera {
             order: -2,
             is_active: false,
-            clear_color: ClearColorConfig::Custom(theme.viewport_background),
+            // The `ClearColor` resource: the scheme's viewport background.
+            clear_color: ClearColorConfig::Default,
             ..default()
         },
         Projection::Orthographic(OrthographicProjection {

@@ -247,10 +247,11 @@ fn knockout(inside_plane: bool) -> Color {
     if inside_plane {
         by_scheme(
             Color::srgb_u8(0xf4, 0xf8, 0xfb),
-            Color::srgb_u8(0x33, 0x45, 0x57),
+            Color::srgb_u8(0x3a, 0x48, 0x58),
         )
     } else {
-        by_scheme(Color::WHITE, Color::srgb_u8(0x2e, 0x30, 0x35))
+        // The dark viewport (`Theme::dark().viewport_background`).
+        by_scheme(Color::WHITE, Color::srgb_u8(0x39, 0x3c, 0x42))
     }
 }
 /// A hovered dimension.
@@ -783,11 +784,16 @@ fn draw_sketches(
                     &units.0,
                     false,
                 );
-                let style = if d.driven {
+                let mut style = if d.driven {
                     DimStyle::driven()
                 } else {
                     DimStyle::normal()
                 };
+                // Over a sketch selected as a whole (its orange fill), dark lines read in dark
+                // too.
+                if whole {
+                    style.line = by_scheme(style.line, Color::srgb_u8(0x1d, 0x1e, 0x21));
+                }
                 draw_dimension(
                     &sk.geometry,
                     &map,
