@@ -243,20 +243,48 @@ impl Draft {
                     labels(&Role::ALL, Role::label),
                     index_of(&Role::ALL, d.role),
                 ));
-                let studios = ctx.part_studios();
-                f.push(Field::select(
-                    "studio",
-                    "Part Studio",
-                    studios.iter().map(|s| s.1.clone()),
-                    d.studio,
-                ));
-                let mut refs = vec!["Workspace (follows edits)".to_string()];
-                refs.extend(ctx.versions.iter().map(|v| format!("Version {}", v.0)));
-                f.push(Field::select("version", "Reference", refs, d.version));
-                if d.version == 0 {
-                    f.push(Field::note(
-                        "A version keeps the part as it is; the workspace follows every edit.",
-                    ));
+                if !d.others.is_empty() {
+                    let mut docs = vec!["This document".to_string()];
+                    docs.extend(d.others.iter().map(|o| o.1.clone()));
+                    f.push(Field::select("document", "Document", docs, d.document));
+                }
+                match &d.other {
+                    Some(o) if d.document > 0 => {
+                        f.push(Field::select(
+                            "studio",
+                            "Part Studio",
+                            o.studios.iter().map(|s| s.1.clone()),
+                            d.studio,
+                        ));
+                        f.push(Field::select(
+                            "version",
+                            "Version",
+                            o.versions.iter().map(|v| v.1.clone()),
+                            d.version,
+                        ));
+                        f.push(Field::note(
+                            "Parts from another document come in at a version: Update brings a \
+                             newer one.",
+                        ));
+                    }
+                    _ => {
+                        let studios = ctx.part_studios();
+                        f.push(Field::select(
+                            "studio",
+                            "Part Studio",
+                            studios.iter().map(|s| s.1.clone()),
+                            d.studio,
+                        ));
+                        let mut refs = vec!["Workspace (follows edits)".to_string()];
+                        refs.extend(ctx.versions.iter().map(|v| format!("Version {}", v.0)));
+                        f.push(Field::select("version", "Reference", refs, d.version));
+                        if d.version == 0 {
+                            f.push(Field::note(
+                                "A version keeps the part as it is; the workspace follows every \
+                                 edit.",
+                            ));
+                        }
+                    }
                 }
                 f.push(Field::section("Parts"));
                 if d.parts.is_empty() {

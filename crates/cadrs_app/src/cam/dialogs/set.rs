@@ -10,12 +10,34 @@ impl Draft {
         match self {
             Draft::Insert(d) => match (key, v) {
                 ("role", Value::Index(i)) => d.role = Role::ALL[(*i).min(2)],
+                ("document", Value::Index(i)) => {
+                    d.document = (*i).min(d.others.len());
+                    d.studio = 0;
+                    d.other = match d.document {
+                        0 => None,
+                        k => super::load_other(world, d.others[k - 1].0, None),
+                    };
+                    // Another document's newest version; this one's workspace.
+                    d.version = d
+                        .other
+                        .as_ref()
+                        .map_or(0, |o| o.versions.len().saturating_sub(1));
+                    fill_parts(world, d);
+                }
                 ("studio", Value::Index(i)) => {
                     d.studio = *i;
                     fill_parts(world, d);
                 }
                 ("version", Value::Index(i)) => {
                     d.version = *i;
+                    // Another document's Part Studios as that version has them.
+                    if d.document > 0
+                        && let Some(vid) = d.other.as_ref().and_then(|o| o.versions.get(*i))
+                    {
+                        let vid = vid.0;
+                        d.other = super::load_other(world, d.others[d.document - 1].0, Some(vid));
+                        d.studio = 0;
+                    }
                     fill_parts(world, d);
                 }
                 (k, Value::Bool(b)) if k.starts_with("part-") => {

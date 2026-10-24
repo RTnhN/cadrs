@@ -81,7 +81,8 @@ pub struct CamDialog {
 impl CamDialog {
     /// A change the live preview hasn't taken yet (a toolpath's).
     pub fn waiting(&self) -> bool {
-        self.changed.is_some() && matches!(self.draft, Draft::Toolpath { .. })
+        (self.changed.is_some() && matches!(self.draft, Draft::Toolpath { .. }))
+            || matches!(&self.draft, Draft::Insert(d) if d.others_pending)
     }
 }
 
@@ -134,12 +135,77 @@ pub enum Draft {
 #[derive(Debug, Clone)]
 pub struct InsertDraft {
     pub role: Role,
+    /// 0: this document; 1…: one of `others`.
+    pub document: usize,
+    /// The library's other documents with versions: (id, name).
+    pub others: Vec<(cadrs_core::DocumentId, String)>,
+    /// The library is still being read (`others` comes when it's done).
+    pub others_pending: bool,
+    /// The other document chosen, opened at its version.
+    pub other: Option<OtherDoc>,
     /// The Part Studio (an index into the document's Part Studios).
     pub studio: usize,
-    /// 0: the workspace; 1…: the document's versions.
+    /// This document: 0 the workspace, 1… its versions. Another: an index into its versions.
     pub version: usize,
     /// The studio's parts: (id, name, ticked).
     pub parts: Vec<(PartId, String, bool)>,
+}
+
+/// Another document an insert takes parts from: its versions, newest last, and the Part
+/// Studios of the one chosen.
+#[derive(Debug, Clone)]
+pub struct OtherDoc {
+    pub versions: Vec<(cadrs_core::history_log::VersionId, String)>,
+    pub studios: Vec<(ElementId, String)>,
+}
+
+/// The library's other documents that have a version to take parts from (`None` while the
+/// library is still being read).
+fn other_documents(world: &mut World) -> Option<Vec<(cadrs_core::DocumentId, String)>> {
+    let b = crate::linked::Browse {
+        location: crate::linked::Location::Mine,
+        search: String::new(),
+        opened: None,
+        graph: false,
+    };
+    let this = world.resource::<ActiveDocument>().doc.id;
+    let list = crate::linked::browser_list(world, &b);
+    (!list.loading).then(|| {
+        list.rows
+            .into_iter()
+            .filter(|r| r.versions && r.id != this)
+            .map(|r| (r.id, r.name))
+            .collect()
+    })
+}
+
+/// Opens another document at a version (its newest when `None`): its versions and the Part
+/// Studios it has there.
+fn load_other(
+    world: &mut World,
+    document: cadrs_core::DocumentId,
+    version: Option<cadrs_core::history_log::VersionId>,
+) -> Option<OtherDoc> {
+    let versions: Vec<(cadrs_core::history_log::VersionId, String)> =
+        crate::linked::versions_of(world, document)
+            .into_iter()
+            .map(|(id, name, _)| (id, name))
+            .collect();
+    let opened = match crate::linked::open(world, document, version) {
+        Ok(o) => o,
+        Err(e) => {
+            toast(world, &e);
+            return None;
+        }
+    };
+    let studios = opened
+        .doc
+        .elements
+        .iter()
+        .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
+        .map(|e| (e.id, e.name.clone()))
+        .collect();
+    Some(OtherDoc { versions, studios })
 }
 
 /// What a draft reads from the document.
@@ -243,16 +309,32 @@ pub fn insert_component(world: &mut World, role: Role) {
         .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. }))
         .map(|e| e.id)
         .collect();
-    if studios.is_empty() {
-        toast(world, "The document has no Part Studio to take parts from");
+    let found = other_documents(world);
+    let others_pending = found.is_none();
+    let others = found.unwrap_or_default();
+    if studios.is_empty() && others.is_empty() && !others_pending {
+        toast(world, "No Part Studio to take parts from");
         return;
     }
     let mut d = InsertDraft {
         role,
+        document: 0,
+        others,
+        others_pending,
+        other: None,
         studio: 0,
         version: 0,
         parts: Vec::new(),
     };
+    // A document without Part Studios of its own starts on the first other one.
+    if studios.is_empty() && !d.others.is_empty() {
+        d.document = 1;
+        d.other = load_other(world, d.others[0].0, None);
+        d.version = d
+            .other
+            .as_ref()
+            .map_or(0, |o| o.versions.len().saturating_sub(1));
+    }
     fill_parts(world, &mut d);
     open(world, Draft::Insert(d));
 }
@@ -293,8 +375,20 @@ pub struct InsertParts {
     rx: std::sync::Mutex<std::sync::mpsc::Receiver<Vec<(PartId, String)>>>,
 }
 
-/// Puts the rebuilt part list in the insert dialog (if it still shows that studio).
+/// Puts the rebuilt part list in the insert dialog (if it still shows that studio), and the
+/// library's other documents once they're read.
 fn take_insert_parts(world: &mut World) {
+    let pending = world
+        .get_resource::<CamDialog>()
+        .is_some_and(|d| matches!(&d.draft, Draft::Insert(i) if i.others_pending));
+    if pending && let Some(others) = other_documents(world) {
+        let mut dlg = world.resource_mut::<CamDialog>();
+        if let Draft::Insert(d) = &mut dlg.draft {
+            d.others = others;
+            d.others_pending = false;
+        }
+        dlg.shown = None;
+    }
     let Some(mut job) = world.get_resource_mut::<InsertParts>() else {
         return;
     };
@@ -328,6 +422,31 @@ fn source_of(
     Vec<cadrs_core::external::LinkedElement>,
 )> {
     let doc = world.resource::<ActiveDocument>().doc.clone();
+    // Another document's Part Studio, at one of its versions.
+    if d.document > 0 {
+        let (other_id, _) = *d.others.get(d.document - 1)?;
+        let o = d.other.as_ref()?;
+        let element = o.studios.get(d.studio)?.0;
+        let vid = o.versions.get(d.version)?.0;
+        let log = world.resource::<crate::history_panel::DocLog>().log.clone();
+        let got = {
+            let mut res = crate::linked::resolver(world);
+            cadrs_core::derived::resolve(
+                &mut res.0,
+                &doc,
+                log.as_ref(),
+                cadrs_core::derived::DerivedFeature::default(),
+                cadrs_core::external::SourceRef::version(Some(other_id), element, vid),
+            )
+        };
+        return match got {
+            Ok(r) => Some((r.derived, r.links)),
+            Err(e) => {
+                toast(world, &e.to_string());
+                None
+            }
+        };
+    }
     let studios: Vec<ElementId> = doc
         .elements
         .iter()

@@ -2551,3 +2551,11 @@ fn golden_cam_studio_3d() {
     // below (the scenario checks Verify finds no gouges and no collisions).
     run_scenario("cam_studio_3d");
 }
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_cam_studio_other_document() {
+    // CAM Studio taking its part from another document at a version (the scenario checks the
+    // component comes in at V1).
+    run_scenario("cam_studio_other_document");
+}
