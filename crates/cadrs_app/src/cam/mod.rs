@@ -1100,16 +1100,46 @@ fn on_row_menu(
                     item("cam-m-down", "Move down", "arrow-down")
                         .disabled(i + 1 >= setup.operations.len()),
                 )
-                .item(item("cam-m-duplicate", "Duplicate", "copy"))
-                .item(item(
-                    "cam-m-suppress",
-                    if o.suppressed {
-                        "Unsuppress"
+                .item(item("cam-m-duplicate", "Duplicate", "copy"));
+            // To the other setups: moved within its job, copied to any.
+            for (jj, other_job) in cam.jobs.iter().enumerate() {
+                for other in &other_job.setups {
+                    if other.id == setup.id {
+                        continue;
+                    }
+                    let place = if cam.jobs.len() > 1 {
+                        format!("{} · {}", other_job.name, other.name)
                     } else {
-                        "Suppress"
-                    },
-                    "",
-                ));
+                        other.name.clone()
+                    };
+                    if jj
+                        == cam.find(id).map_or(usize::MAX, |n| match n {
+                            NodeRef::Operation(j, _, _) => j,
+                            _ => usize::MAX,
+                        })
+                    {
+                        menu = menu.item(item(
+                            &format!("cam-m-moveto-{:x}", other.id.0),
+                            &format!("Move to {place}"),
+                            "",
+                        ));
+                    }
+                    menu = menu.item(item(
+                        &format!("cam-m-copyto-{:x}", other.id.0),
+                        &format!("Copy to {place}"),
+                        "copy",
+                    ));
+                }
+            }
+            menu = menu.item(item(
+                "cam-m-suppress",
+                if o.suppressed {
+                    "Unsuppress"
+                } else {
+                    "Suppress"
+                },
+                "",
+            ));
             if !matches!(o.kind, OpKind::Tool(_)) {
                 menu = menu.item(item(
                     "cam-m-hide",
@@ -1223,15 +1253,55 @@ pub fn row_action(world: &mut World, row: CamRow, action: &str) {
             edit(world, Edit::Hide(id, on));
         }
         "cam-m-update" => dialogs::update_component(world, id),
+        a if a.starts_with("cam-m-moveto-") || a.starts_with("cam-m-copyto-") => {
+            let want = u64::from_str_radix(&a["cam-m-moveto-".len()..], 16).ok();
+            let Some(to) = cam
+                .jobs
+                .iter()
+                .flat_map(|j| &j.setups)
+                .find(|s| Some(s.id.0) == want)
+            else {
+                return;
+            };
+            if a.starts_with("cam-m-moveto-") {
+                edit(
+                    world,
+                    Edit::Move {
+                        op: id,
+                        setup: to.id,
+                        index: to.operations.len(),
+                    },
+                );
+            } else {
+                let seed = uuid::Uuid::new_v4().as_u64_pair().0;
+                edit(
+                    world,
+                    Edit::CopyTo {
+                        op: id,
+                        setup: to.id,
+                        seed,
+                    },
+                );
+            }
+        }
         "cam-m-delete" => delete(world, &[id]),
         _ => {}
     }
 }
 
-/// Deletes rows (one undo step each).
+/// Deletes rows (one undo step).
 pub fn delete(world: &mut World, ids: &[CamId]) {
-    for id in ids {
-        edit(world, Edit::Delete(*id));
+    match ids {
+        [] => {}
+        [id] => {
+            edit(world, Edit::Delete(*id));
+        }
+        _ => {
+            edit(
+                world,
+                Edit::Batch(ids.iter().map(|id| Edit::Delete(*id)).collect()),
+            );
+        }
     }
     world.resource_mut::<CamUi>().selected.clear();
 }

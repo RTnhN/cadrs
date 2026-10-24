@@ -426,6 +426,19 @@ pub enum NodeRef {
 }
 
 impl CamStudio {
+    /// The Derived reference of the component standing for `feature` (for updating it in
+    /// place); the features worked out from the components are dropped to be made again.
+    pub fn component_derived_mut(
+        &mut self,
+        feature: FeatureId,
+    ) -> Option<&mut crate::derived::DerivedFeature> {
+        self.features = std::sync::OnceLock::new();
+        self.components
+            .iter_mut()
+            .find(|c| c.feature_id() == feature)
+            .map(|c| &mut c.derived)
+    }
+
     /// The components as Derived features (hidden ones too; the app hides their parts).
     pub fn part_features(&self) -> &[Feature] {
         self.features.get_or_init(|| {
@@ -704,6 +717,15 @@ pub enum Edit {
     SetActiveJob(CamId),
     /// Replaces the tool library (an import merges first and passes the result).
     SetLibrary(Box<ToolLibrary>),
+    /// Copies an operation to the end of a setup, in any job (a new id from `seed`).
+    CopyTo {
+        op: CamId,
+        setup: CamId,
+        seed: u64,
+    },
+    /// Several edits as one undo step (a Delete of something already gone with its parent is
+    /// skipped).
+    Batch(Vec<Edit>),
 }
 
 /// A change to the CAM Studio `element` (one undo step).
@@ -768,6 +790,14 @@ impl Command for EditCam {
             Edit::Move { .. } => "Reorder operations".into(),
             Edit::SetActiveJob(_) => "Activate job".into(),
             Edit::SetLibrary(_) => "Update tool library".into(),
+            Edit::CopyTo { .. } => "Copy operation".into(),
+            Edit::Batch(v) => {
+                if v.iter().all(|e| matches!(e, Edit::Delete(_))) {
+                    format!("Delete {} items", v.len())
+                } else {
+                    format!("{} edits", v.len())
+                }
+            }
         }
     }
 
@@ -775,6 +805,12 @@ impl Command for EditCam {
         match &self.edit {
             // Version references add frozen copies to the document.
             Edit::AddComponents { .. } | Edit::SetComponent { .. } | Edit::Delete(_) => {
+                Scope::Whole
+            }
+            Edit::Batch(v)
+                if v.iter()
+                    .any(|e| EditCam::new(self.element, e.clone()).scope() == Scope::Whole) =>
+            {
                 Scope::Whole
             }
             _ => Scope::Element(self.element),
@@ -1033,6 +1069,30 @@ impl Command for EditCam {
             Edit::SetLibrary(lib) => {
                 let s = studio_mut(doc, self.element)?;
                 s.library = (**lib).clone();
+            }
+            Edit::CopyTo { op, setup, seed } => {
+                let mut seed = *seed;
+                let s = studio_mut(doc, self.element)?;
+                let Some(NodeRef::Operation(j, k, o)) = s.find(*op) else {
+                    return Err(invalid("no such operation"));
+                };
+                let Some(NodeRef::Setup(j2, k2)) = s.find(*setup) else {
+                    return Err(invalid("no such setup"));
+                };
+                let mut c = s.jobs[j].setups[k].operations[o].clone();
+                c.id = reseed(&mut seed);
+                c.name = s.next_name(&strip_number(&c.name));
+                s.jobs[j2].setups[k2].operations.push(c);
+            }
+            Edit::Batch(edits) => {
+                for e in edits {
+                    if let Edit::Delete(id) = e
+                        && studio_mut(doc, self.element)?.find(*id).is_none()
+                    {
+                        continue;
+                    }
+                    EditCam::new(self.element, e.clone()).apply(doc)?;
+                }
             }
         }
         Ok(())

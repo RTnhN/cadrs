@@ -686,3 +686,60 @@ fn a_flipped_setup_starts_from_the_first_ones_stock() {
     // The Ø16 hole the bore made: gone.
     assert_eq!(at([30.0, 20.0, 0.0]), EMPTY);
 }
+
+/// A CAM Studio's components count as references: moving the tab to another document takes
+/// the Part Studio they follow along, and updating references sees them.
+#[test]
+fn components_are_references() {
+    let mut f = Fixture::new();
+    let (_job, _setup) = f.job(MachineKind::Mill);
+    let el = f.doc.element(f.cam).unwrap();
+    assert_eq!(
+        crate::move_doc::tab_dependencies(&f.doc, el),
+        vec![f.studio]
+    );
+    let uses = crate::link_update::workspace_uses(&f.doc, Some(f.cam));
+    assert_eq!(uses.len(), 1, "{uses:?}");
+    assert_eq!(uses[0].source, f.studio);
+    // The site resolves back to the component.
+    assert!(crate::link_update::use_at(&f.doc, uses[0].site).is_some());
+}
+
+/// Deleting several rows is one undo step (a setup and its own operation together too); an
+/// operation copies to a setup of another job.
+#[test]
+fn batch_delete_and_copy_across_jobs() {
+    let mut f = Fixture::new();
+    let (job, setup) = f.job(MachineKind::Mill);
+    f.add_tool(setup, Tool::new(ToolKind::EndMill, 6.0), 1);
+    let em = Tool::new(ToolKind::EndMill, 6.0);
+    let a = f.add_toolpath(
+        setup,
+        Params::new(Pattern::Profile2D, &em, MachineKind::Mill),
+    );
+    let b = f.add_toolpath(setup, Params::new(Pattern::Bore, &em, MachineKind::Mill));
+    f.run(Edit::Duplicate { id: job, seed: 11 }).unwrap();
+    let other_setup = f.cam().jobs[1].setups[0].id;
+    f.run(Edit::CopyTo {
+        op: b,
+        setup: other_setup,
+        seed: 5,
+    })
+    .unwrap();
+    let copied = f.cam().jobs[1].setups[0].operations.last().unwrap().clone();
+    assert_ne!(copied.id, b);
+    assert_eq!(copied.name, "Bore 2");
+    // Both toolpaths, and the second job's setup with its own, in one step.
+    f.run(Edit::Batch(vec![
+        Edit::Delete(a),
+        Edit::Delete(b),
+        Edit::Delete(other_setup),
+        Edit::Delete(copied.id),
+    ]))
+    .unwrap();
+    assert!(f.cam().find(a).is_none() && f.cam().find(b).is_none());
+    assert!(f.cam().jobs[1].setups.is_empty());
+    f.history.undo(&mut f.doc).expect("undo");
+    assert!(f.cam().find(a).is_some() && f.cam().find(b).is_some());
+    assert!(f.cam().find(copied.id).is_some());
+}
