@@ -1058,6 +1058,11 @@ fn applied_picks(
     };
     for p in picks.read() {
         let Some(pick) = p.0 else { continue };
+        // A feature never refers to itself: the second click of the double click that opened
+        // its dialog picks its own row (#65).
+        if pick == Pick::Feature(s.feature) {
+            continue;
+        }
         let field = s.field;
         commands.queue(move |world: &mut World| {
             let Some(f) = current(world) else { return };

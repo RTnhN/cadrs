@@ -1,0 +1,18 @@
+// #65: double-clicking a Plane feature in the list to edit it doesn't add the plane itself to
+// its Entities (the second click of the double click reaches the open dialog as a pick).
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Click(ui("plane")),
+        WaitFor("plane-dialog"),
+        Click(ui("feature-top")),
+        Key("Enter"),
+        Wait(3),
+        DoubleClick(ui("feature-plane-1")),
+        WaitFor("plane-dialog"),
+        Wait(3),
+        Screenshot("01-editing-plane-1-entities-top-only"),
+        Key("Escape"),
+    ],
+)
