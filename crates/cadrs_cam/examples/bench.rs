@@ -63,6 +63,7 @@ fn main() {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let t = Instant::now();
         let r = generate(&input);

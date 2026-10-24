@@ -35,6 +35,8 @@ pub struct MillResult {
     /// Cuts with more material over the tip than the flutes are long, or with the holder
     /// (or arbor) meeting the stock: (operation, where).
     pub holder_hits: Vec<(usize, P3)>,
+    /// Moves (rapids too) with the tool or its holder in the workholding: (operation, where).
+    pub fixture_hits: Vec<(usize, P3)>,
     /// The most material left on the part (mm).
     pub excess: f64,
 }
@@ -80,7 +82,45 @@ fn max_in_disc(map: &HeightMap, c: P2, r: f64) -> f32 {
 
 /// Runs the operations over the stock (see the module docs).
 pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> MillResult {
+    simulate_mill_with(stock, model, &[], ops, cell)
+}
+
+/// [`simulate_mill`] with the workholding's triangles: any move taking the tool or its holder
+/// into them is a collision.
+pub fn simulate_mill_with(
+    stock: &Stock,
+    model: &Model,
+    fixtures: &[[P3; 3]],
+    ops: &[SimOp],
+    cell: f64,
+) -> MillResult {
+    simulate_mill_on(stock.height_map(cell), model, fixtures, ops)
+}
+
+/// The in-process stock `before` leaves of `stock` (the operations before the ones to check),
+/// on a grid of `cell`.
+pub fn in_process(stock: &Stock, before: &[SimOp], cell: f64) -> HeightMap {
     let mut map = stock.height_map(cell);
+    for op in before {
+        for s in op.segments {
+            if !s.is_rapid() {
+                map.cut(op.tool, s.from, s.to);
+            }
+        }
+    }
+    map
+}
+
+/// [`simulate_mill_with`] from a stock already cut (`map`: [`in_process`]).
+pub fn simulate_mill_on(
+    mut map: HeightMap,
+    model: &Model,
+    fixtures: &[[P3; 3]],
+    ops: &[SimOp],
+) -> MillResult {
+    let fixture_idx = (!fixtures.is_empty()).then(|| crate::dropcutter::TriIndex::new(fixtures));
+    let mut fixture_hits = Vec::new();
+    let mut scratch = Vec::new();
     // The part on exactly the stock's grid.
     let mut part = map.blank();
     part.rasterize(&model.triangles, false);
@@ -102,6 +142,44 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
         .into_iter()
         .filter(|d| d.1 >= op.tool.overall_length - 1e-9)
         .collect();
+        // Against the workholding: the cutter (a hair smaller: running along it is fine) and
+        // the holder's discs, all the way along every move.
+        if let Some(fidx) = &fixture_idx {
+            let mut cutter = op.tool.clone();
+            cutter.diameter = (cutter.diameter - 0.002).max(1e-3);
+            if cutter.kind == crate::tool::ToolKind::BallMill {
+                cutter.corner_radius = cutter.diameter / 2.0;
+            }
+            let discs: Vec<(Tool, f64)> = holder
+                .iter()
+                .map(|(hr, hh)| (Tool::new(crate::tool::ToolKind::EndMill, 2.0 * hr), *hh))
+                .collect();
+            let step = (r / 2.0).clamp(0.05, 1.0);
+            for s in op.segments {
+                let n =
+                    ((crate::geom::dist(s.from, s.to) / step).ceil() as usize).clamp(1, 100_000);
+                for i in 0..=n {
+                    let p = crate::geom::lerp(s.from, s.to, i as f64 / n as f64);
+                    let into = |t: &Tool, h: f64, scratch: &mut Vec<u32>| {
+                        crate::dropcutter::drop_point(
+                            t,
+                            fidx,
+                            [p[0], p[1]],
+                            f64::NEG_INFINITY,
+                            scratch,
+                        ) > p[2] + h + 0.01
+                    };
+                    if into(&cutter, 0.0, &mut scratch)
+                        || discs.iter().any(|(t, h)| into(t, *h, &mut scratch))
+                    {
+                        if fixture_hits.len() < MAX_REPORTED {
+                            fixture_hits.push((k, p));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
         for s in op.segments {
             let len =
                 dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]).max((s.to[2] - s.from[2]).abs());
@@ -189,8 +267,114 @@ pub fn simulate_mill(stock: &Stock, model: &Model, ops: &[SimOp], cell: f64) -> 
         gouge_depth,
         rapid_hits,
         holder_hits,
+        fixture_hits,
         excess,
     }
+}
+
+/// What checking an operation against the part (not the stock) found: for operations a height
+/// map along the setup's Z can't cut (a tilted work plane, 3+2), in their own coordinates.
+#[derive(Debug, Clone, Default)]
+pub struct PartCheck {
+    /// Where cuts went into the part (beyond `tol`), and the deepest (mm).
+    pub gouges: Vec<P3>,
+    pub gouge_depth: f64,
+    /// Rapids (other than straight up) through the part.
+    pub rapid_hits: Vec<P3>,
+    /// The shank (above the flutes), holder or arbor into the part.
+    pub holder_hits: Vec<P3>,
+    /// Any of the tool or its holder into the workholding.
+    pub fixture_hits: Vec<P3>,
+}
+
+/// Checks an operation's moves against the part's triangles and the workholding's (all in the
+/// moves' coordinates), with the exact drop-cutter: cuts more than `tol` into the part,
+/// rapids into it, the shank and holder meeting it, and anything meeting the workholding.
+pub fn check_against_part(
+    part: &[[P3; 3]],
+    fixtures: &[[P3; 3]],
+    tool: &Tool,
+    segments: &[Segment],
+    tol: f64,
+) -> PartCheck {
+    use crate::dropcutter::{TriIndex, drop_point};
+    use crate::strategy::collision::{Collision, assembly_discs};
+    let mut out = PartCheck::default();
+    let idx = TriIndex::new(part);
+    let fidx = (!fixtures.is_empty()).then(|| TriIndex::new(fixtures));
+    let mut cutter = tool.clone();
+    cutter.diameter = (cutter.diameter - 0.002).max(1e-3);
+    if cutter.kind == crate::tool::ToolKind::BallMill {
+        cutter.corner_radius = cutter.diameter / 2.0;
+    }
+    let discs: Vec<(Tool, f64)> = assembly_discs(
+        tool,
+        &Collision {
+            shank_clearance: 0.0,
+            holder_clearance: 0.0,
+            ..Default::default()
+        },
+    )
+    .into_iter()
+    .map(|(r, h)| {
+        (
+            Tool::new(crate::tool::ToolKind::EndMill, 2.0 * (r - 1e-3).max(1e-3)),
+            h,
+        )
+    })
+    .collect();
+    let mut scratch = Vec::new();
+    let step = (tool.radius() / 2.0).clamp(0.05, 0.5);
+    let push = |v: &mut Vec<P3>, p: P3| {
+        if v.len() < MAX_REPORTED {
+            v.push(p);
+        }
+    };
+    for s in segments {
+        let up = s.is_rapid()
+            && dist2([s.from[0], s.from[1]], [s.to[0], s.to[1]]) < 1e-9
+            && s.to[2] >= s.from[2];
+        if up {
+            continue;
+        }
+        let n = ((crate::geom::dist(s.from, s.to) / step).ceil() as usize).clamp(1, 100_000);
+        let (mut cut_hit, mut holder_hit, mut fixture_hit) = (false, false, false);
+        for i in 0..=n {
+            let p = crate::geom::lerp(s.from, s.to, i as f64 / n as f64);
+            let xy = [p[0], p[1]];
+            let low = drop_point(&cutter, &idx, xy, f64::NEG_INFINITY, &mut scratch);
+            if !cut_hit && low > p[2] + tol {
+                cut_hit = true;
+                if s.is_rapid() {
+                    push(&mut out.rapid_hits, p);
+                } else {
+                    push(&mut out.gouges, p);
+                    out.gouge_depth = out.gouge_depth.max(low - p[2]);
+                }
+            }
+            if !holder_hit
+                && discs.iter().any(|(t, h)| {
+                    *h >= tool.cutting_length - 1e-9
+                        && drop_point(t, &idx, xy, f64::NEG_INFINITY, &mut scratch)
+                            > p[2] + h + 0.01
+                })
+            {
+                holder_hit = true;
+                push(&mut out.holder_hits, p);
+            }
+            if let Some(f) = &fidx
+                && !fixture_hit
+                && (drop_point(&cutter, f, xy, f64::NEG_INFINITY, &mut scratch) > p[2] + 0.01
+                    || discs.iter().any(|(t, h)| {
+                        drop_point(t, f, xy, f64::NEG_INFINITY, &mut scratch) > p[2] + h + 0.01
+                    }))
+            {
+                fixture_hit = true;
+                push(&mut out.fixture_hits, p);
+            }
+        }
+    }
+    out
 }
 
 /// What a sheet simulation found.
@@ -286,6 +470,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let tp = generate(&input).unwrap();
         let segs = tp.motion([0.0, 0.0, 40.0], 5000.0);
@@ -339,6 +524,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let tp = generate(&input).unwrap();
         let segs = tp.motion([0.0, 0.0, 40.0], 5000.0);
@@ -471,6 +657,7 @@ mod tests {
             machine: MachineKind::Laser,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let tp = generate(&input).unwrap();
         let segs = tp.motion([0.0, 0.0, 0.0], 5000.0);
@@ -523,5 +710,25 @@ mod tests {
             0.2,
         );
         assert!(r.holder_hits.is_empty(), "{:?}", r.holder_hits);
+    }
+
+    /// Checked against the part in its own coordinates: a pass along the top is clean, one
+    /// 2 mm into it gouges, a rapid across it hits, a straight-up retract doesn't.
+    #[test]
+    fn checks_against_the_part() {
+        let tris = box_triangles(&Aabb::new([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]));
+        let tool = Tool::new(ToolKind::BallMill, 6.0);
+        let clean = vec![feed([2.0, 10.0, 10.0], [18.0, 10.0, 10.0])];
+        let r = check_against_part(&tris, &[], &tool, &clean, 0.01);
+        assert!(r.gouges.is_empty() && r.rapid_hits.is_empty(), "{r:?}");
+        let deep = vec![feed([2.0, 10.0, 8.0], [18.0, 10.0, 8.0])];
+        let r = check_against_part(&tris, &[], &tool, &deep, 0.01);
+        assert!((r.gouge_depth - 2.0).abs() < 1e-3, "{r:?}");
+        let mut rapid = feed([-5.0, 10.0, 5.0], [25.0, 10.0, 5.0]);
+        rapid.feed = None;
+        let mut up = feed([10.0, 10.0, 5.0], [10.0, 10.0, 50.0]);
+        up.feed = None;
+        let r = check_against_part(&tris, &[], &tool, &[rapid, up], 0.01);
+        assert_eq!(r.rapid_hits.len(), 1, "{r:?}");
     }
 }

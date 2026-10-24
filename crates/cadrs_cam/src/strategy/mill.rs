@@ -834,6 +834,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         generate(&input).unwrap()
     }
@@ -1019,6 +1020,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         assert!(generate(&input).is_err());
     }

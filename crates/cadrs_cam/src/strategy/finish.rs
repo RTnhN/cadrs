@@ -515,6 +515,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         generate(&input).unwrap()
     }
@@ -609,6 +610,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let tp = generate(&input).unwrap();
         let idx = TriIndex::new(&m.triangles);
@@ -659,6 +661,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         (generate(&input).unwrap(), tool)
     }

@@ -180,15 +180,25 @@ pub fn setup_sheet(
         let stats = o.toolpath.stats(start, rapid);
         total += stats.minutes;
         let b = o.toolpath.bounds();
+        // As posted: the speed the toolpath runs at (a machine's limit slows it, and the
+        // feeds with it).
+        let rpm = o.toolpath.steps.iter().find_map(|s| match s {
+            cadrs_cam::Step::Spindle { rpm, .. } => Some(*rpm),
+            _ => None,
+        });
         let (pattern, speed, feed, depths, left) = match &params {
             Some(p) => (
                 p.pattern.label().to_string(),
                 if o.tool.is_beam() {
                     format!("{} %", fmt_mm(p.beam.power))
                 } else {
-                    format!("{} rpm", p.speeds.spindle_rpm.round())
+                    format!("{} rpm", rpm.unwrap_or(p.speeds.spindle_rpm).round())
                 },
-                format!("{} mm/min", p.speeds.feed.round()),
+                format!(
+                    "{} mm/min",
+                    (p.speeds.feed * rpm.map_or(1.0, |r| r / p.speeds.spindle_rpm.max(1e-9)))
+                        .round()
+                ),
                 format!("↓ {} · ↔ {}", fmt_mm(p.step_down), fmt_mm(p.step_over)),
                 format!("{} / {}", fmt_mm(p.wall_stock), fmt_mm(p.floor_stock)),
             ),

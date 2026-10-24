@@ -403,6 +403,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let mut b = Builder::new(&input);
         let cut = |direct_ok| Cut {

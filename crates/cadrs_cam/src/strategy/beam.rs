@@ -578,6 +578,7 @@ mod tests {
             machine,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         generate(&input)
     }
@@ -669,6 +670,7 @@ mod tests {
             machine: MachineKind::Plasma,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let tp = generate(&input).unwrap();
         let first = tp
@@ -887,6 +889,7 @@ mod tests {
             machine: MachineKind::Plasma,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let tp = generate(&input).unwrap();
         assert_scrap_only(&tp, &m, 0.75);

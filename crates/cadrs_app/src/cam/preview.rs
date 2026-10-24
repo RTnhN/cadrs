@@ -73,6 +73,8 @@ struct OpSpan {
     tool: Tool,
     /// In a tilted work plane (3+2): shown, but not simulated on the height map.
     tilted: bool,
+    /// A tilted operation's own frame in the run's coordinates (it's checked in it).
+    frame: Option<Frame>,
     /// The tool's axis (the run's coordinates).
     axis: P3,
 }
@@ -109,6 +111,8 @@ pub struct PreviewState {
     pub summary: String,
     collisions: Vec<(f64, String)>,
     paused_at: Option<f64>,
+    /// The stock before the run: as the toolpaths before the previewed ones leave it.
+    start: Option<HeightMap>,
     /// The check of the whole run, on a worker thread until it's done.
     analysis: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Analysis>>>,
 }
@@ -119,6 +123,8 @@ struct Analysis {
     collisions: Vec<(f64, String)>,
     /// The part on the stock's grid, pulled in by a cell (mills).
     part: Option<HeightMap>,
+    /// The stock as the toolpaths before the previewed ones leave it (when there are any).
+    start: Option<HeightMap>,
 }
 
 impl PreviewState {
@@ -160,8 +166,11 @@ impl PreviewState {
     fn jump(&mut self, t: f64) {
         let t = t.clamp(0.0, self.total());
         if t < self.t - 1e-12 && self.map.is_some() {
-            // Back: the stock again from the start.
-            self.map = Some(self.stock.height_map(self.map.as_ref().unwrap().cell));
+            // Back: the stock again from the start (as the toolpaths before left it).
+            self.map = Some(match &self.start {
+                Some(m) => m.clone(),
+                None => self.stock.height_map(self.map.as_ref().unwrap().cell),
+            });
             self.applied = 0;
         }
         self.t = t;
@@ -255,8 +264,20 @@ pub fn open_for_selection(world: &mut World) {
         .filter(|o| ops.as_ref().is_none_or(|v| v.contains(&o.id)))
         .map(|o| o.id)
         .collect();
-    let missing: Vec<CamId> = wanted
+    // The toolpaths before the first one previewed: their in-process stock is where it starts.
+    let first = setup
+        .operations
         .iter()
+        .position(|o| wanted.contains(&o.id))
+        .unwrap_or(0);
+    let before: Vec<CamId> = setup.operations[..first]
+        .iter()
+        .filter(|o| !o.suppressed && matches!(o.kind, OpKind::Toolpath(_)))
+        .map(|o| o.id)
+        .collect();
+    let missing: Vec<CamId> = before
+        .iter()
+        .chain(&wanted)
         .copied()
         .filter(|o| world.resource::<Computed>().current(*o).is_none())
         .collect();
@@ -280,6 +301,23 @@ pub fn open_for_selection(world: &mut World) {
             return;
         }
     };
+    let prior: Vec<(Tool, Vec<Segment>)> = if before.is_empty() {
+        Vec::new()
+    } else {
+        program::setup_run(&cam, job, setup, &parts, &paths, Some(&before))
+            .map(|r| {
+                let rapid = job.machine.as_ref().map_or(5_000.0, |m| m.rapid_rate);
+                r.ops
+                    .iter()
+                    .filter(|o| !o.tilted)
+                    .map(|o| {
+                        let start = o.toolpath.start().unwrap_or([0.0; 3]);
+                        (o.tool.clone(), o.toolpath.motion(start, rapid))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let Some(machine) = job.machine.clone() else {
         return;
     };
@@ -296,6 +334,11 @@ pub fn open_for_selection(world: &mut World) {
             name: o.name.to_string(),
             tool: o.tool.clone(),
             tilted: o.tilted,
+            frame: o
+                .plane
+                .as_ref()
+                .filter(|_| o.tilted)
+                .map(|(wf, _, _)| run.frame.relative(wf)),
             axis: o
                 .plane
                 .as_ref()
@@ -325,7 +368,7 @@ pub fn open_for_selection(world: &mut World) {
         ))
     });
     let beam = machine.kind.is_cutting();
-    let cell = sim::sim_cell(&stock, 0.1);
+    let cell = sim::sim_cell(&stock, 0.25);
     let (map, top) = if beam {
         (None, 0.0)
     } else {
@@ -335,16 +378,20 @@ pub fn open_for_selection(world: &mut World) {
     let analysis = {
         let (tx, rx) = std::sync::mpsc::channel();
         let (stock, segments, spans) = (stock.clone(), segments.clone(), spans.clone());
+        let fixtures = program::workholding_triangles(job, &parts, &run.frame);
         let spawned = std::thread::Builder::new()
             .name("cam-verify".into())
             .spawn(move || {
                 let a = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    analyse(&stock, &model, &segments, &spans, beam, cell)
+                    analyse(
+                        &stock, &model, &fixtures, &prior, &segments, &spans, beam, cell,
+                    )
                 }))
                 .unwrap_or_else(|_| Analysis {
                     summary: "The check failed unexpectedly".into(),
                     collisions: Vec::new(),
                     part: None,
+                    start: None,
                 });
                 let _ = tx.send(a);
             });
@@ -377,15 +424,19 @@ pub fn open_for_selection(world: &mut World) {
         summary: "Checking the run…".into(),
         collisions: Vec::new(),
         paused_at: None,
+        start: None,
         analysis,
     });
 }
 
 /// Simulates the whole run: the summary line, the collisions' times and (mills) the part on
 /// the stock's grid.
+#[allow(clippy::too_many_arguments)]
 fn analyse(
     stock: &Stock,
     model: &cadrs_core::cam::cadrs_cam::model::Model,
+    fixtures: &[[P3; 3]],
+    prior: &[(Tool, Vec<Segment>)],
     segments: &[Segment],
     spans: &[OpSpan],
     beam: bool,
@@ -412,8 +463,8 @@ fn analyse(
     let tilted = spans.iter().filter(|s| s.tilted).count();
     let not_simulated = match tilted {
         0 => String::new(),
-        1 => " · 1 tilted operation not simulated".into(),
-        n => format!(" · {n} tilted operations not simulated"),
+        1 => " · 1 tilted operation checked against the part only".into(),
+        n => format!(" · {n} tilted operations checked against the part only"),
     };
     if beam {
         let r = sim::simulate_sheet(stock, model, &ops);
@@ -432,9 +483,16 @@ fn analyse(
             summary,
             collisions: Vec::new(),
             part: None,
+            start: None,
         };
     }
-    let r = sim::simulate_mill(stock, model, &ops, cell);
+    // From the stock the toolpaths before leave.
+    let before: Vec<SimOp> = prior
+        .iter()
+        .map(|(tool, segments)| SimOp { tool, segments })
+        .collect();
+    let start = sim::in_process(stock, &before, cell);
+    let r = sim::simulate_mill_on(start.clone(), model, fixtures, &ops);
     let tl = Timeline::new(segments.to_vec());
     let mut collisions = Vec::new();
     for (k, p) in r.rapid_hits.iter() {
@@ -443,20 +501,72 @@ fn analyse(
             format!("{}: a rapid runs into the stock", spans[*k].name),
         ));
     }
+    for (k, p) in r.fixture_hits.iter() {
+        collisions.push((
+            time_near(&tl, spans, *k, *p),
+            format!("{}: the tool runs into the workholding", spans[*k].name),
+        ));
+    }
     for (k, p) in r.holder_hits.iter() {
         collisions.push((
             time_near(&tl, spans, *k, *p),
             format!("{}: the shank or holder meets the stock", spans[*k].name),
         ));
     }
+    // The tilted operations: in their own frames, against the part and the workholding.
+    let mut gouge_depth = if r.gouge_cells > 0 {
+        r.gouge_depth
+    } else {
+        0.0
+    };
+    for (k, sp) in spans.iter().enumerate() {
+        let Some(f) = sp.frame else { continue };
+        let end = spans.get(k + 1).map_or(segments.len(), |n| n.first);
+        let local = |p: P3| f.to_local(p);
+        let segs: Vec<Segment> = segments[sp.first..end]
+            .iter()
+            .map(|s| Segment {
+                from: local(s.from),
+                to: local(s.to),
+                ..*s
+            })
+            .collect();
+        let tris = |t: &[[P3; 3]]| -> Vec<[P3; 3]> {
+            t.iter()
+                .map(|t| [local(t[0]), local(t[1]), local(t[2])])
+                .collect()
+        };
+        let c = sim::check_against_part(
+            &tris(&model.triangles),
+            &tris(fixtures),
+            &sp.tool,
+            &segs,
+            0.01,
+        );
+        if !c.gouges.is_empty() {
+            gouge_depth = gouge_depth.max(c.gouge_depth);
+        }
+        for (hits, what) in [
+            (&c.rapid_hits, "a rapid runs through the part"),
+            (&c.holder_hits, "the shank or holder meets the part"),
+            (&c.fixture_hits, "the tool runs into the workholding"),
+        ] {
+            for p in hits {
+                collisions.push((
+                    time_near(&tl, spans, k, f.to_world(*p)),
+                    format!("{}: {what}", sp.name),
+                ));
+            }
+        }
+    }
     collisions.sort_by(|a, b| a.0.total_cmp(&b.0));
     let summary = format!(
         "Removed {} mm³ · {} · {}{}",
         fmt0(r.removed),
-        if r.gouge_cells == 0 {
+        if gouge_depth <= 0.0 {
             "no gouges".to_string()
         } else {
-            format!("gouges up to {} mm deep", fmt2(r.gouge_depth))
+            format!("gouges up to {} mm deep", fmt2(gouge_depth))
         },
         if collisions.is_empty() {
             "no collisions".to_string()
@@ -479,6 +589,7 @@ fn analyse(
         summary,
         collisions,
         part: Some(part.eroded()),
+        start: (!prior.is_empty()).then_some(start),
     }
 }
 
@@ -495,12 +606,20 @@ fn poll_analysis(state: Option<ResMut<PreviewState>>) {
             summary: "The check stopped unexpectedly".into(),
             collisions: Vec::new(),
             part: None,
+            start: None,
         },
     };
     s.analysis = None;
     s.summary = got.summary;
     s.collisions = got.collisions;
     s.part = got.part;
+    if let Some(start) = got.start {
+        // Played again from the in-process stock.
+        s.map = Some(start.clone());
+        s.start = Some(start);
+        s.applied = 0;
+        s.cut_to_now();
+    }
     s.mesh_dirty = true;
 }
 
@@ -807,13 +926,20 @@ fn on_button(ev: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut commands: 
             return;
         };
         match name.as_str() {
-            "cam-pv-backplot" => s.mode = Mode::BackPlot,
+            // The toolpath on for the back plot, off over the cut stock (the toggle brings it
+            // back).
+            "cam-pv-backplot" => {
+                s.mode = Mode::BackPlot;
+                s.show_path = true;
+            }
             "cam-pv-verify" => {
                 s.mode = Mode::Verify;
+                s.show_path = false;
                 s.mesh_dirty = true;
             }
             "cam-pv-simulate" => {
                 s.mode = Mode::Simulate;
+                s.show_path = false;
                 s.mesh_dirty = true;
             }
             "cam-pv-run" => {
@@ -1101,8 +1227,21 @@ fn sync_stock_mesh(
 /// A height map as a surface with walls down to its base, coloured by what happened there.
 fn height_mesh(map: &HeightMap, part: Option<&HeightMap>, top: f32, frame: &Frame) -> Mesh {
     let (nx, ny) = (map.nx, map.ny);
-    // At most about 400 × 400 vertices: step over cells for big maps.
-    let step = ((nx.max(ny) as f32 / 400.0).ceil() as usize).max(1);
+    // At most about 600 × 600 vertices: a block of cells to a vertex for big maps, at the
+    // block's highest (so a wall stays where it is instead of aliasing into spikes).
+    let step = ((nx.max(ny) as f32 / 600.0).ceil() as usize).max(1);
+    let block = |i: usize, j: usize| -> f32 {
+        let mut v = EMPTY;
+        for jj in j..(j + step).min(ny) {
+            for ii in i..(i + step).min(nx) {
+                let c = map.at(ii, jj);
+                if c != EMPTY && (v == EMPTY || c > v) {
+                    v = c;
+                }
+            }
+        }
+        v
+    };
     let xs: Vec<usize> = (0..nx).step_by(step).collect();
     let ys: Vec<usize> = (0..ny).step_by(step).collect();
     let base = map
@@ -1118,7 +1257,7 @@ fn height_mesh(map: &HeightMap, part: Option<&HeightMap>, top: f32, frame: &Fram
     let mut col = Vec::with_capacity(xs.len() * ys.len());
     for &j in &ys {
         for &i in &xs {
-            let v = map.at(i, j);
+            let v = block(i, j);
             let z = if v == EMPTY { base } else { v };
             let q = map.point(i, j);
             pos.push(v3(frame.to_world([q[0], q[1], z as f64])).to_array());
@@ -1146,7 +1285,7 @@ fn height_mesh(map: &HeightMap, part: Option<&HeightMap>, top: f32, frame: &Fram
             let (b, c, d) = (a + 1, a + w as u32, a + w as u32 + 1);
             let empty = |k: u32| {
                 let (ii, jj) = (xs[k as usize % w], ys[k as usize / w]);
-                map.at(ii, jj) == EMPTY
+                block(ii, jj) == EMPTY
             };
             if empty(a) || empty(b) || empty(c) || empty(d) {
                 continue;
@@ -1159,20 +1298,29 @@ fn height_mesh(map: &HeightMap, part: Option<&HeightMap>, top: f32, frame: &Fram
         bevy::asset::RenderAssetUsages::default(),
     )
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
     .with_inserted_indices(bevy::mesh::Indices::U32(idx));
-    mesh.compute_smooth_normals();
+    // Flat shaded: a wall the grid steps round (a hole's) reads as facets, not as the streaks
+    // smooth normals draw down a staircase.
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
     // Lit from above right, as the parts are: the colour times a diffuse term.
     let light = Vec3::new(0.35, -0.45, 0.82).normalize();
-    if let Some(bevy::mesh::VertexAttributeValues::Float32x3(normals)) =
-        mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+    let normals: Vec<Vec3> = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+        Some(bevy::mesh::VertexAttributeValues::Float32x3(n)) => {
+            n.iter().map(|v| Vec3::from_array(*v)).collect()
+        }
+        _ => Vec::new(),
+    };
+    if let Some(bevy::mesh::VertexAttributeValues::Float32x4(cols)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_COLOR)
     {
-        for (c, n) in col.iter_mut().zip(normals) {
-            let k = 0.62 + 0.38 * Vec3::from_array(*n).dot(light).max(0.0);
+        for (c, n) in cols.iter_mut().zip(&normals) {
+            let k = 0.62 + 0.38 * n.dot(light).max(0.0);
             for v in c.iter_mut().take(3) {
                 *v *= k;
             }
         }
     }
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
     mesh
 }

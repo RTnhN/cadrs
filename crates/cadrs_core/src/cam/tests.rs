@@ -303,6 +303,30 @@ fn mill_job_end_to_end() {
         "{sheet}"
     );
     assert!(sheet.contains("3 operations, 2 tools"), "{sheet}");
+    // The bore breaks through the plate's (and the stock's) bottom: it says so.
+    assert!(
+        paths[&bore]
+            .warnings
+            .iter()
+            .any(|w| w.contains("below the stock's bottom")),
+        "{:?}",
+        paths[&bore].warnings
+    );
+    // The 18 000 rpm asked for runs at the Fanuc mill's 10 000, the feeds slowed with it,
+    // in the program, the sheet and the toolpath's warnings alike.
+    assert!(nc.contains("S10000 M3") && !nc.contains("S18000"), "{nc}");
+    assert!(
+        sheet.contains("10000 rpm") && sheet.contains("667 mm/min"),
+        "{sheet}"
+    );
+    assert!(
+        paths[&profile]
+            .warnings
+            .iter()
+            .any(|w| w.contains("over the machine's 10000 rpm")),
+        "{:?}",
+        paths[&profile].warnings
+    );
     for name in ["2-axis profile 1", "Bore 1", "2-axis chamfer 1"] {
         assert!(sheet.contains(name), "{name} in {sheet}");
     }

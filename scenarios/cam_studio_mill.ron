@@ -8,11 +8,13 @@
 // 05 Create setup: the program number, machine mating, the work coordinate system at the
 //    stock's top centre (its triad in the view).
 // 06 Create tool: the D6 end mill from the tool library.
-// 07 Create toolpath: 2-axis profile round the outline and the hole, previewed live.
-// 08 the profile calculated: its time in the Jobs list, the toolpath in the view.
-// 09 a second toolpath: Bore (Holes) helix-mills the Ø16 hole.
-// 10 Preview operation: the back plot of the bore 40 % through, the tool in the hole.
-// 11 Verify: the stock as the bore leaves it, with what Verify found.
+// 07 Create toolpath: Bore (Holes) helix-mills the Ø16 hole, previewed live.
+// 08 the bore calculated: its time in the Jobs list, the toolpath in the view.
+// 09 a second toolpath: 2-axis profile round the outline (and the bored hole), down through
+//    the plate on four tabs that hold it in the stock.
+// 10 Preview operation: the back plot of the profile 40 % through.
+// 11 Verify of the profile: from the stock the bore left, cut round the tabs, with what Verify
+//    found.
 // 12 Post: the Fanuc program for the setup (program number, file, machine, units, operations,
 //    the start of the G-code).
 // 13 posted: the toast names the file.
@@ -75,23 +77,26 @@ Scenario(
         Wait(3),
         Click(ui("cam-tb-toolpath")),
         WaitFor("cam-dialog"),
-        MoveTo(1420, 900),
-        Wait(10),
-        Screenshot("07-profile-preview"),
-        Click(ui("cam-dialog-accept")),
-        MoveTo(1420, 900),
-        Wait(5),
-        Screenshot("08-profile"),
-        ExpectText("cam-tree", "2-axis profile 1"),
-        Click(ui("cam-tb-toolpath")),
-        WaitFor("cam-dialog"),
         Click(ui("cam-f-type")),
         Click(ui("cam-f-type-option-3")),
         MoveTo(1420, 900),
         Wait(10),
-        Screenshot("09-bore"),
+        Screenshot("07-bore-preview"),
+        Click(ui("cam-dialog-accept")),
+        MoveTo(1420, 900),
+        Wait(5),
+        Screenshot("08-bore"),
+        ExpectText("cam-tree", "Bore 1"),
+        Click(ui("cam-tb-toolpath")),
+        WaitFor("cam-dialog"),
+        Click(ui("cam-f-tabs")),
+        MoveTo(1420, 900),
+        Wait(10),
+        Screenshot("09-profile-tabs"),
         Click(ui("cam-dialog-accept")),
         Wait(5),
+        ExpectText("cam-tree", "2-axis profile 1"),
+        Custom("cam select op 2"),
         Click(ui("cam-tb-preview")),
         WaitFor("cam-preview-bar"),
         Custom("cam preview-at 0.4"),
@@ -116,7 +121,7 @@ Scenario(
         Screenshot("12-post"),
         // The Fanuc program, its coordinates with decimal points.
         ExpectText("cam-export-preview", "O1001 (JOB 1 SETUP 1)"),
-        ExpectText("cam-export-preview", "G0 X30. Y-23.002 Z10."),
+        ExpectText("cam-export-preview", "G0 X0. Y0. Z10."),
         Click(ui("cam-export-ok")),
         MoveTo(1420, 900),
         Wait(5),

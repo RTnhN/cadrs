@@ -95,6 +95,15 @@ impl Dialect {
         format!("({text})")
     }
 
+    /// A canned cycle's dwell `P` word for `sec` seconds: milliseconds on Fanuc-style controls
+    /// (no point), seconds on LinuxCNC and Mach3.
+    fn cycle_dwell(self, sec: f64) -> String {
+        match self {
+            Dialect::Fanuc | Dialect::Haas => format!("{}", (sec * 1000.0).round()),
+            _ => decimal(sec, 3, false),
+        }
+    }
+
     /// A dwell of `sec` seconds.
     fn dwell(self, sec: f64) -> String {
         match self {
@@ -726,6 +735,8 @@ fn post_moves(
         if b.material > 0 {
             w.block(&format!("M190 P{}", b.material));
             w.block("M66 P3 L3 Q1");
+        } else {
+            w.comment("No material number: the cut uses the material loaded in QtPlasmaC");
         }
         if !b.thc {
             w.block("M62 P2");
@@ -884,7 +895,7 @@ fn post_drill(
             let _ = write!(words, " Q{}", w.num(c.peck));
         }
         if c.dwell > 0.0 {
-            let _ = write!(words, " P{}", (c.dwell * 1000.0).round());
+            let _ = write!(words, " P{}", d.cycle_dwell(c.dwell));
         }
         // (A tap's feed is its pitch × rpm already.)
         w.feed = None;
@@ -1287,6 +1298,53 @@ mod tests {
     }
 
     #[test]
+    fn drill_dwells_suit_the_dialect() {
+        let cycle = DrillCycle {
+            at: [10.0, 20.0],
+            r_plane: 2.0,
+            bottom: -5.0,
+            retract: 10.0,
+            feed: 120.0,
+            kind: CycleKind::Drill,
+            peck: 0.0,
+            dwell: 0.5,
+            pitch: 0.0,
+        };
+        for (d, want) in [
+            (Dialect::Fanuc, " P500"),
+            (Dialect::Haas, " P500"),
+            (Dialect::LinuxCnc, " P0.5"),
+            (Dialect::Mach3, " P0.5"),
+        ] {
+            let mut m = machine(MachineKind::Mill, Dialect::Fanuc);
+            m.dialect = d;
+            let s = PostSettings::for_dialect(d, MachineKind::Mill);
+            let op = NcOperation {
+                name: "Spot".into(),
+                tool: Tool::new(ToolKind::Drill, 5.0),
+                tool_number: 1,
+                toolpath: Toolpath {
+                    steps: vec![Step::Rapid([10.0, 20.0, 10.0]), Step::Drill(cycle)],
+                    warnings: vec![],
+                },
+                coolant: Coolant::Off,
+                datum: 1,
+                stop_before: false,
+                force_tool_change: false,
+                tilt: None,
+            };
+            let p = NcProgram {
+                name: "Holes".into(),
+                number: 1,
+                operations: vec![op],
+            };
+            let nc = post(&p, &m, &s).unwrap();
+            let line = nc.lines().find(|l| l.contains("G82")).expect(&nc);
+            assert!(line.contains(want), "{d:?}: {line}");
+        }
+    }
+
+    #[test]
     fn dwells_and_comments_suit_the_dialect() {
         assert_eq!(Dialect::Fanuc.dwell(1.0), "G4 X1.");
         assert_eq!(Dialect::Haas.dwell(0.5), "G4 X0.5");
@@ -1494,6 +1552,7 @@ mod tests {
                 machine: MachineKind::Mill,
                 params: &p,
                 rest: None,
+                fixtures: &[],
             };
             let tp = generate(&input).unwrap();
             ops.push(NcOperation {

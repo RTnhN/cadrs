@@ -1328,9 +1328,14 @@ pub(super) fn toolpath_fields(
             Unit::Mm,
         ));
         f.push(Field::count("passes", "Radial passes", p.passes as i64));
+        f.push(Field::check(
+            "left-thread",
+            "Left-hand thread",
+            p.left_hand_thread,
+        ));
         f.push(Field::note(
-            "Right-hand threads with a right-hand tool, left-hand with a left-hand one; the \
-             tool's pitch sets the thread's.",
+            "The tool's pitch sets the thread's; climb milling follows the spindle's direction \
+             (a left-hand tool turns M4).",
         ));
     }
     if !matches!(pat, Drill) {

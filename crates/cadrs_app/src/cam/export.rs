@@ -141,6 +141,8 @@ struct Program {
     names: Vec<String>,
     /// The setup sheet (HTML).
     sheet: String,
+    /// What the operator should know before running it.
+    notes: Vec<String>,
 }
 
 fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
@@ -170,12 +172,24 @@ fn program_text(world: &World, s: &ExportSession) -> Result<Program, String> {
         .collect();
     let file = post::file_name(&format!("{} {}", job.name, setup.name), m.dialect);
     let sheet = cadrs_core::cam::sheet::setup_sheet(cam, job, setup, &run, &parts, &file);
+    let mut notes = Vec::new();
+    if m.kind == cadrs_core::cam::cadrs_cam::MachineKind::Plasma
+        && m.dialect == post::Dialect::LinuxCnc
+        && run.ops.iter().any(|o| o.tool.beam.material == 0)
+    {
+        notes.push(
+            "No material number on the torch: QtPlasmaC cuts with the material it has loaded \
+             (set one on the tool)"
+                .to_string(),
+        );
+    }
     Ok(Program {
         nc,
         file,
         machine: format!("{} (post: {})", m.title(), m.dialect.label()),
         names,
         sheet,
+        notes,
     })
 }
 
@@ -188,6 +202,7 @@ fn open_dialog(world: &mut World) {
         file,
         machine,
         names,
+        notes,
         ..
     } = match program_text(world, &s) {
         Ok(x) => x,
@@ -329,6 +344,12 @@ fn open_dialog(world: &mut World) {
                     Name::new("cam-export-summary"),
                     t.text(&summary, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
                 ));
+                for n in &notes {
+                    b.spawn((
+                        Name::new("cam-export-note"),
+                        t.text(n, t.font_sm, FontWeight::NORMAL, t.danger),
+                    ));
+                }
             })
             .footer(move |f| {
                 let t = &tf;

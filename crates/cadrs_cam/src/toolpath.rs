@@ -186,6 +186,33 @@ pub struct Toolpath {
 const ARC_CHORD: f64 = 0.005;
 
 impl Toolpath {
+    /// Brings its spindle speeds down to `max` rpm, slowing every feed by the same ratio so
+    /// each tooth still takes the chip it was set for; the ratio when it had to (else `None`).
+    pub fn limit_spindle(&mut self, max: f64) -> Option<f64> {
+        let fastest = self
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Spindle { rpm, .. } => Some(*rpm),
+                _ => None,
+            })
+            .fold(0.0, f64::max);
+        if max <= 0.0 || fastest <= max + 1e-9 {
+            return None;
+        }
+        let k = max / fastest;
+        for s in &mut self.steps {
+            match s {
+                Step::Spindle { rpm, .. } => *rpm *= k,
+                Step::Feed { feed, .. } | Step::Arc { feed, .. } => *feed *= k,
+                // A tap's feed is its pitch a turn: it follows the spindle the same way.
+                Step::Drill(c) => c.feed *= k,
+                _ => {}
+            }
+        }
+        Some(k)
+    }
+
     pub fn is_empty(&self) -> bool {
         !self.steps.iter().any(|s| {
             matches!(

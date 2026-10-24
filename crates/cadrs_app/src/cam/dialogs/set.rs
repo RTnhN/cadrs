@@ -422,6 +422,7 @@ impl Draft {
                     ("passes", Value::Number(n)) => p.passes = n.clamp(1.0, 50.0) as u32,
                     ("steep", Value::Number(n)) => p.steep_angle = n.clamp(0.0, 90.0),
                     ("thread-d", Value::Number(n)) => p.thread_diameter = n.max(0.0),
+                    ("left-thread", Value::Bool(b)) => p.left_hand_thread = *b,
                     ("direction", Value::Index(i)) => p.direction = Direction::ALL[(*i).min(1)],
                     ("method", Value::Index(i)) => {
                         p.cutting_method = CuttingMethod::ALL[(*i).min(1)]

@@ -35,7 +35,7 @@ use crate::heightmap::HeightMap;
 use crate::machine::MachineKind;
 use crate::model::Model;
 use crate::tool::{Tool, ToolKind};
-use crate::toolpath::{Coolant, CycleKind, Toolpath};
+use crate::toolpath::{Coolant, CycleKind, Step, Toolpath};
 
 /// What a toolpath machines (the dialog's Type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -732,6 +732,9 @@ pub struct Params {
     /// Thread mill: the thread's major diameter (mm; 0 = from the hole).
     #[serde(default)]
     pub thread_diameter: f64,
+    /// Thread mill: a left-hand thread (else right-hand).
+    #[serde(default)]
+    pub left_hand_thread: bool,
     /// Adaptive clearing: the fine levels' spacing between the deep ones (mm; 0 = none).
     #[serde(default)]
     pub fine_step_down: f64,
@@ -777,6 +780,7 @@ impl Params {
             collision: collision::Collision::default(),
             axis: ToolAxis::WorkPlane,
             thread_diameter: 0.0,
+            left_hand_thread: false,
             fine_step_down: 0.0,
             speeds: Speeds {
                 spindle_rpm: c.spindle_rpm,
@@ -1018,6 +1022,9 @@ pub struct Input<'a> {
     pub params: &'a Params,
     /// The stock as the operations before left it (rest machining, re-machining).
     pub rest: Option<&'a HeightMap>,
+    /// The workholding's triangles (vises, clamps, fixture plates): never cut, never touched
+    /// by the tool or its holder ([`collision::apply`]).
+    pub fixtures: &'a [[crate::geom::P3; 3]],
 }
 
 impl Input<'_> {
@@ -1116,14 +1123,27 @@ impl Input<'_> {
         self.height(self.params.heights.bottom)
     }
 
-    /// The clearance plane (absolute).
+    /// The highest of the stock, the model and the workholding.
+    fn highest(&self) -> f64 {
+        let fixtures = self
+            .fixtures
+            .iter()
+            .flatten()
+            .map(|p| p[2])
+            .fold(f64::NEG_INFINITY, f64::max);
+        self.stock.bounds.max[2]
+            .max(self.model.bounds().max[2])
+            .max(fixtures)
+    }
+
+    /// The clearance plane (absolute): over the stock, the model and the workholding.
     pub fn clearance(&self) -> f64 {
-        self.stock.bounds.max[2].max(self.model.bounds().max[2]) + self.params.links.clearance
+        self.highest() + self.params.links.clearance
     }
 
     /// The rapid plane (absolute).
     pub fn rapid_plane(&self) -> f64 {
-        self.stock.bounds.max[2].max(self.model.bounds().max[2]) + self.params.links.rapid_distance
+        self.highest() + self.params.links.rapid_distance
     }
 
     /// Depth levels from `top` down to `bottom` by the step down (the first one by the first
@@ -1205,11 +1225,32 @@ pub fn generate(input: &Input) -> Result<Toolpath, String> {
         Pattern::Etch => beam::etch(input),
         Pattern::Fill => beam::fill(input),
     }?;
-    let tp = if input.machine.is_milling() {
+    let mut tp = if input.machine.is_milling() {
         collision::apply(input, tp)
     } else {
         tp
     };
+    // Through the bottom of the stock (a hole's break-through, a profile's cut-off): whatever
+    // the part sits on is there.
+    if input.machine.is_milling() {
+        let lowest = tp
+            .steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Feed { to, .. } | Step::Arc { to, .. } => Some(to[2]),
+                Step::Drill(c) => Some(c.bottom),
+                _ => None,
+            })
+            .fold(f64::INFINITY, f64::min);
+        let under = input.stock.bounds.min[2] - lowest;
+        if under > 1e-3 {
+            tp.warnings.push(format!(
+                "It cuts {} mm below the stock's bottom: what the part sits on must be clear \
+                 there (parallels, a spoil board)",
+                crate::tool::fmt_mm(under)
+            ));
+        }
+    }
     if tp.is_empty() {
         return Err(format!(
             "{} found nothing to cut{}",
@@ -1399,6 +1440,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         let l = input.levels(21.0, 0.0, true);
         assert_eq!(*l.last().unwrap(), 0.0);

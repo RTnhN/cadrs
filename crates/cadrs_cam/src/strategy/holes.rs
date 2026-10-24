@@ -254,9 +254,10 @@ fn thread_major(h: &Hole, pitch: f64, set: f64) -> f64 {
     }
 }
 
-/// Thread mill: each hole threaded by a helix, a pitch a turn. Climb milling: a right-hand
-/// thread from the bottom up (counter-clockwise), a left-hand one (a left-hand tool) from the
-/// top down; conventional the other way. In from the middle on a half circle, out the same.
+/// Thread mill: each hole threaded by a helix, a pitch a turn. Climb milling (with the spindle
+/// clockwise) runs counter-clockwise: a right-hand thread from the bottom up, a left-hand one
+/// from the top down; conventional, or a left-hand tool, the other way round. In from the
+/// middle on a half circle, out the same.
 pub fn thread_mill(input: &Input) -> Result<Toolpath, String> {
     let p = input.params;
     let t = input.tool;
@@ -272,11 +273,11 @@ pub fn thread_mill(input: &Input) -> Result<Toolpath, String> {
     let clearance = input.clearance();
     let pitch = t.pitch;
     let climb = p.direction == super::Direction::Climb;
-    let right = t.hand == crate::tool::Hand::Right;
-    // Counter-clockwise when climbing (the wall outside the circle on the right); up when that
-    // turn makes the thread's hand.
-    let ccw = climb;
-    let up = ccw == right;
+    // Climb is counter-clockwise round a hole's wall with the spindle turning clockwise (M3), the
+    // other way with a left-hand tool (M4).
+    let ccw = climb != (t.hand == crate::tool::Hand::Left);
+    // A right-hand thread rises turning counter-clockwise.
+    let up = ccw != p.left_hand_thread;
     let mut too_big = 0;
     for h in holes {
         let major = thread_major(&h, pitch, p.thread_diameter);
@@ -408,6 +409,7 @@ mod tests {
             machine: MachineKind::Mill,
             params: &p,
             rest: None,
+            fixtures: &[],
         };
         generate(&input)
     }
@@ -486,6 +488,65 @@ mod tests {
         assert!((cuts.first().unwrap().0[2] + 1.0).abs() < 1e-9);
         assert!((cuts.last().unwrap().0[2] - 10.0).abs() < 1e-9);
         // (The two Ø6 holes are too small for it: every turn is round the Ø20.)
+    }
+
+    /// The thread's hand and the cutting direction, with either spindle direction: a
+    /// right-hand thread always rises turning counter-clockwise (or falls turning clockwise).
+    #[test]
+    fn thread_hand_and_direction() {
+        for left_thread in [false, true] {
+            for climb in [true, false] {
+                for left_tool in [false, true] {
+                    let mut tool = Tool::new(ToolKind::ThreadMill, 12.0);
+                    tool.pitch = 2.0;
+                    if left_tool {
+                        tool.hand = crate::tool::Hand::Left;
+                    }
+                    let m = plate();
+                    let stock = Stock::block(Aabb::new([0.0, 0.0, 0.0], [80.0, 40.0, 10.0]));
+                    let mut p = Params::new(Pattern::ThreadMill, &tool, MachineKind::Mill);
+                    p.left_hand_thread = left_thread;
+                    p.direction = if climb {
+                        crate::strategy::Direction::Climb
+                    } else {
+                        crate::strategy::Direction::Conventional
+                    };
+                    let input = Input {
+                        model: &m,
+                        stock: &stock,
+                        tool: &tool,
+                        machine: MachineKind::Mill,
+                        params: &p,
+                        rest: None,
+                        fixtures: &[],
+                    };
+                    let tp = generate(&input).unwrap();
+                    let cuts: Vec<(P3, bool)> = tp
+                        .steps
+                        .iter()
+                        .filter_map(|s| match s {
+                            Step::Arc {
+                                to,
+                                cw,
+                                kind: FeedKind::Cut,
+                                ..
+                            } => Some((*to, *cw)),
+                            _ => None,
+                        })
+                        .collect();
+                    let cw = cuts[0].1;
+                    let rising = cuts[1].0[2] > cuts[0].0[2];
+                    // Right-hand: rising and counter-clockwise go together.
+                    assert_eq!(
+                        rising == !cw,
+                        !left_thread,
+                        "{left_thread} {climb} {left_tool}"
+                    );
+                    // Climb: counter-clockwise with M3, clockwise with M4.
+                    assert_eq!(!cw, climb != left_tool, "{left_thread} {climb} {left_tool}");
+                }
+            }
+        }
     }
 
     #[test]

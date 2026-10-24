@@ -50,6 +50,23 @@ pub fn job_workholding<'a>(job: &Job, parts: &'a [Part]) -> Vec<&'a Part> {
         .collect()
 }
 
+/// The workholding's triangles in `frame`'s coordinates (from the display meshes: obstacles,
+/// so their tessellation's few hundredths don't matter beside the clearances).
+pub fn workholding_triangles(job: &Job, parts: &[Part], frame: &Frame) -> Vec<[P3; 3]> {
+    let mut out = Vec::new();
+    for p in job_workholding(job, parts) {
+        let s = &p.solid;
+        out.extend(s.indices.chunks(3).map(|t| {
+            [
+                frame.to_local(s.positions[t[0] as usize]),
+                frame.to_local(s.positions[t[1] as usize]),
+                frame.to_local(s.positions[t[2] as usize]),
+            ]
+        }));
+    }
+    out
+}
+
 /// The box of parts' display meshes in `frame`'s coordinates.
 pub fn parts_box(parts: &[&Part], frame: &Frame) -> Aabb {
     Aabb::of(
@@ -234,6 +251,8 @@ pub struct OpInput {
     /// The parts to send to the kernel: (features, part ids).
     pub parts: Vec<crate::ids::PartId>,
     pub tolerance: f64,
+    /// The workholding in the frame: kept clear of.
+    pub fixtures: Vec<[P3; 3]>,
 }
 
 /// An operation's input, or why it can't be computed.
@@ -266,6 +285,7 @@ pub fn op_input(cam: &CamStudio, op: CamId, parts: &[Part]) -> Result<OpInput, S
         machine,
         parts: bodies.iter().map(|p| p.id).collect(),
         tolerance: tp.params.tolerance,
+        fixtures: workholding_triangles(job, parts, &frame),
     })
 }
 
@@ -287,6 +307,9 @@ pub fn op_key(input: &OpInput, features: u64) -> u64 {
     h.update(format!("{:?}", input.machine.kind).as_bytes());
     h.update(format!("{:?}", input.stock).as_bytes());
     h.update(format!("{:?}", input.parts).as_bytes());
+    for t in &input.fixtures {
+        h.update(format!("{t:?}").as_bytes());
+    }
     h.update(&features.to_le_bytes());
     let b = h.finalize();
     u64::from_le_bytes(b.as_bytes()[..8].try_into().unwrap())
@@ -305,8 +328,23 @@ pub fn generate(
         machine: input.machine.kind,
         params: &input.params,
         rest,
+        fixtures: &input.fixtures,
     };
-    cadrs_cam::generate(&strategy_input)
+    let mut tp = cadrs_cam::generate(&strategy_input)?;
+    // Not faster than the machine's spindle goes (the feeds follow, keeping the chip load).
+    if input.machine.kind.is_milling()
+        && let Some(k) = tp.limit_spindle(input.machine.max_spindle)
+    {
+        tp.warnings.push(format!(
+            "The spindle speed ({} rpm) is over the machine's {} rpm: it runs at {} rpm with \
+             the feeds slowed to {} % to keep the chip load",
+            input.params.speeds.spindle_rpm.round(),
+            input.machine.max_spindle.round(),
+            input.machine.max_spindle.round(),
+            (k * 100.0).round()
+        ));
+    }
+    Ok(tp)
 }
 
 /// The heights a toolpath wants exact sections at (ask the kernel for them with the model).
@@ -318,6 +356,7 @@ pub fn section_levels(input: &OpInput, model: &Model) -> Vec<f64> {
         machine: input.machine.kind,
         params: &input.params,
         rest: None,
+        fixtures: &[],
     })
 }
 
@@ -565,7 +604,10 @@ pub fn simulate(
         SimResult::Sheet(Box::new(sim::simulate_sheet(&stock, &model, &ops)))
     } else {
         let cell = sim::sim_cell(&stock, quality);
-        SimResult::Mill(Box::new(sim::simulate_mill(&stock, &model, &ops, cell)))
+        let fixtures = workholding_triangles(job, parts, &run.frame);
+        SimResult::Mill(Box::new(sim::simulate_mill_with(
+            &stock, &model, &fixtures, &ops, cell,
+        )))
     })
 }
 
