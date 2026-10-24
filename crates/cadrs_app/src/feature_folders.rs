@@ -561,22 +561,30 @@ fn place_drop_line(
             .find(|f| f.id == folder)
             .and_then(|f| f.features.iter().find(|x| order.contains(x)).copied())
     };
-    // The feature the moved ones go before, and the folder they join.
-    let (before, folder): (Option<FeatureId>, Option<FeatureId>) = match rows.get(k).map(|r| &r.3) {
-        None => (None, None),
-        Some(Row::Folder(f)) => (first_of(*f), None),
-        Some(Row::Feature(id, inf)) => {
-            // Inside a folder when the row above is of the same folder (or is its header).
-            let joined = inf.filter(|f| {
-                k > 0
-                    && match &rows[k - 1].3 {
-                        Row::Folder(g) => g == f,
-                        Row::Feature(_, g) => *g == Some(*f),
-                    }
-            });
-            (Some(*id), joined)
-        }
-    };
+    // The feature the moved ones go before: the first row from the gap on that isn't one of
+    // them (the line just above a dragged row is its own place, #70; not the list's end).
+    let dragged = |r: &Row| matches!(r, Row::Feature(id, _) if drag.features.contains(id));
+    let next = rows[k..]
+        .iter()
+        .position(|r| !dragged(&r.3))
+        .map_or(rows.len(), |i| k + i);
+    // And the folder they join.
+    let (before, folder): (Option<FeatureId>, Option<FeatureId>) =
+        match rows.get(next).map(|r| &r.3) {
+            None => (None, None),
+            Some(Row::Folder(f)) => (first_of(*f), None),
+            Some(Row::Feature(id, inf)) => {
+                // Inside a folder when the row above is of the same folder (or is its header).
+                let joined = inf.filter(|f| {
+                    k > 0
+                        && match &rows[k - 1].3 {
+                            Row::Folder(g) => g == f,
+                            Row::Feature(_, g) => *g == Some(*f),
+                        }
+                });
+                (Some(*id), joined)
+            }
+        };
     let mut to = before
         .and_then(|b| order.iter().position(|x| *x == b))
         .unwrap_or(order.len());
