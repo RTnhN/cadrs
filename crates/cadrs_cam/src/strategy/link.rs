@@ -5,7 +5,7 @@
 use crate::geom::{P2, P3, dist2, lerp2};
 use crate::toolpath::{FeedKind, Step, Toolpath};
 
-use super::path::{Contour, lead_arc, lead_out_arc, ramp_along, with_tabs};
+use super::path::{Contour, lead_arc, lead_out_arc, ramp_along, sub_walk, with_tabs};
 use super::{Entry, Input, LeadKind, LinkAction};
 
 /// Points along an XY arc from `a` to `b` about `c` (for checking what a lead sweeps).
@@ -266,7 +266,23 @@ impl<'a> Builder<'a> {
                 self.finish_contour(c, z, cut, true);
                 return;
             }
-            self.feed([entry_xy[0], entry_xy[1], z], FeedKind::Plunge);
+            // Tabs on this contour: a ramp back and forth along its start, which is clear of
+            // them (they're centred between the start and the end of each stretch).
+            match tabs_here {
+                Some((_, count, width))
+                    if cut.ramp && lead_in.is_none() && l.entry == Entry::Ramp =>
+                {
+                    let total: f64 = walk.windows(2).map(|w| dist2(w[0], w[1])).sum();
+                    let room = total / count.max(1) as f64 / 2.0 - width / 2.0;
+                    let run = room.min(self.input.tool.diameter * 2.0);
+                    if run > self.input.tool.radius() * 0.5 {
+                        self.zigzag_ramp(&sub_walk(&walk, 0.0, run), z);
+                    } else {
+                        self.feed([entry_xy[0], entry_xy[1], z], FeedKind::Plunge);
+                    }
+                }
+                _ => self.feed([entry_xy[0], entry_xy[1], z], FeedKind::Plunge),
+            }
         }
         if let Some((_, arc)) = lead_in {
             match arc {
@@ -276,6 +292,14 @@ impl<'a> Builder<'a> {
         }
         match tabs_here {
             Some((top, count, width)) => {
+                let total: f64 = walk.windows(2).map(|w| dist2(w[0], w[1])).sum();
+                if width * count as f64 >= total * 0.8 {
+                    let w =
+                        "A contour too short for its tabs was cut through without them".to_string();
+                    if !self.warnings.contains(&w) {
+                        self.warnings.push(w);
+                    }
+                }
                 for q in with_tabs(&walk, z, top, count, width).iter().skip(1) {
                     self.feed(*q, FeedKind::Cut);
                 }
@@ -287,6 +311,42 @@ impl<'a> Builder<'a> {
             }
         }
         self.finish_contour(c, z, cut, false);
+    }
+
+    /// Down to `z` from where the tool is, back and forth along `stretch` (from its start) at
+    /// the ramp angle, ending back at its start at depth.
+    fn zigzag_ramp(&mut self, stretch: &[P2], z: f64) {
+        let Some(from) = self.at else { return };
+        if stretch.len() < 2 {
+            self.feed([stretch[0][0], stretch[0][1], z], FeedKind::Plunge);
+            return;
+        }
+        let len: f64 = stretch.windows(2).map(|w| dist2(w[0], w[1])).sum();
+        let drop = len
+            * self
+                .input
+                .params
+                .links
+                .ramp_angle
+                .clamp(0.5, 45.0)
+                .to_radians()
+                .tan();
+        let back: Vec<P2> = stretch.iter().rev().copied().collect();
+        let mut h = from[2];
+        let mut forward = true;
+        while h > z + 1e-9 || !forward {
+            let leg = if forward { stretch } else { &back[..] };
+            let target = (h - drop).max(z);
+            // Down evenly along the leg.
+            let mut s = 0.0;
+            for w in leg.windows(2) {
+                s += dist2(w[0], w[1]);
+                let zz = h + (target - h) * (s / len).min(1.0);
+                self.feed([w[1][0], w[1][1], zz], FeedKind::Ramp);
+            }
+            h = target;
+            forward = !forward;
+        }
     }
 
     /// The overlap past the start of a closed contour and the lead-out.

@@ -22,7 +22,7 @@ use crate::toolpath::{FeedKind, Step, Toolpath};
 use super::link::{Builder, arc_path};
 use super::path::{
     Contour, chain, hatch, inner_point, lead_arc, nearest_order, nearest_order_indexed,
-    region_contours,
+    region_contours, sub_walk,
 };
 use super::{CuttingMethod, Direction, Input, LeadKind, Side};
 
@@ -176,30 +176,6 @@ fn lead_for(
     (dist2(mid, pt) > kerf && fits(mid, &[mid, pt])).then_some((mid, None))
 }
 
-/// The part of a walk between arc lengths `s0` and `s1`.
-fn sub_path(walk: &[P2], s0: f64, s1: f64) -> Vec<P2> {
-    let mut out = Vec::new();
-    let mut s = 0.0;
-    for w in walk.windows(2) {
-        let l = dist2(w[0], w[1]);
-        let (a, b) = (s, s + l);
-        s = b;
-        if l <= 0.0 || b < s0 || a > s1 {
-            continue;
-        }
-        if out.is_empty() {
-            out.push(lerp2(w[0], w[1], ((s0 - a) / l).clamp(0.0, 1.0)));
-        }
-        if b <= s1 {
-            out.push(w[1]);
-        } else {
-            out.push(lerp2(w[0], w[1], ((s1 - a) / l).clamp(0.0, 1.0)));
-            break;
-        }
-    }
-    out
-}
-
 /// Splits a closed walk into the pieces between `count` gaps of `width`, evenly spaced along
 /// it (the first half a spacing from the start).
 fn microjoint_pieces(walk: &[P2], count: usize, width: f64) -> Vec<Vec<P2>> {
@@ -212,10 +188,10 @@ fn microjoint_pieces(walk: &[P2], count: usize, width: f64) -> Vec<Vec<P2>> {
     let mut s = 0.0;
     for i in 0..count {
         let c = spacing * (i as f64 + 0.5);
-        pieces.push(sub_path(walk, s, c - width / 2.0));
+        pieces.push(sub_walk(walk, s, c - width / 2.0));
         s = c + width / 2.0;
     }
-    pieces.push(sub_path(walk, s, total));
+    pieces.push(sub_walk(walk, s, total));
     pieces.retain(|p| p.len() >= 2);
     pieces
 }

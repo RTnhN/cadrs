@@ -404,6 +404,30 @@ pub fn with_tabs(walk: &[P2], z: f64, tab_top: f64, count: usize, width: f64) ->
     out
 }
 
+/// The part of a walk between arc lengths `s0` and `s1`.
+pub fn sub_walk(walk: &[P2], s0: f64, s1: f64) -> Vec<P2> {
+    let mut out = Vec::new();
+    let mut s = 0.0;
+    for w in walk.windows(2) {
+        let l = dist2(w[0], w[1]);
+        let (a, b) = (s, s + l);
+        s = b;
+        if l <= 0.0 || b < s0 || a > s1 {
+            continue;
+        }
+        if out.is_empty() {
+            out.push(lerp2(w[0], w[1], ((s0 - a) / l).clamp(0.0, 1.0)));
+        }
+        if b <= s1 {
+            out.push(w[1]);
+        } else {
+            out.push(lerp2(w[0], w[1], ((s1 - a) / l).clamp(0.0, 1.0)));
+            break;
+        }
+    }
+    out
+}
+
 /// A tangent arc lead of `radius` sweeping `sweep_deg` onto (or off) the point `p` with unit
 /// tangent `t`, on the side `side` (+1 left of the tangent, −1 right). Returns the far end and
 /// the arc's centre and direction (clockwise), for a lead-in arc from the far end to `p`.

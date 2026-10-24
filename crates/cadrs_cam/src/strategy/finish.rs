@@ -288,6 +288,37 @@ pub fn pencil(input: &Input) -> Result<Toolpath, String> {
     follow(input, ordered, false)
 }
 
+/// A cutter whose surface is `tool`'s grown by `s` all round (a flat end's becomes a bull
+/// nose with corner `s`), and how far its tip sits under `tool`'s: dropped onto the model, it
+/// leaves `s` of stock along the surface's normal, on walls as on floors. Cones are left as
+/// they are (`s` straight up).
+pub(super) fn offset_cutter(tool: &crate::tool::Tool, s: f64) -> (crate::tool::Tool, f64) {
+    use crate::tool::ToolKind::*;
+    let mut t = tool.clone();
+    if s <= 0.0 {
+        return (t, 0.0);
+    }
+    match tool.kind {
+        BallMill => {
+            t.diameter += 2.0 * s;
+            t.corner_radius = t.diameter / 2.0;
+        }
+        EndMill | FaceMill => {
+            t.kind = BullMill;
+            t.diameter += 2.0 * s;
+            t.corner_radius = s;
+        }
+        BullMill => {
+            t.diameter += 2.0 * s;
+            t.corner_radius += s;
+        }
+        _ => return (t, s),
+    }
+    // The grown cutter's tip is `s` under the true one's (its surface `s` out along the
+    // normal everywhere, the bottom too).
+    (t, s)
+}
+
 fn polyline_len(pts: &[P2]) -> f64 {
     pts.windows(2).map(|w| dist2(w[0], w[1])).sum()
 }
@@ -306,18 +337,22 @@ fn follow(input: &Input, lines: Vec<Vec<P2>>, link_close: bool) -> Result<Toolpa
     let mut b = Builder::new(input);
     // Half the tolerance for the drops, half for simplifying them: within it in all.
     let tol = p.tolerance * 0.5;
+    // The stock to leave, all round: the wall stock as an offset of the surface (a cutter
+    // grown by it, dropped, then lifted by it), the floor stock's extra straight up.
+    let (dropped, lift) = offset_cutter(input.tool, p.wall_stock.max(0.0));
+    let extra = (p.floor_stock - p.wall_stock).max(0.0);
     let drop = |pts: &[P2]| -> Vec<P3> {
         drop_line(
-            input.tool,
+            &dropped,
             &idx,
             pts,
-            bottom - p.floor_stock,
+            bottom - lift - extra,
             step,
             tol,
             min_step,
         )
         .into_iter()
-        .map(|q| [q[0], q[1], (q[2] + p.floor_stock).max(bottom)])
+        .map(|q| [q[0], q[1], (q[2] + lift + extra).max(bottom)])
         .collect()
     };
     let mut prev_end: Option<P3> = None;
@@ -768,5 +803,43 @@ mod tests {
         ] {
             assert!(pts.iter().any(|q| side(q) && (q[2] - 12.0).abs() < 0.05));
         }
+    }
+
+    /// 0.5 mm of stock on a vertical wall: the ball keeps its surface 0.5 off it (where the
+    /// old straight-up stock kept it 0 off on the wall), and 0.5 over the floor.
+    #[test]
+    fn stock_is_left_along_the_normal() {
+        let (tp, tool) = on_pocket(Pattern::Parallel, |p| {
+            p.wall_stock = 0.5;
+            p.floor_stock = 0.5;
+            p.angle = 0.0;
+            p.step_over = 0.5;
+        });
+        let m = crate::strategy::testing::pocket_block();
+        // The model grown by 0.5: nothing of the toolpath goes into it.
+        let mut grown = tool.clone();
+        grown.diameter += 1.0;
+        grown.corner_radius = grown.diameter / 2.0;
+        let lifted = Toolpath {
+            steps: tp
+                .steps
+                .iter()
+                .map(|s| match s {
+                    Step::Feed { to, feed, kind } => Step::Feed {
+                        to: [to[0], to[1], to[2] - 0.5],
+                        feed: *feed,
+                        kind: *kind,
+                    },
+                    Step::Rapid(p) => Step::Rapid([p[0], p[1], p[2] - 0.5]),
+                    s => s.clone(),
+                })
+                .collect(),
+            warnings: vec![],
+        };
+        let (g, at) = crate::strategy::testing::max_gouge_within(&m, &grown, &lifted, 0.01);
+        assert!(g < 1e-6, "{g} at {at:?}");
+        // On the pocket's floor, 0.5 up.
+        let pts = cut_points(&tp);
+        assert!(pts.iter().any(|q| (q[2] - 12.5).abs() < 1e-6), "{pts:?}");
     }
 }

@@ -979,6 +979,40 @@ mod tests {
         }
     }
 
+    /// With tabs and no room for a lead (leads off), the levels under the tabs' top ramp in
+    /// back and forth along the contour's start: no plunge deeper than the feed distance.
+    #[test]
+    fn tabbed_levels_ramp_in() {
+        let tp = run(Pattern::Profile2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
+            p.step_down = 5.0;
+            p.tabs.enabled = true;
+            p.links.lead_in = crate::strategy::LeadKind::None;
+            p.links.lead_out = crate::strategy::LeadKind::None;
+        });
+        let mut at = [0.0, 0.0, 100.0];
+        let mut ramps = 0;
+        for s in &tp.steps {
+            match s {
+                Step::Feed { to, kind, .. } => {
+                    if *kind == crate::toolpath::FeedKind::Plunge {
+                        assert!(
+                            at[2] - to[2] <= 1.0 + 1e-6,
+                            "a plunge from {at:?} to {to:?}"
+                        );
+                    }
+                    if *kind == crate::toolpath::FeedKind::Ramp {
+                        ramps += 1;
+                    }
+                    at = *to;
+                }
+                Step::Rapid(p) => at = *p,
+                Step::Arc { to, .. } => at = *to,
+                _ => {}
+            }
+        }
+        assert!(ramps > 0);
+    }
+
     #[test]
     fn climb_profile_runs_clockwise_round_the_outline() {
         let tp = run(Pattern::Profile2D, Tool::new(ToolKind::EndMill, 6.0), |p| {
