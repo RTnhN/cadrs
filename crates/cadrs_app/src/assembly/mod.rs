@@ -78,6 +78,7 @@ use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
+use cadrs_core::assembly::commands::DeleteMateFeatures;
 use cadrs_core::assembly::{Instance, InstanceId, Pose};
 use cadrs_core::rebuild::Build;
 use cadrs_core::{Element, ElementId, Feature, FeatureId, PartId};
@@ -914,7 +915,19 @@ fn assembly_keys(
             {
                 commands.queue(move |world: &mut World| {
                     let instances = selected_instances(world.resource::<Selection>());
-                    delete_instances(world, element, instances);
+                    if !instances.is_empty() {
+                        delete_instances(world, element, instances);
+                        return;
+                    }
+                    // #64: with no instance selected, the mate selected in the list (its row
+                    // stays highlighted while parts are picked, so it is only the fallback).
+                    if let Some(mate) = world
+                        .get_resource_mut::<mate_display::MateSelection>()
+                        .and_then(|mut s| s.0.take())
+                    {
+                        let mates = vec![mate];
+                        run(world, &DeleteMateFeatures { element, mates });
+                    }
                 });
             }
             KeyCode::KeyM if !shift => {
@@ -1095,6 +1108,48 @@ mod deletion_tests {
                 1
             );
         }
+    }
+
+    #[test]
+    fn delete_removes_the_mate_selected_in_the_list() {
+        use cadrs_core::assembly::mate::{MateFeature, MateId, MateKind};
+        let (mut app, element, ids) = scene();
+        let mate = MateId::new();
+        let group = MateKind::Group {
+            instances: vec![ids[0], ids[2]],
+        };
+        let mut active = app.world_mut().resource_mut::<ActiveDocument>();
+        let asm = &mut active.doc.elements[1].assembly;
+        asm.mates = vec![MateFeature::new(mate, "Group 1", group)];
+        app.world_mut().resource_mut::<Selection>().0.clear();
+        app.insert_resource(mate_display::MateSelection(Some(mate)));
+        press(&mut app, KeyCode::Delete, false);
+        let active = app.world().resource::<ActiveDocument>();
+        let asm = &active.doc.element(element).unwrap().assembly;
+        assert!(asm.mates.is_empty());
+        assert_eq!(asm.instances.len(), 3);
+        assert_eq!(active.history.undo_len(), 1);
+        let sel = app.world().resource::<mate_display::MateSelection>();
+        assert_eq!(sel.0, None);
+    }
+
+    #[test]
+    fn selected_instances_win_over_the_selected_mate() {
+        use cadrs_core::assembly::mate::{MateFeature, MateId, MateKind};
+        let (mut app, element, ids) = scene();
+        let mate = MateId::new();
+        let group = MateKind::Group {
+            instances: vec![ids[1], ids[2]],
+        };
+        let mut active = app.world_mut().resource_mut::<ActiveDocument>();
+        let asm = &mut active.doc.elements[1].assembly;
+        asm.mates = vec![MateFeature::new(mate, "Group 1", group)];
+        app.insert_resource(mate_display::MateSelection(Some(mate)));
+        press(&mut app, KeyCode::Delete, false);
+        let asm = &app.world().resource::<ActiveDocument>().doc;
+        let asm = &asm.element(element).unwrap().assembly;
+        assert_eq!(asm.instances.len(), 2);
+        assert_eq!(asm.mates.len(), 1);
     }
 
     #[test]
