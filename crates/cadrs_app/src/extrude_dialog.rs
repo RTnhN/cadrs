@@ -1119,7 +1119,7 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Role>, mut commands: Commands) {
             change(&mut commands, "Body type", move |e| {
                 e.body = body;
                 if body == BodyType::Surface {
-                    e.op = BooleanOp::New;
+                    set_op(e, BooleanOp::New);
                 }
             });
         }
@@ -1131,10 +1131,19 @@ fn on_tab(ev: On<TabStripSelect>, q: Query<&Role>, mut commands: Commands) {
                     s.op_auto = false;
                 }
             });
-            change(&mut commands, op.label(), move |e| e.op = op);
+            change(&mut commands, op.label(), move |e| set_op(e, op));
         }
         _ => {}
     }
+}
+
+/// Sets the operation, flipping the direction when it changes to or from Remove: a cut goes
+/// into the material an Add would grow out of, so the sign needn't be flipped by hand.
+fn set_op(e: &mut ExtrudeFeature, op: BooleanOp) {
+    if (e.op == BooleanOp::Remove) != (op == BooleanOp::Remove) {
+        e.flip = !e.flip;
+    }
+    e.op = op;
 }
 
 fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
@@ -1479,4 +1488,22 @@ fn on_list_activate(ev: On<SelectionListActivate>, q: Query<&Role>, mut commands
         _ => return,
     };
     set_field(&mut commands, field);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_flips_the_direction() {
+        let mut e = ExtrudeFeature::default();
+        set_op(&mut e, BooleanOp::Add);
+        assert!(!e.flip);
+        set_op(&mut e, BooleanOp::Remove);
+        assert!(e.flip);
+        set_op(&mut e, BooleanOp::Remove);
+        assert!(e.flip);
+        set_op(&mut e, BooleanOp::Intersect);
+        assert!(!e.flip);
+    }
 }
