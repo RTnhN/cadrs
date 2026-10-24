@@ -794,6 +794,20 @@ fn rgba(c: render::Rgba) -> Color {
 /// A filled area's colour and depth: areas sharing one share a mesh.
 type AreaKey = (render::Rgba, i32);
 
+/// The schematic's colours: KiCad's, on its cream paper in both schemes; in dark, the ground
+/// around the paper is the drawing sheets' dark grey.
+fn schematic_theme() -> render::SchematicTheme {
+    let th = render::SchematicTheme::default();
+    if cadrs_ui::dark_in_force() {
+        render::SchematicTheme {
+            background: [0x2c, 0x2e, 0x33, 0xff],
+            ..th
+        }
+    } else {
+        th
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn rebuild_scene(
     eda: Res<Eda2d>,
@@ -828,6 +842,7 @@ fn rebuild_scene(
         doc.history.undo_len(),
         doc.history.redo_len(),
         &inputs,
+        cadrs_ui::dark_in_force(),
     )
         .hash(&mut h);
     let preview_design = preview.as_ref().and_then(|p| p.get());
@@ -853,14 +868,9 @@ fn rebuild_scene(
                     };
                     if d.schematic.sheets.is_empty() {
                         // A board imported alone: its (first) sheet is blank until edited.
-                        render::schematic(
-                            &Design::new().schematic,
-                            0,
-                            &render::SchematicTheme::default(),
-                            &hl,
-                        )
+                        render::schematic(&Design::new().schematic, 0, &schematic_theme(), &hl)
                     } else {
-                        render::schematic(&d.schematic, 0, &render::SchematicTheme::default(), &hl)
+                        render::schematic(&d.schematic, 0, &schematic_theme(), &hl)
                     }
                 }
                 Mode::Layout => {
@@ -899,7 +909,7 @@ fn rebuild_scene(
                 ),
                 _ => render::symbol_view(
                     comp.symbol.as_ref(),
-                    &render::SchematicTheme::default(),
+                    &schematic_theme(),
                     &inputs.sym_selected,
                 ),
             }
