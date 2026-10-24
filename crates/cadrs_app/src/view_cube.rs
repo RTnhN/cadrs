@@ -1030,6 +1030,7 @@ fn draw_cube(
     mut arcs: Gizmos<CubeArcGizmos>,
     view: Res<ViewportView>,
     theme: Res<Theme>,
+    active: Res<cadrs_ui::ActiveTheme>,
 ) {
     draw_cube_arcs(&mut arcs, &view.view, theme.view_cube_arc());
     let edge = theme.view_cube_edge();
@@ -1051,9 +1052,9 @@ fn draw_cube(
     }
     let o = TRIAD_ORIGIN;
     for (axis, color) in [
-        (Vec3::X, theme.axis_x),
-        (Vec3::Y, theme.axis_y),
-        (Vec3::Z, theme.axis_z),
+        (Vec3::X, active.axis_x),
+        (Vec3::Y, active.axis_y),
+        (Vec3::Z, active.axis_z),
     ] {
         gizmos.line(o, o + axis * TRIAD_LEN, color);
     }

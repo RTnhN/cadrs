@@ -171,7 +171,7 @@ fn defined() -> Color {
 fn conflict() -> Color {
     by_scheme(
         Color::srgb_u8(0xbe, 0x00, 0x00),
-        Color::srgb_u8(0xff, 0x5c, 0x5c),
+        Color::srgb_u8(0xff, 0x80, 0x80),
     )
 }
 fn status_color(s: Status) -> Color {
@@ -239,7 +239,7 @@ fn dimension_text() -> Color {
 fn dimension_driven() -> Color {
     by_scheme(
         Color::srgb_u8(0x95, 0xa1, 0xab),
-        Color::srgb_u8(0x84, 0x90, 0x9b),
+        Color::srgb_u8(0xaa, 0xb4, 0xbe),
     )
 }
 /// Behind dimension values: the sketch plane's colour.
@@ -784,16 +784,11 @@ fn draw_sketches(
                     &units.0,
                     false,
                 );
-                let mut style = if d.driven {
+                let style = if d.driven {
                     DimStyle::driven()
                 } else {
                     DimStyle::normal()
                 };
-                // Over a sketch selected as a whole (its orange fill), dark lines read in dark
-                // too.
-                if whole {
-                    style.line = by_scheme(style.line, Color::srgb_u8(0x1d, 0x1e, 0x21));
-                }
                 draw_dimension(
                     &sk.geometry,
                     &map,

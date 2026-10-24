@@ -1590,6 +1590,7 @@ fn draw_regions(
             t.map(f32::to_bits).hash(&mut h);
         }
         failed.0.hash(&mut h);
+        cadrs_ui::dark_in_force().hash(&mut h);
         h.finish()
     };
     let key: FillKey = (selected.clone(), plain_key, shape);
@@ -1608,7 +1609,11 @@ fn draw_regions(
     } else if sketching.is_some() {
         Color::srgba_u8(0xfd, 0xcc, 0x6e, 0x8c)
     } else {
-        Color::srgba_u8(0xfd, 0xcc, 0x6e, 0xe6)
+        // In dark, a deeper amber, so the light sketch and dimension lines read over it.
+        cadrs_ui::by_scheme(
+            Color::srgba_u8(0xfd, 0xcc, 0x6e, 0xe6),
+            Color::srgba_u8(0x9a, 0x67, 0x16, 0xd9),
+        )
     };
     let mesh = region_fill_mesh(tris);
     match fill.as_mut() {

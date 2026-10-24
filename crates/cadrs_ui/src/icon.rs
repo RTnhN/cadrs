@@ -379,7 +379,12 @@ pub(crate) fn sync_icon_layers(
         let reenabled = parent.is_some_and(|p| enabled_now.contains(&p)) && !disabled;
         if full {
             let alpha = if disabled {
-                0.35
+                // Faded further on dark, where the dark artwork faded as much still reads.
+                if crate::color_scheme::dark_in_force() {
+                    0.22
+                } else {
+                    0.35
+                }
             } else if reenabled {
                 1.0
             } else {

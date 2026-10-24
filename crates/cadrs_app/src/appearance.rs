@@ -1087,6 +1087,7 @@ fn sync_appearance_panel(
                                         ..default()
                                     },
                                     BackgroundColor(color),
+                                    cadrs_ui::KeepFill,
                                     BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
                                     Pickable::IGNORE,
                                 ));

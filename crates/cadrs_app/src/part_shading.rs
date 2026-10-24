@@ -65,8 +65,8 @@ pub struct PartShadingParams {
     /// The section view's planes (`n.extend(n·o)` each, zero for none): a fragment with
     /// `dot(n, p) > w` for every plane (on the removed side of all) is discarded.
     pub clip: [Vec4; crate::section_view::MAX_PLANES],
-    /// x: 1 draws the faces flat white (the hidden-line render modes); y: an opacity factor
-    /// (the Translucent render mode's).
+    /// x: 1 draws the faces flat (the hidden-line render modes), in the grey z (sRGB; white in
+    /// light); y: an opacity factor (the Translucent render mode's).
     pub style: Vec4,
     /// P3E.3b, the analysis tools ([`crate::analysis`]): x the face colouring (0 none, 1 zebra
     /// stripes, 2 draft analysis), y the draft angle needed (degrees), z the zebra stripes per
@@ -82,7 +82,7 @@ impl Default for PartShadingParams {
     fn default() -> Self {
         Self {
             clip: [Vec4::ZERO; crate::section_view::MAX_PLANES],
-            style: Vec4::new(0.0, 1.0, 0.0, 0.0),
+            style: Vec4::new(0.0, 1.0, 1.0, 0.0),
             analysis: Vec4::ZERO,
             pull: Vec4::ZERO,
             bands: [Vec4::ZERO; 6],

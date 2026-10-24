@@ -692,6 +692,7 @@ fn spawn_panel(
                                                 ..default()
                                             },
                                             BackgroundColor(c),
+                                            cadrs_ui::KeepFill,
                                             BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.3)),
                                             Pickable::IGNORE,
                                         ));

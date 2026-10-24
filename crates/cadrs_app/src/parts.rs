@@ -2472,6 +2472,12 @@ fn draw_part_edges(
     // P3E.3b: under the zebra stripes the edges are mid-grey, apart from both bands.
     let edge_color = if analysis.mode == 1 {
         Color::srgb_u8(0x8a, 0x8a, 0x8a)
+    } else if !mode.shaded() {
+        // The hidden-line modes draw the faces in the viewport's grey: light lines in dark.
+        cadrs_ui::by_scheme(
+            Color::srgb_u8(0x14, 0x14, 0x14),
+            Color::srgb_u8(0xd6, 0xd9, 0xde),
+        )
     } else {
         Color::srgb_u8(0x14, 0x14, 0x14)
     };

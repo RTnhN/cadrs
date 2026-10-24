@@ -157,6 +157,10 @@ pub struct SchemeMap {
     tokens: HashMap<(ColorRole, [u8; 3]), Srgba>,
     /// Per role, (light lightness, dark lightness) of the theme's greys, by light lightness.
     curves: HashMap<ColorRole, Vec<(f32, f32)>>,
+    /// How much lighter than the page a raised and a floating surface are (OKLCH lightness):
+    /// what's drawn on them is lifted as much, so a hover stays lighter than its menu and text
+    /// keeps its contrast.
+    lift: [f32; 2],
 }
 
 impl Default for SchemeMap {
@@ -210,7 +214,16 @@ impl SchemeMap {
             }
             *points = kept;
         }
-        Self { tokens, curves }
+        let l = |c: Color| Oklcha::from(c.to_srgba()).lightness;
+        let lift = [
+            l(dark.popover) - l(dark.background),
+            l(dark.floating) - l(dark.background),
+        ];
+        Self {
+            tokens,
+            curves,
+            lift,
+        }
     }
 
     /// The dark-scheme color for `color` painted in `role`. Alpha is kept.
@@ -226,6 +239,11 @@ impl SchemeMap {
         let Some(curve) = self.curves.get(&role).filter(|c| c.len() >= 2) else {
             return color;
         };
+        // A translucent black rule (a swatch's rim, a divider) would vanish on dark: a faint
+        // light one instead.
+        if role == ColorRole::Line && o.chroma < GREY && o.lightness < INKY && c.alpha < 0.99 {
+            return Color::Srgba(Srgba::WHITE.with_alpha(c.alpha * 0.6));
+        }
         let lightness = match role {
             ColorRole::Fill | ColorRole::Raised | ColorRole::Floating | ColorRole::Line
                 if o.chroma < GREY && o.lightness < INKY && c.alpha > 0.99 =>
@@ -275,6 +293,33 @@ impl SchemeMap {
         };
         let out = Oklcha { lightness, ..o };
         Color::Srgba(Srgba::from(out).with_alpha(c.alpha))
+    }
+
+    /// The dark-scheme color for `color` painted in `role` (a fill, ink or a line) on `surface`:
+    /// the surface's own token, else the page's color lifted to the surface.
+    pub fn dark_on(&self, color: Color, role: ColorRole, surface: Surface) -> Color {
+        let (own, lift) = match surface {
+            Surface::Page => return self.dark(color, role),
+            Surface::Raised => (ColorRole::Raised, self.lift[0]),
+            Surface::Floating => (ColorRole::Floating, self.lift[1]),
+        };
+        let c = color.to_srgba();
+        if role == ColorRole::Fill
+            && let Some(d) = self.tokens.get(&(own, key(c)))
+        {
+            return Color::Srgba(d.with_alpha(c.alpha));
+        }
+        let page = self.dark(color, role);
+        if key(page.to_srgba()) == key(c) {
+            // Kept as it is (a strong color, white text): not lifted either.
+            return color;
+        }
+        let o = Oklcha::from(page.to_srgba());
+        let lifted = Oklcha {
+            lightness: (o.lightness + lift).min(0.97).max(o.lightness),
+            ..o
+        };
+        Color::Srgba(Srgba::from(lifted))
     }
 
     /// `color` in the given scheme.
@@ -473,7 +518,8 @@ fn refade(light: Color, dark: Color, current: Color) -> Option<Color> {
     (d.with_alpha(0.0) == c.with_alpha(0.0)).then(|| light.with_alpha(c.alpha))
 }
 
-/// How high a UI node's surface sits: its fill is mapped to that surface's dark color.
+/// The surface a UI node is drawn on, the nearest of it and its ancestors that is raised or
+/// floating: its colors are mapped for that surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Page,
@@ -482,16 +528,6 @@ pub enum Surface {
     Raised,
     /// Menus, popups and toasts: `GlobalZIndex` of [`crate::z::MENU`] and above.
     Floating,
-}
-
-impl Surface {
-    fn role(self) -> ColorRole {
-        match self {
-            Surface::Page => ColorRole::Fill,
-            Surface::Raised => ColorRole::Raised,
-            Surface::Floating => ColorRole::Floating,
-        }
-    }
 }
 
 impl SchemeColors for BackgroundColor {
@@ -507,7 +543,7 @@ impl SchemeColors for BackgroundColor {
         self.0 = v;
     }
     fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
-        map.dark(v, surface.role())
+        map.dark_on(v, ColorRole::Fill, surface)
     }
 }
 
@@ -524,8 +560,8 @@ impl SchemeColors for BorderColor {
             left,
         };
     }
-    fn dark(v: [Color; 4], map: &SchemeMap, _: Surface) -> [Color; 4] {
-        v.map(|c| map.dark(c, ColorRole::Line))
+    fn dark(v: [Color; 4], map: &SchemeMap, surface: Surface) -> [Color; 4] {
+        v.map(|c| map.dark_on(c, ColorRole::Line, surface))
     }
 }
 
@@ -540,8 +576,8 @@ impl SchemeColors for Outline {
     fn set(&mut self, v: Color) {
         self.color = v;
     }
-    fn dark(v: Color, map: &SchemeMap, _: Surface) -> Color {
-        map.dark(v, ColorRole::Line)
+    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
+        map.dark_on(v, ColorRole::Line, surface)
     }
 }
 
@@ -556,8 +592,8 @@ impl SchemeColors for TextColor {
     fn set(&mut self, v: Color) {
         self.0 = v;
     }
-    fn dark(v: Color, map: &SchemeMap, _: Surface) -> Color {
-        map.dark(v, ColorRole::Ink)
+    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
+        map.dark_on(v, ColorRole::Ink, surface)
     }
 }
 
@@ -572,8 +608,8 @@ impl SchemeColors for ImageNode {
     fn set(&mut self, v: Color) {
         self.color = v;
     }
-    fn dark(v: Color, map: &SchemeMap, _: Surface) -> Color {
-        map.dark(v, ColorRole::Ink)
+    fn dark(v: Color, map: &SchemeMap, surface: Surface) -> Color {
+        map.dark_on(v, ColorRole::Ink, surface)
     }
 }
 
@@ -586,8 +622,8 @@ impl SchemeColors for TextCursorStyle {
         self.color = color;
         self.selected_text_color = selected;
     }
-    fn dark((color, selected): Self::Value, map: &SchemeMap, _: Surface) -> Self::Value {
-        (map.dark(color, ColorRole::Ink), selected)
+    fn dark((color, selected): Self::Value, map: &SchemeMap, surface: Surface) -> Self::Value {
+        (map.dark_on(color, ColorRole::Ink, surface), selected)
     }
 }
 
@@ -664,15 +700,21 @@ pub fn apply_scheme<T: SchemeColors>(
         Option<&GlobalZIndex>,
         Has<RaisedSurface>,
         Has<crate::dialog::DialogRoot>,
+        Option<&ChildOf>,
     )>,
     mut commands: Commands,
 ) {
     let scheme = appearance.scheme();
     let switched = mapped_for.is_none_or(|m| m.0 != scheme);
-    let surface = |e: Entity| match surfaces.get(e) {
-        Ok((Some(z), ..)) if z.0 >= crate::z::MENU => Surface::Floating,
-        Ok((Some(_), ..) | (_, true, _) | (_, _, true)) => Surface::Raised,
-        _ => Surface::Page,
+    let surface = |mut e: Entity| {
+        loop {
+            match surfaces.get(e) {
+                Ok((Some(z), ..)) if z.0 >= crate::z::MENU => return Surface::Floating,
+                Ok((Some(_), ..) | (_, true, ..) | (_, _, true, _)) => return Surface::Raised,
+                Ok((.., Some(parent))) => e = parent.parent(),
+                _ => return Surface::Page,
+            }
+        }
     };
     let mut visit = |(e, mut c, mapped, (keep, keep_fill)): Item<T>| {
         if keep || (T::FILL && keep_fill) {
@@ -870,6 +912,33 @@ mod tests {
             map.dark(Color::WHITE, ColorRole::Ink).to_srgba(),
             Srgba::WHITE
         );
+    }
+
+    #[test]
+    fn raised_and_floating_surfaces_lift_what_is_on_them() {
+        let (light, dark) = (Theme::light(), Theme::dark());
+        let map = SchemeMap::default();
+        // A menu's own fill is its token; a hovered row on it is lighter than the menu.
+        let menu = map.dark_on(light.popover, ColorRole::Fill, Surface::Floating);
+        assert_eq!(menu, dark.floating);
+        let hover = map.dark_on(light.menu_hover, ColorRole::Fill, Surface::Floating);
+        assert!(l(hover) > l(menu) + 0.02, "{hover:?} on {menu:?}");
+        let row = map.dark_on(light.list_hover, ColorRole::Fill, Surface::Raised);
+        assert!(l(row) > l(dark.popover) + 0.02, "{row:?}");
+        // Disabled text on a menu keeps about the contrast it has on the page.
+        let page = l(dark.disabled_foreground) - l(dark.background);
+        let on_menu = l(map.dark_on(light.disabled_foreground, ColorRole::Ink, Surface::Floating))
+            - l(dark.floating);
+        assert!((on_menu - page).abs() < 0.02, "{on_menu} vs {page}");
+        // White text on a primary button in a menu stays white.
+        assert_eq!(
+            map.dark_on(Color::WHITE, ColorRole::Ink, Surface::Floating)
+                .to_srgba(),
+            Srgba::WHITE
+        );
+        // A swatch's translucent black rim becomes a faint light one.
+        let rim = map.dark(Color::srgba(0.0, 0.0, 0.0, 0.25), ColorRole::Line);
+        assert!(l(rim) > 0.9 && rim.alpha() < 0.25);
     }
 
     #[test]

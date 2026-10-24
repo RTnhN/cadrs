@@ -458,7 +458,7 @@ impl Theme {
     /// earlier one decides its dark color.
     pub fn colors(&self) -> Vec<(ColorRole, Color)> {
         use ColorRole::{Fill, Floating, Ink, Line, Raised};
-        let mut v = vec![
+        vec![
             (Fill, self.background),
             (Fill, self.title_bar),
             (Fill, self.tab_bar),
@@ -558,15 +558,7 @@ impl Theme {
             (Line, self.list_selected_bar),
             (Line, self.tab_underline),
             (Line, self.plane_edge),
-        ];
-        // Raised and floating surfaces take the fills they don't name themselves.
-        let fills: Vec<_> = v
-            .iter()
-            .filter(|(r, _)| *r == Fill)
-            .flat_map(|&(_, c)| [(Raised, c), (Floating, c)])
-            .collect();
-        v.extend(fills);
-        v
+        ]
     }
 
     /// A [`TextFont`] using Inter at `size` px and `weight`.
