@@ -3665,7 +3665,12 @@ fn rebuild_feature_rows(
                 under.0.contains(&f.id),
                 kind,
                 failed,
-                !cache.hidden_sketches.contains(&f.id),
+                // A Plane's eye only (#66); a sketch's also follows the features using it.
+                if kind == RowKind::Plane {
+                    el.sketch_visibility(f.id) != Some(false)
+                } else {
+                    !cache.hidden_sketches.contains(&f.id)
+                },
                 cache.warnings.get(&f.id).cloned(),
             )
         })
@@ -3927,8 +3932,11 @@ fn rebuild_feature_rows(
                 // P3G.4 (DV3.5): the chevron opens what it brought in.
                 item = item.disclosure(Some(*open));
             }
-            // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view.
-            if kind.is_sketch() || *kind == RowKind::Sm9("sheet-metal-form") {
+            // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view,
+            // and a Plane's the plane (#66).
+            if kind.is_sketch()
+                || matches!(*kind, RowKind::Sm9("sheet-metal-form") | RowKind::Plane)
+            {
                 // The eye shows or hides the sketch (PS1.5); it shows while the row is hovered.
                 let tip = if *shown {
                     format!("Hide {name}")
@@ -4460,6 +4468,10 @@ fn on_feature_context_menu(
             .map(|f| (f.sketch().is_some(), f.is_part_feature()))
     });
     let is_sketch = kind.is_some_and(|k| k.0);
+    let is_plane = doc
+        .as_ref()
+        .and_then(|d| d.active_element()?.feature(row.0))
+        .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)));
     let appearance = match kind {
         Some((true, _)) => Some(
             MenuItem::new("feature-sketch-appearance", "Edit sketch appearance…")
@@ -4490,7 +4502,11 @@ fn on_feature_context_menu(
             .is_some_and(|i| el.rollback_index() == i + 1)
     });
     let in_dialog = session.is_some() || extrude.is_some();
-    let shown = !cache.hidden_sketches.contains(&row.0);
+    let shown = if is_plane {
+        el.is_some_and(|el| el.sketch_visibility(row.0) != Some(false))
+    } else {
+        !cache.hidden_sketches.contains(&row.0)
+    };
     // P3D.1 (IR5.5): the items in the order `ex1-step2.png` shows them.
     let mut menu = Menu::new("feature-context-menu")
         .min_width(190.0)
@@ -4641,7 +4657,7 @@ fn on_feature_context_menu(
             "Add selection to folder…",
         ))
         .separator();
-    if is_sketch {
+    if is_sketch || is_plane {
         menu = menu.item(if shown {
             MenuItem::new("feature-hide", "Hide").icon("hidden")
         } else {
@@ -4923,17 +4939,15 @@ pub fn rename_feature(world: &mut World, id: FeatureId) {
     world.flush();
 }
 
-/// The eye on a sketch's row shows or hides the sketch (PS1.5), as an undoable step.
+/// The eye on a sketch's row shows or hides the sketch (PS1.5), and on a Plane's the plane
+/// (#66), as an undoable step.
 fn on_sketch_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&FeatureRow>, mut commands: Commands) {
     let Ok(row) = q.get(ev.entity) else {
         return;
     };
     let sketch = row.0;
     commands.queue(move |world: &mut World| {
-        let shown = !world
-            .resource::<crate::parts::PartCache>()
-            .hidden_sketches
-            .contains(&sketch);
+        let shown = crate::feature_menu::sketch_shown(world, sketch);
         let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
             return;
         };
