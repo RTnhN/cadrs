@@ -61,6 +61,7 @@ Scenario(
         MoveTo(1420, 900),
         Wait(20),
         Screenshot("02-adaptive"),
+        ExpectText("cam-dialog", "Adaptive clearing 1"),
         Click(ui("cam-dialog-accept")),
         Wait(5),
         Click(ui("cam-tb-tool")),
@@ -88,5 +89,6 @@ Scenario(
         MoveTo(1420, 900),
         Wait(10),
         Screenshot("04-verify"),
+        ExpectText("cam-pv-readout", "no gouges · no collisions"),
     ],
 )

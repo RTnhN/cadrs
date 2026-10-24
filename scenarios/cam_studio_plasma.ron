@@ -73,6 +73,7 @@ Scenario(
         MoveTo(1420, 900),
         Wait(5),
         Screenshot("05-verify-sheet"),
+        ExpectText("cam-pv-readout", "1 part free"),
         Click(ui("cam-pv-close")),
         Custom("cam select setup 0"),
         Click(ui("cam-tb-post")),
@@ -83,6 +84,9 @@ Scenario(
         MoveTo(1420, 900),
         Wait(3),
         Screenshot("06-post"),
+        // QtPlasmaC: its preamble, the torch codes, no Z.
+        ExpectText("cam-export-preview", "G21 G40 G49 G64 P0.1 G80 G90 G92.1 G94 G97"),
+        ExpectText("cam-export-preview", "M3 $0 S1"),
         Click(ui("cam-export-ok")),
         Wait(3),
     ],
