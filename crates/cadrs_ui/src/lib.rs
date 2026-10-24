@@ -52,6 +52,7 @@ pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
 pub mod segmented;
+pub mod selectable_text;
 pub mod selection_box;
 pub mod selection_field;
 pub mod selection_list;
@@ -142,6 +143,9 @@ pub use quick_dim::{
 pub use radio::{RadioChange, RadioGroup, RadioGroupState, RadioOption};
 pub use scrollbar::{WheelScroll, horizontal_scrollbar, vertical_scrollbar};
 pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
+pub use selectable_text::{
+    ReadOnlyText, SelectableText, SelectableTextField, SelectableValue, TextCopied,
+};
 pub use selection_field::{
     SelectionField, SelectionFieldActivate, SelectionFieldClear, SelectionFieldState,
 };
@@ -292,6 +296,7 @@ impl Plugin for CadrsUiPlugin {
                 splitter::SplitterPlugin,
                 selection_box::SelectionBoxPlugin,
                 color_editor::ColorEditorPlugin,
+                selectable_text::SelectableTextPlugin,
             ))
             .add_message::<ScriptCommand>();
     }

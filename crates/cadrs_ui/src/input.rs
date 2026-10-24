@@ -692,7 +692,13 @@ fn show_chips(
 fn fix_selection_end(
     mut q: Query<
         &mut bevy::text::TextLayoutInfo,
-        (With<TextInputField>, Changed<bevy::text::TextLayoutInfo>),
+        (
+            Or<(
+                With<TextInputField>,
+                With<crate::selectable_text::SelectableTextField>,
+            )>,
+            Changed<bevy::text::TextLayoutInfo>,
+        ),
     >,
 ) {
     for mut info in &mut q {
