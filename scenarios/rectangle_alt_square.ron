@@ -1,0 +1,28 @@
+// #54: holding Alt while drawing a corner rectangle makes it a square. The preview follows
+// the longer side, and the placed rectangle gets an Equal constraint on two sides; only the
+// width quick dimension opens (the height follows). The same for a center-point rectangle.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Click(ui("sketch")),
+        WaitFor("sketch-dialog"),
+        ClickAt(560, 575),
+        Key("N"),
+        Key("G"),
+        ClickWorld(10, 10),
+        KeyDown("Alt"),
+        MoveWorld(50, 25),
+        Wait(2),
+        Screenshot("01-alt-preview-square"),
+        ClickWorld(50, 25),
+        KeyUp("Alt"),
+        Wait(2),
+        Screenshot("02-square-width-quick-dim"),
+        Key("Escape"),
+        Key("Escape"),
+        MoveWorld(90, -40),
+        Wait(2),
+        Screenshot("03-square-equal-glyph"),
+    ],
+)
