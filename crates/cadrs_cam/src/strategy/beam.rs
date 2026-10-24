@@ -8,7 +8,7 @@
 //! right (the good side of a clockwise-swirl plasma torch), past the start by the overlap.
 //! Microjoints leave short uncut bridges that hold the parts in the sheet.
 
-use crate::geom::{P2, P3, dist2, lerp2, ring_area2};
+use crate::geom::{P2, P3, dist2, lerp2, ring_area2, ring_contains};
 use crate::machine::MachineKind;
 use crate::region::{self, Region};
 use crate::toolpath::{FeedKind, Step, Toolpath};
@@ -182,9 +182,13 @@ pub fn cut(input: &Input) -> Result<Toolpath, String> {
     let mut by_depth: Vec<(usize, Contour, bool)> = contours
         .into_iter()
         .map(|(c, hole)| {
-            let probe = c.pts[0];
+            // How many other contours it lies in (its own boundary says nothing).
             let d = if c.closed {
-                depth_in(&rings, probe).saturating_sub(1)
+                rings
+                    .iter()
+                    .filter(|r| **r != c.pts)
+                    .filter(|r| ring_contains(r, c.pts[0]))
+                    .count()
             } else {
                 usize::MAX
             };
@@ -559,6 +563,63 @@ mod tests {
                 .iter()
                 .any(|s| matches!(s, Step::Rapid(p) if (p[2] - 6.8).abs() < 1e-9))
         );
+    }
+
+    /// A plate with a round hole (the hole's triangles a fan, as a kernel tessellates it): the
+    /// hole is cut before the outline whatever the outline's distance.
+    #[test]
+    fn round_hole_first() {
+        let mut t = Vec::new();
+        let n = 48;
+        let ring = |r: f64, z: f64| -> Vec<P3> {
+            (0..n)
+                .map(|i| {
+                    let a = std::f64::consts::TAU * i as f64 / n as f64;
+                    [30.0 + r * a.cos(), 20.0 + r * a.sin(), z]
+                })
+                .collect()
+        };
+        // The plate's top as triangles between the outline (a square) and the hole.
+        let outer = |i: usize| -> P3 {
+            let a = std::f64::consts::TAU * i as f64 / n as f64;
+            let (c, s) = (a.cos(), a.sin());
+            let k = 1.0 / c.abs().max(s.abs());
+            [30.0 + 30.0 * c * k, 20.0 + 20.0 * s * k, 3.0]
+        };
+        let hole = ring(8.0, 3.0);
+        for i in 0..n {
+            let j = (i + 1) % n;
+            t.push([hole[i], outer(i), outer(j)]);
+            t.push([hole[i], outer(j), hole[j]]);
+        }
+        let m = Model::from_triangles("plate", t);
+        let stock = Stock::block(Aabb::new([-5.0, -5.0, 0.0], [65.0, 45.0, 3.0]));
+        let tool = Tool::new(ToolKind::Plasma, 1.5);
+        let p = Params::new(Pattern::Cut, &tool, MachineKind::Plasma);
+        let input = Input {
+            model: &m,
+            stock: &stock,
+            tool: &tool,
+            machine: MachineKind::Plasma,
+            params: &p,
+            rest: None,
+        };
+        let tp = generate(&input).unwrap();
+        let first = tp
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                Step::Feed {
+                    to,
+                    kind: FeedKind::Cut,
+                    ..
+                } => Some(*to),
+                _ => None,
+            })
+            .unwrap();
+        // On the hole: 8 − 0.75 from its centre.
+        let r = (first[0] - 30.0).hypot(first[1] - 20.0);
+        assert!((r - 7.25).abs() < 0.05, "{first:?} r={r}");
     }
 
     #[test]
