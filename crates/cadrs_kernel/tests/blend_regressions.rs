@@ -2101,7 +2101,9 @@ fn chamfer_mixed_corner_at_135_degrees() {
 /// there, the cylinder's top rim beside it and the concave edge where the cylinder leaves the
 /// box: a mixed chamfer corner closed by a triangle, its side across the rim's chamfer (a cone)
 /// the curve the triangle's plane cuts that in (remote sentry, Chamfer 1). The volume is this
-/// construction's (no reference chamfers this corner).
+/// construction's (no reference chamfers this corner); the concave edge's contacts lie 1 along
+/// the box's side and 1 round the cylinder, its fill under the top chamfer about 0.97 more than
+/// the ball rule's (0.480 against 0.372 a section).
 #[test]
 fn chamfer_mixed_corner_on_a_cone() {
     use nalgebra::Point2;
@@ -2157,7 +2159,7 @@ fn chamfer_mixed_corner_on_a_cone() {
                 .any(|c| !matches!(o.edges[c.edge].curve, curve::Curve::Line { .. }))
     });
     assert!(cap, "no corner triangle with a curved side");
-    let (want_v, want_a) = (4385.981425680911, 1719.6502524262403);
+    let (want_v, want_a) = (4386.985846155351, 1719.332028409182);
     assert!(
         (v - want_v).abs() < 1e-6 * want_v,
         "volume {v}, want {want_v}"
@@ -2173,8 +2175,8 @@ fn chamfer_mixed_corner_on_a_cone() {
 /// rim's cone meet in a point, where the line the flat ones meet in crosses the cone; the
 /// cone's ends there the conics the flat ones cut it in (gridfinity, Chamfer 2). The volume is
 /// that of the prism cut by every chamfer's plane and the rim's cone (integrated over z by
-/// clipping the sections; the chamfers up the sides through the contacts of the ball of radius
-/// d·tan(θ/2) the local chamfer rolls, θ the faces' angle).
+/// clipping the sections; the chamfers up the sides through their contacts 1 along the flat
+/// face and 1 round the cylinder, as `chamfer_plane_to_cylinder_measures_round_the_cylinder`).
 #[test]
 fn chamfer_corner_of_two_planes_and_a_cone() {
     let mut k = NativeKernel::new();
@@ -2193,7 +2195,45 @@ fn chamfer_corner_of_two_planes_and_a_cone() {
         .collect();
     assert_eq!(edges.len(), 5, "{edges:?}");
     let (_, v, _) = local_chamfer(&mut k, b, &edges, 1.0);
-    let want = 2655.1457202931565;
+    let want = 2657.5007292150626;
+    assert!((v - want).abs() < 1e-8 * want, "volume {v}, want {want}");
+}
+
+/// A cylinder of radius 10 with a slice off its side at x = −6 (a D-shaped prism), chamfered 1
+/// up the two edges where the cut meets the cylinder: the contacts lie 1 from each edge along
+/// the flat face and 1 round the cylinder (Offset measures along the faces; the ball whose
+/// contacts on the faces' tangent planes are 1 away, of radius tan(θ/2) = 2 here, would touch
+/// the flat face 1.07 from the edge and the cylinder 1.20 round it). Each section takes off the
+/// triangle between the edge and the two contacts and the circular segment over its curved
+/// side: (1/2)·1·|E − Q|·sin(∠PEQ) + R²/2·(α − sin α), α = 1/R, over the height 10.
+#[test]
+fn chamfer_plane_to_cylinder_measures_round_the_cylinder() {
+    let mut k = NativeKernel::new();
+    let (r, d, h) = (10.0_f64, 1.0_f64, 10.0);
+    let c = k.pcylinder(r, h).unwrap();
+    let bx = k.box_at(-20.0, -20.0, -1.0, 14.0, 40.0, 12.0).unwrap();
+    let draw::Shape::Body(b) = k.bcut(&c, &bx).unwrap() else {
+        panic!("not a body")
+    };
+    let before = k.mass_properties(b).unwrap().volume;
+    let edges: Vec<EdgeId> = k
+        .edges(b)
+        .unwrap()
+        .iter()
+        .filter(|e| (e.mid.x + 6.0).abs() < 1e-9 && e.mid.y.abs() > 7.0)
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(edges.len(), 2, "{edges:?}");
+    let (_, v, _) = local_chamfer(&mut k, b, &edges, d);
+    // Upper edge E = (−6, 8): P down the flat face, Q round the arc towards +x.
+    let (ex, ey) = (-6.0_f64, 8.0_f64);
+    let (px, py) = (ex, ey - d);
+    let alpha = d / r;
+    let q = ey.atan2(ex) - alpha;
+    let (qx, qy) = (r * q.cos(), r * q.sin());
+    let triangle = ((px - ex) * (qy - ey) - (qx - ex) * (py - ey)).abs() / 2.0;
+    let segment = r * r / 2.0 * (alpha - alpha.sin());
+    let want = before - 2.0 * h * (triangle + segment);
     assert!((v - want).abs() < 1e-8 * want, "volume {v}, want {want}");
 }
 

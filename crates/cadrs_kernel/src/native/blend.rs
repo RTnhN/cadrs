@@ -2740,35 +2740,24 @@ pub fn chamfer(
     let edges = &real_edges(&b, edges)?[..];
     // (Local trimming passes over edges whose faces join smoothly.)
     let sharp = sharp_edges(&b, edges)?;
-    // Equal distances where the faces meet at a constant angle: by local trimming, as the
-    // ball whose contacts are that far along the faces, cut straight across.
+    // Equal distances: by local trimming, their contacts that far along the faces
+    // ([`super::fillet::chamfer_equal_edges`]), cut straight across.
     if let (ChamferSpec::EqualDistance(d), ChamferMeasure::Offset) = (spec, opts.measurement)
         && d > 0.0
         && std::env::var_os("CADRS_NO_LOCAL_FILLET").is_none()
     {
-        let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
-            .iter()
-            .map(|e| {
-                let e = e.0 as usize;
-                // (Where the faces' angle varies along the edge, a law of radii.)
-                match super::fillet::chamfer_radius(&b, e, d) {
-                    Some(r) => Some((e, vec![(0.0, r), (1.0, r)])),
-                    None => Some((e, super::fillet::chamfer_law(&b, e, d)?)),
+        let sharp: Vec<usize> = sharp.iter().map(|e| e.0 as usize).collect();
+        if let Some(local) = super::fillet::chamfer_equal_edges(&b, body, &sharp, d) {
+            let local = local.and_then(|(out, src)| {
+                // (The local result's edges are merged and its tolerances fitted already.)
+                match local_problem(&b, &out) {
+                    Some(e) => Err(KernelError::InvalidResult {
+                        op: "chamfer",
+                        why: format!("the local chamfer isn't valid: {e}"),
+                    }),
+                    None => Ok((out, src)),
                 }
-            })
-            .collect();
-        if let Some(laws) = laws {
-            let local =
-                super::fillet::fillet_edges_laws(&b, body, &laws, true).and_then(|(out, src)| {
-                    // (The local result's edges are merged and its tolerances fitted already.)
-                    match local_problem(&b, &out) {
-                        Some(e) => Err(KernelError::InvalidResult {
-                            op: "chamfer",
-                            why: format!("the local chamfer isn't valid: {e}"),
-                        }),
-                        None => Ok((out, src)),
-                    }
-                });
+            });
             match local {
                 Ok((out, src)) => return Ok(Tracked { body: out, src }.into_result(k, body)),
                 Err(e) => {
@@ -3170,20 +3159,10 @@ pub fn chamfer_local(
     let b = (**k.get(body)?).clone();
     let edges = &real_edges(&b, edges)?[..];
     let sharp = sharp_edges(&b, edges)?;
-    let laws: Option<Vec<super::fillet::RadiusLaw>> = sharp
-        .iter()
-        .map(|e| {
-            let e = e.0 as usize;
-            match super::fillet::chamfer_radius(&b, e, d) {
-                Some(r) => Some((e, vec![(0.0, r), (1.0, r)])),
-                None => Some((e, super::fillet::chamfer_law(&b, e, d)?)),
-            }
-        })
-        .collect();
-    let laws = laws.ok_or(KernelError::Unsupported(
-        "a chamfer whose faces' angle can't be followed along its edge",
-    ))?;
-    let (out, src) = super::fillet::fillet_edges_laws(&b, body, &laws, true)?;
+    let sharp: Vec<usize> = sharp.iter().map(|e| e.0 as usize).collect();
+    let (out, src) = super::fillet::chamfer_equal_edges(&b, body, &sharp, d).ok_or(
+        KernelError::Unsupported("a chamfer whose faces' angle can't be followed along its edge"),
+    )??;
     if let Some(e) = local_problem(&b, &out) {
         return Err(KernelError::InvalidResult {
             op: "chamfer",

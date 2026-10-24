@@ -9619,26 +9619,23 @@ pub fn fillet_edges_laws(
 
 /// The chamfer of each edge with the distances `d` of its contacts from it along its two faces
 /// (in [`super::blend::edge_sides`] order), by local trimming: the ball whose offsets from the
-/// faces put its contacts there ([`chamfer_offsets`]), cut straight across.
+/// faces put its contacts there, measured round a face curving across the edge where it can be
+/// ([`along_chains`]), else on the faces' tangent planes ([`chamfer_offsets`]), cut straight
+/// across.
 pub fn chamfer_edges(
     b: &Body,
     input: BodyId,
     edges: &[(usize, [f64; 2])],
 ) -> Result<(Body, Vec<Vec<FaceSrc>>)> {
+    let ids: Vec<usize> = edges.iter().map(|&(e, _)| e).collect();
+    let along = along_chains(b, &ids, |e| {
+        let d = edges.iter().find(|x| x.0 == e)?.1;
+        chamfer_offsets_along(b, e, d)
+    });
     let mut laws = Vec::new();
     let mut ratios = Vec::new();
-    for &(e, d) in edges {
-        // Unequal distances on a face curving across the edge: measured round it.
-        let [(f1, _), (f2, _)] = sides(b, e)?;
-        let curved = ![f1, f2]
-            .iter()
-            .all(|&f| matches!(b.faces[f].surf, Surface::Plane { .. }));
-        let k = if curved && d[0] != d[1] {
-            chamfer_offsets_along(b, e, d)
-        } else {
-            chamfer_offsets(b, e, d)
-        };
-        let k = k.ok_or_else(|| {
+    for (&(e, d), along) in edges.iter().zip(along) {
+        let k = along.or_else(|| chamfer_offsets(b, e, d)).ok_or_else(|| {
             unsupported("a chamfer along an edge whose faces don't meet at one angle")
         })?;
         // In the strip's face order (the face whose loop runs along the edge first).
@@ -9648,6 +9645,85 @@ pub fn chamfer_edges(
         ratios.push(k[1] / k[0]);
     }
     local_blend(b, input, &laws, &ratios, true)
+}
+
+/// Equal-distance chamfers `d` (ChamferMeasure::Offset) on `edges` by local trimming: on a face
+/// curving across a straight edge that it runs along (a cylinder), the contacts `d` round it
+/// ([`chamfer_offsets_along`]); else the ball whose contacts on the faces' tangent planes are
+/// that far, d·tan(θ/2) (exact between faces straight across the edge), following the faces'
+/// angle where it varies ([`chamfer_law`]); a tangent chain one way all along
+/// ([`along_chains`]). `None` where an edge's angle can't be followed.
+pub fn chamfer_equal_edges(
+    b: &Body,
+    input: BodyId,
+    edges: &[usize],
+    d: f64,
+) -> Option<Result<(Body, Vec<Vec<FaceSrc>>)>> {
+    let along = along_chains(b, edges, |e| chamfer_offsets_along(b, e, [d, d]));
+    let mut laws = Vec::new();
+    let mut ratios = Vec::new();
+    for (&e, along) in edges.iter().zip(along) {
+        let [(_, c1), _] = sides(b, e).ok()?;
+        if let Some(k) = along {
+            // In the strip's face order (the face whose loop runs along the edge first).
+            let k = if c1 { k } else { [k[1], k[0]] };
+            laws.push((e, vec![(0.0, k[0]), (1.0, k[0])]));
+            ratios.push(k[1] / k[0]);
+        } else {
+            let law = match chamfer_radius(b, e, d) {
+                Some(r) => vec![(0.0, r), (1.0, r)],
+                None => chamfer_law(b, e, d)?,
+            };
+            laws.push((e, law));
+            ratios.push(1.0);
+        }
+    }
+    Some(local_blend(b, input, &laws, &ratios, true))
+}
+
+/// Each edge's chamfer offsets measured round a face curving across it (`round`, as
+/// [`chamfer_offsets_along`]), where it has one; `None` between planes (the ball rule is exact
+/// there) and on a tangent chain with an edge that has none: a chain is measured one way all
+/// along, so its sections meet where its edges do.
+fn along_chains(
+    b: &Body,
+    edges: &[usize],
+    round: impl Fn(usize) -> Option<[f64; 2]>,
+) -> Vec<Option<[f64; 2]>> {
+    let mut along: Vec<Option<[f64; 2]>> = edges
+        .iter()
+        .map(|&e| {
+            let curved = sides(b, e).is_ok_and(|s| {
+                !s.iter()
+                    .all(|&(f, _)| matches!(b.faces[f].surf, Surface::Plane { .. }))
+            });
+            curved.then(|| round(e)).flatten()
+        })
+        .collect();
+    let ends = |e: usize| {
+        let ed = &b.edges[e];
+        [0, 1].map(|i| (ed.v[i], ed.curve.tangent(ed.t[i]).normalize()))
+    };
+    let tangent = |e: usize, f: usize| {
+        ends(e).iter().any(|(v, t)| {
+            ends(f)
+                .iter()
+                .any(|(w, u)| v == w && t.dot(u).abs() > 1.0 - tol::ANGULAR)
+        })
+    };
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for i in 0..edges.len() {
+            if along[i].is_some()
+                && (0..edges.len()).any(|j| along[j].is_none() && tangent(edges[i], edges[j]))
+            {
+                along[i] = None;
+                changed = true;
+            }
+        }
+    }
+    along
 }
 
 /// A face on a periodic surface whose inner loop lies a whole period from its outer loop's
