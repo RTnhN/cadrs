@@ -287,6 +287,16 @@ pub(crate) enum Role {
     HelixHandedness,
     FillEdges,
     FillContinuity,
+    // The Thread (`crate::thread_ui`).
+    ThreadEdge,
+    ThreadStandard,
+    ThreadSize,
+    ThreadPitch,
+    ThreadEnd,
+    ThreadLength,
+    ThreadDiameter,
+    ThreadCustomPitch,
+    ThreadHand,
     // The direct edits (`crate::direct_edit_ui`).
     DirectEditFaces,
     DirectEditDistance,
@@ -1933,6 +1943,15 @@ fn on_select(ev: On<SelectChange>, q: Query<&Role>, mut commands: Commands) {
         Role::DiameterTolPrecision | Role::DepthTolPrecision | Role::StyleTol(_, 3) => "Precision",
         Role::TipAngle => "Tip angle",
         Role::TransformType => "Transform type",
+        Role::HelixType => "Helix type",
+        Role::HelixPathType => "Input type",
+        Role::HelixHandedness => "Direction",
+        Role::FillContinuity => "Continuity",
+        Role::ThreadStandard => "Standard",
+        Role::ThreadSize => "Size",
+        Role::ThreadPitch => "Pitch",
+        Role::ThreadEnd => "End type",
+        Role::ThreadHand => "Direction",
         _ => return,
     };
     change(&mut commands, label, move |k| match (k, role) {
@@ -2666,6 +2685,7 @@ pub fn toolbar_kind(name: &str) -> Option<AppliedKind> {
         "thicken" => Some(AppliedKind::Thicken),
         "helix" => Some(AppliedKind::Helix),
         "fill" => Some(AppliedKind::Fill),
+        "thread" => Some(AppliedKind::Thread),
         "sheet-metal-model" => Some(AppliedKind::SheetMetal),
         n => crate::sheetmetal_tools_ui::SmTool::named(n).map(AppliedKind::SheetMetalTool),
     }

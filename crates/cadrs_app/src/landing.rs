@@ -452,7 +452,8 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(7.0),
                 width: Val::Px(294.0),
-                flex_shrink: 0.0,
+                // A narrow window takes from the gap after the name first.
+                min_width: Val::Px(100.0),
                 ..default()
             },
         ))
@@ -477,7 +478,7 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
             Node {
                 align_items: AlignItems::Center,
                 width: Val::Px(358.0),
-                flex_shrink: 0.0,
+                min_width: Val::Px(160.0),
                 ..default()
             },
         ))
@@ -486,7 +487,8 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                 TextInput::new("search")
                     .placeholder(format!("Search in {}", state.filter.label()))
                     .height(26.0)
-                    .width(Val::Px(331.0))
+                    // The box's width but the search button's (it shrinks in a narrow window).
+                    .width(Val::Percent(100.0))
                     .build(t),
             )
             .with_child((
@@ -541,11 +543,33 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
         bar.spawn(Node {
             align_items: AlignItems::Center,
             column_gap: Val::Px(2.0),
+            flex_shrink: 0.0,
             ..default()
         })
         .with_children(|r| {
             let mut dark = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
             dark.foreground = cadrs_ui::StateColors::all(t.foreground);
+            // The update button once a newer release is out (`crate::update`), then the version.
+            r.spawn((
+                Name::new("update-slot"),
+                crate::update::UpdateSlot,
+                Node {
+                    align_items: AlignItems::Center,
+                    margin: UiRect::right(Val::Px(8.0)),
+                    ..default()
+                },
+            ));
+            r.spawn((
+                Name::new("version"),
+                t.text(
+                    concat!("v", env!("CARGO_PKG_VERSION")),
+                    t.font_xs,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+            ))
+            .entry::<Node>()
+            .and_modify(|mut n| n.margin = UiRect::right(Val::Px(10.0)));
             // Light, dark or the system's scheme.
             r.spawn(cadrs_ui::scheme_toggle(t))
                 .entry::<Node>()
@@ -785,7 +809,6 @@ fn footer(p: &mut ChildSpawnerCommands, t: &Theme) {
         for text in [
             "© 2026 cadrs contributors",
             "Documents are stored on this computer",
-            concat!("(", env!("CARGO_PKG_VERSION"), ")"),
         ] {
             f.spawn(Node {
                 flex_grow: 1.0,

@@ -693,10 +693,11 @@ pub(crate) fn body(
         FeatureKind::Thicken(_)
             | FeatureKind::Helix(_)
             | FeatureKind::Fill(_)
+            | FeatureKind::Thread(_)
             | FeatureKind::FlatExtrude(_)
             | FeatureKind::DirectEdit(_)
     ) {
-        crate::surfacing_ui::body(b, t, kind, field, items_of);
+        crate::thread_ui::body(b, t, kind, field, items_of);
         return;
     }
     let Some(name) = name(kind) else { return };
@@ -1088,7 +1089,7 @@ pub(crate) fn tab(k: &mut FeatureKind, role: Role, i: usize) {
     match k {
         FeatureKind::Pattern(x) => x.op = BooleanOp::ALL[i.min(3)],
         FeatureKind::Mirror(x) => x.op = BooleanOp::ALL[i.min(3)],
-        k => crate::surfacing_ui::tab(k, role, i),
+        k => crate::thread_ui::tab(k, role, i),
     }
 }
 

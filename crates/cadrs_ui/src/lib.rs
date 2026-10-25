@@ -49,6 +49,7 @@ pub mod list;
 pub mod menu;
 pub mod name_popup;
 pub mod path_field;
+pub mod progress;
 pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
@@ -140,6 +141,7 @@ pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
 pub use path_field::{
     PathField, PathFieldBrowse, path_field_value, set_path_field, set_path_field_display,
 };
+pub use progress::{Progress, ProgressBar};
 pub use quick_dim::{
     QuickDim, QuickDimBox, QuickDimCancel, QuickDimCommit, QuickDimField,
     start_typing as quick_dim_start_typing,
@@ -287,6 +289,7 @@ impl Plugin for CadrsUiPlugin {
             ))
             .add_plugins(file_picker::FilePickerPlugin)
             .add_plugins(radio::RadioPlugin)
+            .add_plugins(progress::ProgressPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
             .add_plugins((

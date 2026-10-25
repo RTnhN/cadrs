@@ -523,6 +523,13 @@ pub fn slots(kind: &mut FeatureKind, f: &mut dyn FnMut(Slot<'_>)) {
             s("Thickness 1", &mut x.thickness1_expr, &mut x.thickness1, L);
             s("Thickness 2", &mut x.thickness2_expr, &mut x.thickness2, L);
         }
+        FeatureKind::Thread(x) => {
+            s("Length", &mut x.length_expr, &mut x.length, L);
+            if x.custom {
+                s("Diameter", &mut x.diameter_expr, &mut x.diameter, L);
+                s("Pitch", &mut x.custom_pitch_expr, &mut x.custom_pitch, L);
+            }
+        }
         FeatureKind::Helix(x) => {
             s(
                 "Revolutions",

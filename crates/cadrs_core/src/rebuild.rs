@@ -1653,6 +1653,8 @@ impl Rebuilder {
             #[cfg(feature = "brep")]
             FeatureKind::Fill(x) => self.fill(before, f.id, x, state).unwrap_or_else(fail),
             #[cfg(feature = "brep")]
+            FeatureKind::Thread(x) => self.thread(f.id, x, state).unwrap_or_else(fail),
+            #[cfg(feature = "brep")]
             FeatureKind::SheetMetalModel(x) => self
                 .sheet_metal_model(before, f.id, &f.name, x, state)
                 .unwrap_or_else(fail),
@@ -1714,6 +1716,7 @@ impl Rebuilder {
             FeatureKind::Thicken(_)
             | FeatureKind::Helix(_)
             | FeatureKind::Fill(_)
+            | FeatureKind::Thread(_)
             | FeatureKind::Image(_) => fail("This feature needs the solid-modelling kernel".into()),
             #[cfg(not(feature = "brep"))]
             FeatureKind::Composite(_) => {
@@ -2025,6 +2028,7 @@ mod kernel_ops {
     mod sheetmetal_joint;
     mod sheetmetal_loft;
     mod surfacing;
+    mod thread;
     mod transform;
     pub(super) use advanced::plane_of;
 

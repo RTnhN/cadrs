@@ -651,6 +651,7 @@ impl Feature {
             FeatureKind::Thicken(x) => x.problem().is_none(),
             FeatureKind::Helix(x) => x.problem().is_none(),
             FeatureKind::Fill(x) => x.problem().is_none(),
+            FeatureKind::Thread(x) => x.problem().is_none(),
             FeatureKind::Variable(x) => x.problem().is_none(),
             FeatureKind::SheetMetalModel(x) => x.problem().is_none(),
             FeatureKind::ModifyJoint(x) => x.problem().is_none(),
@@ -692,6 +693,7 @@ impl Feature {
             FeatureKind::Thicken(x) => x.problem(),
             FeatureKind::Helix(x) => x.problem(),
             FeatureKind::Fill(x) => x.problem(),
+            FeatureKind::Thread(x) => x.problem(),
             FeatureKind::Variable(x) => x.problem(),
             FeatureKind::SheetMetalModel(x) => x.problem(),
             FeatureKind::ModifyJoint(x) => x.problem(),
@@ -859,6 +861,7 @@ impl Feature {
             FeatureKind::Thicken(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Helix(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Fill(x) => x.parents().into_iter().for_each(&mut add),
+            FeatureKind::Thread(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::SheetMetalModel(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::ModifyJoint(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::SheetMetalLoft(x) => x.parents().into_iter().for_each(&mut add),
@@ -1023,6 +1026,8 @@ pub enum FeatureKind {
     Helix(crate::surfacing::HelixFeature),
     /// A surface filling a closed boundary (Onshape's Fill).
     Fill(crate::surfacing::FillFeature),
+    /// A modelled screw thread on a cylinder or in a hole ([`crate::thread`]).
+    Thread(crate::thread::ThreadFeature),
     /// A variable, `#name = expression` (P3F.4, P5.2; [`crate::variables`]).
     Variable(crate::variables::VariableFeature),
     /// A sheet metal model: Convert, Extrude or Thicken (P3I.2, SM2; [`crate::sheetmetal`]).
