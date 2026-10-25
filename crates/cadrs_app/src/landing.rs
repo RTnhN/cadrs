@@ -1,6 +1,6 @@
 //! The documents page (`reference/onshape/screens/01*`–`04`).
 //!
-//! - Top bar: logo, search box ("Search in Owned by me"), help and the settings menu.
+//! - Top bar: logo, search box ("Search in Owned by me"), the version and the settings menu.
 //! - Sidebar: the blue **Create ▾** button (Document…, Folder…, Import files…, …), the filters
 //!   (Owned by me, Recently opened, Created by me, Labels, Trash; Shared with me, Teams and
 //!   Public are left out until there are accounts, issue #13)
@@ -539,7 +539,7 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
             flex_grow: 1.0,
             ..default()
         });
-        // Right side: notifications, apps, help, user.
+        // Right side: the version, the color scheme and settings.
         bar.spawn(Node {
             align_items: AlignItems::Center,
             column_gap: Val::Px(2.0),
@@ -547,66 +547,13 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
             ..default()
         })
         .with_children(|r| {
-            let mut dark = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
-            dark.foreground = cadrs_ui::StateColors::all(t.foreground);
-            // The update button once a newer release is out (`crate::update`), then the version.
-            r.spawn((
-                Name::new("update-slot"),
-                crate::update::UpdateSlot,
-                Node {
-                    align_items: AlignItems::Center,
-                    margin: UiRect::right(Val::Px(8.0)),
-                    ..default()
-                },
-            ));
-            r.spawn((
-                Name::new("version"),
-                t.text(
-                    concat!("v", env!("CARGO_PKG_VERSION")),
-                    t.font_xs,
-                    FontWeight::NORMAL,
-                    t.muted_foreground,
-                ),
-            ))
-            .entry::<Node>()
-            .and_modify(|mut n| n.margin = UiRect::right(Val::Px(10.0)));
+            crate::update::spawn_version(r, t);
             // Light, dark or the system's scheme.
             r.spawn(cadrs_ui::scheme_toggle(t))
                 .entry::<Node>()
                 .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // (Notifications and apps are left out until they do something: issue #13.)
-            r.spawn(
-                Button::new("help")
-                    .icon("help")
-                    .icon_size(20.0)
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Help")
-                    .build(t),
-            )
-            .insert(dark.clone())
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.padding = UiRect::horizontal(Val::Px(4.0));
-                n.column_gap = Val::Px(4.0);
-            });
-            // The settings menu (Preferences…). No profile name or avatar: there are no
-            // accounts yet (issue #13).
-            r.spawn(
-                Button::new("account")
-                    .icon("settings")
-                    .icon_size(20.0)
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Settings")
-                    .build(t),
-            )
-            .insert(dark)
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.padding = UiRect::horizontal(Val::Px(4.0));
-                n.column_gap = Val::Px(4.0);
-            });
+            // (Notifications, apps and help are left out until they do something: issue #13.)
+            crate::preferences_ui::spawn_settings_button(r, t);
         });
     });
 }

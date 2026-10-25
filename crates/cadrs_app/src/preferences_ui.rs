@@ -181,6 +181,32 @@ fn save(world: &mut World) {
 // ---------------------------------------------------------------------------------------------
 // The account menu and the dialog
 
+/// The settings button of a top bar (the documents page's and a document's), framed like the
+/// color scheme toggle beside it ([`cadrs_ui::segmented::frame`]). No profile name or avatar: there are no accounts yet
+/// (issue #13).
+pub fn spawn_settings_button(r: &mut ChildSpawnerCommands, t: &Theme) {
+    r.spawn((Name::new("settings"), cadrs_ui::segmented::frame(t)))
+        .with_children(|b| {
+            b.spawn(
+                Button::new("account")
+                    .icon("settings")
+                    .icon_size(14.0)
+                    .small()
+                    .ghost()
+                    .dropdown_caret()
+                    .tooltip("Settings")
+                    .build(t),
+            )
+            .entry::<Node>()
+            .and_modify(|mut n| {
+                n.height = Val::Px(22.0);
+                n.border = UiRect::ZERO;
+                n.padding = UiRect::horizontal(Val::Px(6.0));
+                n.column_gap = Val::Px(4.0);
+            });
+        });
+}
+
 /// The account button (top right, on the documents page and in a document): its menu.
 fn on_account(a: On<Activate>, q: Query<&Name>, theme: Res<Theme>, mut commands: Commands) {
     if q.get(a.entity).map(|n| n.as_str()) != Ok("account") {
@@ -190,6 +216,11 @@ fn on_account(a: On<Activate>, q: Query<&Name>, theme: Res<Theme>, mut commands:
         .align_end()
         .min_width(180.0)
         .item(MenuItem::new("account-preferences", "Preferences…").icon("settings"))
+        .item(
+            MenuItem::new("account-shortcuts", "Keyboard shortcuts")
+                .icon("keyboard")
+                .shortcut("Shift+/"),
+        )
         .separator()
         .item(MenuItem::new("account-sign-out", "Sign out").planned());
     open_menu(&mut commands, a.entity, menu.build(&theme));
@@ -199,8 +230,10 @@ fn on_account_action(ev: On<MenuAction>, q: Query<&Name>, mut commands: Commands
     if q.get(ev.entity).map(|n| n.as_str()) != Ok("account") {
         return;
     }
-    if ev.item == "account-preferences" {
-        commands.queue(open_preferences);
+    match ev.item.as_str() {
+        "account-preferences" => commands.queue(open_preferences),
+        "account-shortcuts" => commands.queue(crate::shortcuts::open_shortcuts),
+        _ => {}
     }
 }
 

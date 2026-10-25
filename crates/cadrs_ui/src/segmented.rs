@@ -93,16 +93,7 @@ impl Segmented {
         (
             Name::new(name.clone()),
             SegmentedState { selected },
-            Node {
-                column_gap: Val::Px(1.0),
-                padding: UiRect::all(Val::Px(1.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(t.radius)),
-                flex_shrink: 0.0,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BorderColor::all(t.border),
+            frame(&t),
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let row = p.target_entity();
                 for (i, (label, icon, tip)) in options.into_iter().enumerate() {
@@ -125,6 +116,24 @@ impl Segmented {
             })),
         )
     }
+}
+
+/// The bordered box around a segmented control's buttons, also for a lone button that sits
+/// beside one (the top bar's settings button). The 2 px inset keeps a selected or hovered
+/// button's fill off the border at fractional display scales, where 1 px can round to none.
+pub fn frame(t: &Theme) -> impl Bundle {
+    (
+        Node {
+            column_gap: Val::Px(1.0),
+            padding: UiRect::all(Val::Px(2.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius)),
+            flex_shrink: 0.0,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        BorderColor::all(t.border),
+    )
 }
 
 fn on_segment(

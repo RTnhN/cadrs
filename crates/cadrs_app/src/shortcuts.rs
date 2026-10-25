@@ -1,4 +1,4 @@
-//! The keyboard shortcuts dialog (Shift+/ or Help ▾ › Keyboard shortcuts), laid out like
+//! The keyboard shortcuts dialog (Shift+/ or Settings ▾ › Keyboard shortcuts), laid out like
 //! Onshape's (`reference/onshape/shortcuts/keyboard-shortcut-dialog-03.png`): a 20 px title,
 //! a "Search shortcuts" box in the title row, tabs General | Part Studio | Assembly | 3D view |
 //! Sketch | Drawing, one row per shortcut with right-aligned keycaps and the action (a 🔒 marks bindings
