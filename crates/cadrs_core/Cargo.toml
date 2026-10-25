@@ -42,6 +42,7 @@ tempfile = "3"
 
 [dev-dependencies]
 tiny-skia.workspace = true
+serde_json.workspace = true
 
 # Its own executable is the kernel process it starts (`rebuild::process`), so it has a `main`.
 [[test]]

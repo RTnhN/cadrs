@@ -1,0 +1,33 @@
+# Reference parts
+
+Parts with expected values worked out independently of cadrs, rebuilt through cadrs' feature
+list by `tests/reference_parts.rs` and compared (issue #101). The results table is
+`docs/reference-parts.md`.
+
+## `solidcraft/`
+
+The reference cases of [SolidCraft](https://github.com/tangency-labs/solidcraft)
+(`tests/oracle/`, at commit `0870d6474a87a2cc03707080f848cfd81017f943`), copied unchanged:
+each case's `recipe.json` (the part, in SolidCraft's recipe format) and `expected.json` (what
+it must measure: closed-form values, or values from an independent FreeCAD build, as its
+`source` says). Their `reference.stl` files are not copied yet. Copyright (c) 2026 SolidCraft
+contributors, used under the MIT License (`solidcraft/LICENSE-MIT`); SolidCraft is also
+available under the Apache License 2.0.
+
+The recipe format and its conventions are described in SolidCraft's `tests/oracle/README.md`.
+The translation into cadrs features follows SolidCraft's own reader
+(`apps/solidcraft-cli/src/recipe.rs`) for what the format means, and its comparison rules
+(`apps/solidcraft-cli/src/oracle.rs`): volume and area within a relative 1e-3 unless a case
+says otherwise, centre of mass and bounding box within 1e-3 of the bounding box's diagonal,
+face counts where given, and a STEP export read back with the same volume and area.
+
+## Updating the passing list
+
+`passing.txt` lists the cases cadrs passes; the test fails if one of them stops passing. After
+a change that makes more cases pass, record them with:
+
+```sh
+CADRS_BLESS=1 cargo test -r -p cadrs_core --test reference_parts
+```
+
+which also rewrites `docs/reference-parts.md`.
