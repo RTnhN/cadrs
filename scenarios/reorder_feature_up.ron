@@ -1,0 +1,20 @@
+// #70: dropping a dragged feature on the line just above its own row leaves it where it is
+// (it went to the bottom of the list), and dragging it up past another feature puts it where
+// the blue line is.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("sketch top rect 0 0 40 40"),
+        Custom("sketch top rect 60 0 100 40"),
+        Custom("sketch top rect 120 0 160 40"),
+        Wait(3),
+        Screenshot("01-three-sketches"),
+        Drag(ui("feature-sketch-2"), ui_at("feature-sketch-2", 0.5, 0.05)),
+        Wait(3),
+        Screenshot("02-sketch-2-dropped-on-its-own-place"),
+        Drag(ui("feature-sketch-3"), ui_at("feature-sketch-1", 0.5, 0.15)),
+        Wait(3),
+        Screenshot("03-sketch-3-above-sketch-1"),
+    ],
+)

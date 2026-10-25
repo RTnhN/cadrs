@@ -108,11 +108,13 @@ pub mod suppress_variable;
 pub mod surfacing_ui;
 pub mod tab_folders;
 pub mod tab_manager;
+pub mod thread_ui;
 pub mod threads_ui;
 pub mod thumbnail;
 pub mod tool_input;
 pub mod transform_ui;
 pub mod units_dialog;
+pub mod update;
 pub mod variables_ui;
 pub mod view_cube;
 pub mod view_options;
@@ -650,6 +652,7 @@ impl Plugin for CadrsAppPlugin {
                 accept::AcceptPlugin,
                 frame_stats::FrameStatsPlugin,
                 frame_profile::FrameProfilePlugin,
+                update::UpdatePlugin,
             ))
             .add_plugins((
                 parts::PartsPlugin,

@@ -1,0 +1,31 @@
+// The top bar's light / dark / system toggle: dark at once on the documents page, still dark in
+// a document (menus and dialogs too), and back to light; scripted runs read the system as light.
+Scenario(
+    start: Some("landing"),
+    seed_documents: 6,
+    steps: [
+        WaitFor("color-scheme"),
+        Screenshot("01-light-system"),
+        Click(ui("color-scheme-1")),
+        Screenshot("02-dark-documents"),
+        Click(ui("create")),
+        WaitFor("new-document"),
+        Screenshot("03-dark-create-menu"),
+        Click(ui("new-document")),
+        WaitFor("new-document-dialog"),
+        Type("Dark bracket"),
+        Screenshot("04-dark-new-document-dialog"),
+        Click(ui("new-document-create")),
+        WaitFor("document-shell"),
+        Screenshot("05-dark-document"),
+        Click(ui("account")),
+        Click(ui("account-preferences")),
+        WaitFor("preferences-dialog"),
+        Screenshot("06-dark-preferences"),
+        Click(ui("pref-cancel")),
+        Click(ui("color-scheme-0")),
+        Screenshot("07-light-document"),
+        Click(ui("color-scheme-2")),
+        Screenshot("08-system-is-light-in-scripts"),
+    ],
+)

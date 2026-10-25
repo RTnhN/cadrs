@@ -23,7 +23,7 @@ use bevy::prelude::*;
 use cadrs_core::FeatureId;
 use cadrs_core::commands::{EditSketch, SetSketchVisibility};
 use cadrs_sketch::{Sketch, SketchOp, Vec2 as SVec2};
-use cadrs_ui::{Notification, TextInputField, Theme, show_notification};
+use cadrs_ui::{Notification, Theme, show_notification};
 
 use crate::sketch::SketchSession;
 use crate::{ActiveDocument, AppState};
@@ -73,7 +73,7 @@ fn paste_shortcut(
     mut keys_in: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    q_fields: Query<(), With<TextInputField>>,
+    q_fields: Query<(), With<cadrs_ui::KeyboardField>>,
     session: Option<Res<SketchSession>>,
     clipboard: Res<SketchClipboard>,
     mut commands: Commands,
@@ -205,8 +205,18 @@ pub fn show_all_sketches(world: &mut World) {
     doc.squash_element_since(mark, element, "Show all sketches");
 }
 
-/// Whether a sketch is shown in the view.
+/// Whether a sketch is shown in the view, or a Plane (by its eye alone, #66).
 pub fn sketch_shown(world: &World, id: FeatureId) -> bool {
+    let el = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element());
+    if let Some(el) = el
+        && el
+            .feature(id)
+            .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)))
+    {
+        return el.sketch_visibility(id) != Some(false);
+    }
     !world
         .resource::<crate::parts::PartCache>()
         .hidden_sketches

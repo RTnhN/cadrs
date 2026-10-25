@@ -23,6 +23,7 @@ pub mod collapsible;
 pub mod color_editor;
 pub mod color_legend;
 pub mod color_picker;
+pub mod color_scheme;
 pub mod command_palette;
 pub mod cursor;
 pub mod dialog;
@@ -49,10 +50,12 @@ pub mod list;
 pub mod menu;
 pub mod name_popup;
 pub mod path_field;
+pub mod progress;
 pub mod quick_dim;
 pub mod radio;
 pub mod scrollbar;
 pub mod segmented;
+pub mod selectable_text;
 pub mod selection_box;
 pub mod selection_field;
 pub mod selection_list;
@@ -92,6 +95,10 @@ pub use color_legend::{ColorLegend, color_map};
 pub use color_picker::{
     ColorMixer, ColorMixerChange, ColorMixerState, ColorSwatch, SwatchColor, SwatchSelected,
 };
+pub use color_scheme::{
+    ActiveTheme, Appearance, ColorScheme, KeepColors, KeepFill, Mapped, RaisedSurface, SchemeMap,
+    SchemePreference, SchemeToggle, authored, by_scheme, dark_in_force, scheme_toggle,
+};
 pub use command_palette::{
     CommandPalette, CommandPaletteClose, CommandPaletteLayer, CommandPaletteResults, palette_row,
 };
@@ -126,7 +133,9 @@ pub use inline_edit::{
     DoubleClick, DoubleClickable, InlineEdit, InlineEditCancel, InlineEditCommit, InlineEditLabel,
     InlineEditOptions, begin_inline_edit,
 };
-pub use input::{CaretBlinkOverride, TextCancel, TextInput, TextInputField, TextSubmit};
+pub use input::{
+    CaretBlinkOverride, KeyboardField, TextCancel, TextInput, TextInputField, TextSubmit,
+};
 pub use list::{GridItem, ListItem};
 pub use menu::{
     ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuItem,
@@ -136,6 +145,7 @@ pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
 pub use path_field::{
     PathField, PathFieldBrowse, path_field_value, set_path_field, set_path_field_display,
 };
+pub use progress::{Progress, ProgressBar};
 pub use quick_dim::{
     QuickDim, QuickDimBox, QuickDimCancel, QuickDimCommit, QuickDimField,
     start_typing as quick_dim_start_typing,
@@ -143,11 +153,14 @@ pub use quick_dim::{
 pub use radio::{RadioChange, RadioGroup, RadioGroupState, RadioOption};
 pub use scrollbar::{WheelScroll, horizontal_scrollbar, vertical_scrollbar};
 pub use segmented::{Segmented, SegmentedSelect, SegmentedState};
+pub use selectable_text::{
+    ReadOnlyText, SelectableText, SelectableTextField, SelectableValue, TextCopied,
+};
 pub use selection_field::{
     SelectionField, SelectionFieldActivate, SelectionFieldClear, SelectionFieldState,
 };
 pub use selection_list::{
-    SelectionList, SelectionListActivate, SelectionListItem, SelectionListMove,
+    SelectionList, SelectionListActivate, SelectionListClear, SelectionListItem, SelectionListMove,
     SelectionListRemove, SelectionListReorder, SelectionListReplace, SelectionListReplaceable,
     SelectionListState,
 };
@@ -165,7 +178,7 @@ pub use table::{
 pub use tabs::Tab;
 pub use tag::Tag;
 pub use text_dialog::{TextDialog, TextDialogState};
-pub use theme::Theme;
+pub use theme::{ColorRole, Theme};
 pub use timeline::{TimelineMarker, TimelineRow, TimelineRowState};
 pub use toast::{
     Notification, ToastHost, close_toasts, close_transient_toasts, show_notification, show_toast,
@@ -283,6 +296,7 @@ impl Plugin for CadrsUiPlugin {
             ))
             .add_plugins(file_picker::FilePickerPlugin)
             .add_plugins(radio::RadioPlugin)
+            .add_plugins(progress::ProgressPlugin)
             .add_plugins(entry_list::EntryListPlugin)
             .add_plugins(name_popup::NamePopupPlugin)
             .add_plugins((
@@ -293,6 +307,8 @@ impl Plugin for CadrsUiPlugin {
                 splitter::SplitterPlugin,
                 selection_box::SelectionBoxPlugin,
                 color_editor::ColorEditorPlugin,
+                selectable_text::SelectableTextPlugin,
+                color_scheme::ColorSchemePlugin,
             ))
             .add_message::<ScriptCommand>();
     }

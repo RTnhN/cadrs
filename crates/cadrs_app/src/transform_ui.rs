@@ -249,7 +249,7 @@ pub fn takes_connectors(kind: &FeatureKind, field: AppliedField) -> bool {
 pub(crate) fn name(kind: &FeatureKind) -> Option<&'static str> {
     matches!(kind, FeatureKind::Transform(_))
         .then_some("transform")
-        .or_else(|| crate::surfacing_ui::name(kind))
+        .or_else(|| crate::thread_ui::name(kind))
 }
 
 pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
@@ -258,7 +258,7 @@ pub(crate) fn layout(kind: &FeatureKind) -> Option<String> {
             "transform {:?} {} {} {} {:?}",
             x.transform_type, x.copy, x.flip, x.flip_primary, x.secondary
         )),
-        k => crate::surfacing_ui::layout(k),
+        k => crate::thread_ui::layout(k),
     }
 }
 
@@ -305,7 +305,7 @@ pub(crate) fn items(
     role: Role,
 ) -> Option<Vec<String>> {
     let FeatureKind::Transform(x) = kind else {
-        return crate::surfacing_ui::items(features, cache, kind, role);
+        return crate::thread_ui::items(features, cache, kind, role);
     };
     Some(match role {
         Role::TransformParts => crate::applied::part_names(cache, &x.parts)
@@ -351,7 +351,7 @@ pub(crate) fn list_field(role: Role) -> Option<AppliedField> {
         Role::TransformTo => AppliedField::TransformTo,
         Role::TransformAxis => AppliedField::TransformAxis,
         Role::TransformScalePoint => AppliedField::TransformScalePoint,
-        r => return crate::surfacing_ui::list_field(r),
+        r => return crate::thread_ui::list_field(r),
     })
 }
 
@@ -573,7 +573,7 @@ pub(crate) fn body(
 
 pub(crate) fn number_text(kind: &FeatureKind, role: Role) -> Option<String> {
     let FeatureKind::Transform(x) = kind else {
-        return crate::surfacing_ui::number_text(kind, role);
+        return crate::thread_ui::number_text(kind, role);
     };
     Some(match role {
         Role::TransformDistance => x.distance_expr.clone(),
@@ -591,7 +591,7 @@ pub(crate) fn select_index(kind: &FeatureKind, role: Role) -> Option<usize> {
         (FeatureKind::Transform(x), Role::TransformType) => {
             Some(index_of(&TransformType::ALL, &x.transform_type))
         }
-        (k, r) => crate::surfacing_ui::select_index(k, r),
+        (k, r) => crate::thread_ui::select_index(k, r),
     }
 }
 
@@ -600,12 +600,12 @@ pub(crate) fn select(k: &mut FeatureKind, role: Role, i: usize) {
         (FeatureKind::Transform(x), Role::TransformType) => {
             x.transform_type = TransformType::ALL[i.min(TransformType::ALL.len() - 1)]
         }
-        (k, r) => crate::surfacing_ui::select(k, r, i),
+        (k, r) => crate::thread_ui::select(k, r, i),
     }
 }
 
 pub(crate) fn is_checkbox(name: &str) -> bool {
-    name == "transform-copy-checkbox" || crate::surfacing_ui::is_checkbox(name)
+    name == "transform-copy-checkbox" || crate::thread_ui::is_checkbox(name)
 }
 
 pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'static str> {
@@ -614,7 +614,7 @@ pub(crate) fn checkbox(k: &mut FeatureKind, name: &str, on: bool) -> Option<&'st
             x.copy = on;
             Some("Copy part")
         }
-        (k, n) => crate::surfacing_ui::checkbox(k, n, on),
+        (k, n) => crate::thread_ui::checkbox(k, n, on),
     }
 }
 
@@ -627,16 +627,16 @@ pub(crate) fn is_signed(role: Role) -> bool {
             | Role::TransformY
             | Role::TransformZ
             | Role::TransformAngle
-    ) || crate::surfacing_ui::is_signed(role)
+    ) || crate::thread_ui::is_signed(role)
 }
 
 /// The scale: a plain number greater than zero.
 pub(crate) fn is_plain(role: Role) -> bool {
-    role == Role::TransformScale || crate::surfacing_ui::is_plain(role)
+    role == Role::TransformScale || crate::thread_ui::is_plain(role)
 }
 
 pub(crate) fn is_angle(role: Role) -> bool {
-    role == Role::TransformAngle || crate::surfacing_ui::is_angle(role)
+    role == Role::TransformAngle || crate::thread_ui::is_angle(role)
 }
 
 pub(crate) fn number_label(role: Role) -> Option<&'static str> {
@@ -647,13 +647,13 @@ pub(crate) fn number_label(role: Role) -> Option<&'static str> {
         Role::TransformZ => "Z",
         Role::TransformAngle => "Angle",
         Role::TransformScale => "Scale",
-        r => return crate::surfacing_ui::number_label(r),
+        r => return crate::thread_ui::number_label(r),
     })
 }
 
 pub(crate) fn set_number(k: &mut FeatureKind, role: Role, v: f64, expr: String) {
     if !matches!(k, FeatureKind::Transform(_)) {
-        crate::surfacing_ui::set_number(k, role, v, expr);
+        crate::thread_ui::set_number(k, role, v, expr);
         return;
     }
     let FeatureKind::Transform(x) = k else { return };
@@ -673,7 +673,7 @@ pub(crate) fn set_number(k: &mut FeatureKind, role: Role, v: f64, expr: String) 
 /// The opposite-direction flip, the flip primary axis and reorient secondary axis buttons.
 pub(crate) fn flip(k: &mut FeatureKind, role: Role) {
     if !matches!(k, FeatureKind::Transform(_)) {
-        crate::surfacing_ui::flip(k, role);
+        crate::thread_ui::flip(k, role);
         return;
     }
     let FeatureKind::Transform(x) = k else { return };
@@ -688,7 +688,7 @@ pub(crate) fn flip(k: &mut FeatureKind, role: Role) {
 /// An item's ✕.
 pub(crate) fn remove(k: &mut FeatureKind, role: Role, i: usize) {
     if !matches!(k, FeatureKind::Transform(_)) {
-        crate::surfacing_ui::remove(k, role, i);
+        crate::thread_ui::remove(k, role, i);
         return;
     }
     let FeatureKind::Transform(x) = k else { return };

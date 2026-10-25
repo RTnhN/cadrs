@@ -117,6 +117,8 @@ pub enum AppliedKind {
     Thicken,
     Helix,
     Fill,
+    /// The Thread feature (`crate::thread_ui`).
+    Thread,
     /// P3I.2: the Sheet metal model (`crate::sheetmetal_ui`).
     SheetMetal,
     /// P3I.9: Sheet metal loft, Form, Tag (`crate::sheetmetal_p3i9_ui`).
@@ -150,6 +152,7 @@ impl AppliedKind {
             FeatureKind::Thicken(_) => Some(Self::Thicken),
             FeatureKind::Helix(_) => Some(Self::Helix),
             FeatureKind::Fill(_) => Some(Self::Fill),
+            FeatureKind::Thread(_) => Some(Self::Thread),
             FeatureKind::SheetMetalModel(_) => Some(Self::SheetMetal),
             k @ (FeatureKind::SheetMetalLoft(_)
             | FeatureKind::Form(_)
@@ -242,6 +245,8 @@ pub enum AppliedField {
     ThickenEntities,
     HelixEntity,
     FillEdges,
+    /// The Thread's cylinder or hole edge.
+    ThreadEdge,
     /// P3I.2: the Sheet metal model's fields: Convert's parts, faces to exclude and edges or
     /// cylinders to bend (Thicken's too); Extrude's curves, arcs to extrude as bends and the Up
     /// to entities of its two ends; Thicken's faces and regions.
@@ -304,6 +309,7 @@ impl AppliedSession {
             dots: matches!(self.kind, AppliedKind::Pattern(_)).then_some(self.feature),
             // The feature's own faces (a fillet's round) can't be picked for it.
             skip_op: Some(self.feature.0),
+            whole_parts: false,
         };
         let planes = [true; 3];
         match self.field {
@@ -316,9 +322,15 @@ impl AppliedSession {
                 edges: true,
                 ..none
             },
-            AppliedField::Faces | AppliedField::MergeScope => PickFilter {
+            AppliedField::Faces => PickFilter {
                 faces: true,
                 edges: true,
+                ..none
+            },
+            // Whole parts only: no edges or vertices to hover.
+            AppliedField::MergeScope => PickFilter {
+                faces: true,
+                whole_parts: true,
                 ..none
             },
             AppliedField::Points => PickFilter {
@@ -495,11 +507,11 @@ impl AppliedSession {
                 edges: true,
                 ..none
             },
-            // The parts' faces and edges pick the parts (the Transform keeps their names, so its
-            // own op never shows on them).
+            // Whole parts only, no edges or vertices to hover (the Transform keeps their names,
+            // so its own op never shows on them).
             AppliedField::TransformParts => PickFilter {
                 faces: true,
-                edges: true,
+                whole_parts: true,
                 skip_op: None,
                 ..none
             },
@@ -552,6 +564,10 @@ impl AppliedSession {
             AppliedField::FillEdges => PickFilter {
                 edges: true,
                 sketch_curves: true,
+                ..none
+            },
+            AppliedField::ThreadEdge => PickFilter {
+                edges: true,
                 ..none
             },
             AppliedField::Sm9(f) => crate::sheetmetal_p3i9_ui::pick_filter(f, none),
@@ -624,6 +640,7 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
     let advanced = crate::advanced::initial(world, kind, &picked)
         .or_else(|| crate::pattern::initial(world, kind, &picked))
         .or_else(|| crate::surfacing_ui::initial(world, kind, &picked))
+        .or_else(|| crate::thread_ui::initial(world, kind, &picked))
         .or_else(|| {
             (kind == AppliedKind::SheetMetal)
                 .then(|| crate::sheetmetal_ui::initial(world, &picked))
@@ -730,6 +747,7 @@ pub fn begin(world: &mut World, kind: AppliedKind) {
         | AppliedKind::Thicken
         | AppliedKind::Helix
         | AppliedKind::Fill
+        | AppliedKind::Thread
         | AppliedKind::SheetMetal
         | AppliedKind::Sm9(_)
         | AppliedKind::SmFeature(_)
@@ -814,6 +832,7 @@ pub fn edit(world: &mut World, feature: FeatureId) {
         AppliedKind::Thicken => AppliedField::ThickenEntities,
         AppliedKind::Helix => AppliedField::HelixEntity,
         AppliedKind::Fill => AppliedField::FillEdges,
+        AppliedKind::Thread => AppliedField::ThreadEdge,
         AppliedKind::SheetMetal => match &before.kind {
             FeatureKind::SheetMetalModel(x) => crate::sheetmetal_ui::first_field(x.operation),
             _ => AppliedField::SmParts,
@@ -1058,6 +1077,11 @@ fn applied_picks(
     };
     for p in picks.read() {
         let Some(pick) = p.0 else { continue };
+        // A feature never refers to itself: the second click of the double click that opened
+        // its dialog picks its own row (#65).
+        if pick == Pick::Feature(s.feature) {
+            continue;
+        }
         let field = s.field;
         commands.queue(move |world: &mut World| {
             let Some(f) = current(world) else { return };
@@ -1185,6 +1209,11 @@ fn applied_picks(
                     _,
                 ) => {
                     if !crate::surfacing_ui::pick(world, k, field, pick) {
+                        return;
+                    }
+                }
+                (k @ FeatureKind::Thread(_), _) => {
+                    if !crate::thread_ui::pick(world, k, field, pick) {
                         return;
                     }
                 }
@@ -1561,6 +1590,7 @@ fn show_references(
         k @ (FeatureKind::Thicken(_) | FeatureKind::Helix(_) | FeatureKind::Fill(_)) => {
             want.extend(crate::surfacing_ui::references(k, &cache))
         }
+        k @ FeatureKind::Thread(_) => want.extend(crate::thread_ui::references(k, &cache)),
         k @ FeatureKind::SheetMetalModel(_) => {
             want.extend(crate::sheetmetal_ui::references(k, &cache))
         }

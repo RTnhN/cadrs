@@ -54,45 +54,54 @@ use crate::{ActiveDocument, AppState};
 
 pub struct TabManagerPlugin;
 
+/// The active tab's row in the list.
+const ACTIVE_FILL: Color = Color::srgb_u8(0xb3, 0xdc, 0xf2);
+
 impl Plugin for TabManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TabManager>()
-            .init_resource::<ManagerDrag>()
-            .init_resource::<TabThumbs>()
-            .init_resource::<PendingRowRename>()
-            .add_systems(
-                Update,
-                (
-                    read_search,
-                    sync_panel,
-                    fill_thumbs,
-                    sync_filters,
-                    sync_rows,
-                    sync_preview,
-                    start_row_rename,
-                    place_drop,
-                )
-                    .chain()
-                    .run_if(in_state(AppState::Document)),
+        app.add_systems(Startup, |mut map: ResMut<cadrs_ui::SchemeMap>| {
+            // The active tab's row: the selected rows' blue in dark.
+            map.pair(
+                cadrs_ui::ColorRole::Fill,
+                ACTIVE_FILL,
+                cadrs_ui::Theme::dark().list_selected,
+            );
+        })
+        .init_resource::<TabManager>()
+        .init_resource::<ManagerDrag>()
+        .init_resource::<TabThumbs>()
+        .init_resource::<PendingRowRename>()
+        .add_systems(
+            Update,
+            (
+                read_search,
+                sync_panel,
+                fill_thumbs,
+                sync_filters,
+                sync_rows,
+                sync_preview,
+                start_row_rename,
+                place_drop,
             )
-            .add_systems(
-                OnExit(AppState::Document),
-                |mut tm: ResMut<TabManager>,
-                 mut d: ResMut<ManagerDrag>,
-                 mut th: ResMut<TabThumbs>| {
-                    *tm = TabManager::default();
-                    *d = ManagerDrag::default();
-                    *th = TabThumbs::default();
-                },
-            )
-            .add_observer(on_button)
-            .add_observer(on_sort_action)
-            .add_observer(on_row_menu)
-            .add_observer(on_row_menu_action)
-            .add_observer(on_row_rename_commit)
-            .add_observer(on_drag_start)
-            .add_observer(on_drag)
-            .add_observer(on_drag_end);
+                .chain()
+                .run_if(in_state(AppState::Document)),
+        )
+        .add_systems(
+            OnExit(AppState::Document),
+            |mut tm: ResMut<TabManager>, mut d: ResMut<ManagerDrag>, mut th: ResMut<TabThumbs>| {
+                *tm = TabManager::default();
+                *d = ManagerDrag::default();
+                *th = TabThumbs::default();
+            },
+        )
+        .add_observer(on_button)
+        .add_observer(on_sort_action)
+        .add_observer(on_row_menu)
+        .add_observer(on_row_menu_action)
+        .add_observer(on_row_rename_commit)
+        .add_observer(on_drag_start)
+        .add_observer(on_drag)
+        .add_observer(on_drag_end);
     }
 }
 
@@ -959,7 +968,7 @@ fn sync_rows(world: &mut World, mut last: Local<Option<RowsKey>>) {
         .iter()
         .filter_map(|r| Some((r.item.id(), thumb_of(world, r.item.id())?)))
         .collect();
-    let active_fill = Color::srgb_u8(0xb3, 0xdc, 0xf2);
+    let active_fill = ACTIVE_FILL;
     let active_bar = Color::srgb_u8(0x1f, 0x5f, 0xa8);
     world.entity_mut(rows_box).with_children(|list| {
         if rows.is_empty() {

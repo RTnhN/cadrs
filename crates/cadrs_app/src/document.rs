@@ -32,7 +32,6 @@ use cadrs_core::commands::{
 use cadrs_core::{ElementId, FeatureId};
 use cadrs_ui::Button;
 use cadrs_ui::ShortcutKey;
-use cadrs_ui::input::TextInputField;
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
@@ -53,6 +52,10 @@ impl Plugin for DocumentPlugin {
             .add_observer(remember_feature_split)
             .init_resource::<crate::WorkspaceUnits>()
             .add_systems(OnEnter(AppState::Document), spawn_shell)
+            .add_systems(
+                Update,
+                back_viewport_tools.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
+            )
             .add_systems(OnExit(AppState::Document), save_on_exit)
             .add_systems(
                 Update,
@@ -599,6 +602,10 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             ..default()
         })
         .with_children(|r| {
+            // Light, dark or the system's scheme.
+            r.spawn(cadrs_ui::scheme_toggle(t))
+                .entry::<Node>()
+                .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
             // (Explore, notifications, apps and Share are left out until they do something:
             // issue #13.)
             r.spawn((
@@ -774,16 +781,36 @@ fn right_strip(vp: &mut ChildSpawnerCommands, t: &Theme) {
     });
 }
 
+/// The bottom-right tools over the 3D view.
+#[derive(Component)]
+struct ViewportTools;
+
+/// Behind the bottom-right tools: nothing on white, a dark veil in dark, where the light icons
+/// would vanish over a light part.
+fn viewport_tools_backing() -> Color {
+    cadrs_ui::by_scheme(Color::NONE, Color::srgba(0.12, 0.13, 0.15, 0.72))
+}
+
+fn back_viewport_tools(mut q: Query<&mut BackgroundColor, With<ViewportTools>>) {
+    for mut bg in &mut q {
+        bg.0 = viewport_tools_backing();
+    }
+}
+
 fn bottom_right_tools(vp: &mut ChildSpawnerCommands, t: &Theme) {
     vp.spawn((
         Name::new("viewport-tools"),
+        ViewportTools,
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(6.0),
             bottom: Val::Px(2.0),
             column_gap: Val::Px(4.0),
+            border_radius: BorderRadius::all(Val::Px(t.radius)),
             ..default()
         },
+        BackgroundColor(viewport_tools_backing()),
+        cadrs_ui::KeepFill,
     ))
     .with_children(|s| {
         // "Area: … mm²" while a region is selected (`intro-to-sketching/ex1-step8.png`).
@@ -1565,13 +1592,25 @@ struct EnabledColor(Color);
 
 /// While the sketch dialog waits for a plane, the search box is greyed out with the sketch
 /// tools (`screens/07`: text about #cecece on an almost white box).
+#[allow(clippy::type_complexity)]
 fn sync_search_tools(
     session: Option<Res<SketchSession>>,
     theme: Res<Theme>,
     mut q_root: Query<(Entity, &mut BackgroundColor), With<SearchTools>>,
     q_children: Query<&Children>,
-    mut q_text: Query<(&mut TextColor, Option<&EnabledColor>)>,
-    mut q_border: Query<(&mut BorderColor, Option<&EnabledColor>), Without<TextColor>>,
+    mut q_text: Query<(
+        &mut TextColor,
+        Option<&EnabledColor>,
+        Option<&cadrs_ui::Mapped<TextColor>>,
+    )>,
+    mut q_border: Query<
+        (
+            &mut BorderColor,
+            Option<&EnabledColor>,
+            Option<&cadrs_ui::Mapped<BorderColor>>,
+        ),
+        Without<TextColor>,
+    >,
     mut commands: Commands,
 ) {
     let disabled = session.as_ref().is_some_and(|s| s.waiting_for_plane);
@@ -1584,14 +1623,15 @@ fn sync_search_tools(
         };
         bg.set_if_neq(BackgroundColor(want));
         for e in q_children.iter_descendants(root) {
-            if let Ok((mut c, orig)) = q_text.get_mut(e) {
-                let base = orig.map_or(c.0, |o| o.0);
+            // As built: in light, even while the dark scheme shows it mapped.
+            if let Ok((mut c, orig, mapped)) = q_text.get_mut(e) {
+                let base = orig.map_or_else(|| cadrs_ui::authored(&*c, mapped), |o| o.0);
                 if orig.is_none() {
                     commands.entity(e).try_insert(EnabledColor(base));
                 }
                 c.set_if_neq(TextColor(if disabled { grey } else { base }));
-            } else if let Ok((mut b, orig)) = q_border.get_mut(e) {
-                let base = orig.map_or(b.top, |o| o.0);
+            } else if let Ok((mut b, orig, mapped)) = q_border.get_mut(e) {
+                let base = orig.map_or_else(|| cadrs_ui::authored(&*b, mapped)[0], |o| o.0);
                 if orig.is_none() {
                     commands.entity(e).try_insert(EnabledColor(base));
                 }
@@ -3473,6 +3513,7 @@ enum RowKind {
     /// The surfacing features.
     Thicken,
     Helix,
+    Thread,
     Fill,
     /// Move face, Delete face, Simplify (their icon).
     DirectEdit(&'static str),
@@ -3520,6 +3561,7 @@ impl RowKind {
             RowKind::Thicken => "thicken",
             // icon-rs has no helix or fill icon yet (recorded in PROGRESS.md).
             RowKind::Helix => "thread",
+            RowKind::Thread => "thread",
             RowKind::Fill => "surface",
             RowKind::Variable => "variables",
             RowKind::SheetMetalModel => "sheet-metal-model",
@@ -3630,6 +3672,7 @@ fn rebuild_feature_rows(
                 cadrs_core::FeatureKind::Derived(_) => RowKind::Derived,
                 cadrs_core::FeatureKind::Thicken(_) => RowKind::Thicken,
                 cadrs_core::FeatureKind::Helix(_) => RowKind::Helix,
+                cadrs_core::FeatureKind::Thread(_) => RowKind::Thread,
                 cadrs_core::FeatureKind::Fill(_) => RowKind::Fill,
                 cadrs_core::FeatureKind::Variable(_) => RowKind::Variable,
                 cadrs_core::FeatureKind::SheetMetalModel(_) => RowKind::SheetMetalModel,
@@ -3680,7 +3723,12 @@ fn rebuild_feature_rows(
                 under.0.contains(&f.id),
                 kind,
                 failed,
-                !cache.hidden_sketches.contains(&f.id),
+                // A Plane's eye only (#66); a sketch's also follows the features using it.
+                if kind == RowKind::Plane {
+                    el.sketch_visibility(f.id) != Some(false)
+                } else {
+                    !cache.hidden_sketches.contains(&f.id)
+                },
                 cache.warnings.get(&f.id).cloned(),
             )
         })
@@ -3942,8 +3990,11 @@ fn rebuild_feature_rows(
                 // P3G.4 (DV3.5): the chevron opens what it brought in.
                 item = item.disclosure(Some(*open));
             }
-            // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view.
-            if kind.is_sketch() || *kind == RowKind::Sm9("sheet-metal-form") {
+            // P3I.9 (SM20, `form-10.png`): a Form's eye shows or hides its sketch on the flat view,
+            // and a Plane's the plane (#66).
+            if kind.is_sketch()
+                || matches!(*kind, RowKind::Sm9("sheet-metal-form") | RowKind::Plane)
+            {
                 // The eye shows or hides the sketch (PS1.5); it shows while the row is hovered.
                 let tip = if *shown {
                     format!("Hide {name}")
@@ -4475,6 +4526,10 @@ fn on_feature_context_menu(
             .map(|f| (f.sketch().is_some(), f.is_part_feature()))
     });
     let is_sketch = kind.is_some_and(|k| k.0);
+    let is_plane = doc
+        .as_ref()
+        .and_then(|d| d.active_element()?.feature(row.0))
+        .is_some_and(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)));
     let appearance = match kind {
         Some((true, _)) => Some(
             MenuItem::new("feature-sketch-appearance", "Edit sketch appearance…")
@@ -4505,7 +4560,11 @@ fn on_feature_context_menu(
             .is_some_and(|i| el.rollback_index() == i + 1)
     });
     let in_dialog = session.is_some() || extrude.is_some();
-    let shown = !cache.hidden_sketches.contains(&row.0);
+    let shown = if is_plane {
+        el.is_some_and(|el| el.sketch_visibility(row.0) != Some(false))
+    } else {
+        !cache.hidden_sketches.contains(&row.0)
+    };
     // P3D.1 (IR5.5): the items in the order `ex1-step2.png` shows them.
     let mut menu = Menu::new("feature-context-menu")
         .min_width(190.0)
@@ -4656,7 +4715,7 @@ fn on_feature_context_menu(
             "Add selection to folder…",
         ))
         .separator();
-    if is_sketch {
+    if is_sketch || is_plane {
         menu = menu.item(if shown {
             MenuItem::new("feature-hide", "Hide").icon("hidden")
         } else {
@@ -4938,17 +4997,15 @@ pub fn rename_feature(world: &mut World, id: FeatureId) {
     world.flush();
 }
 
-/// The eye on a sketch's row shows or hides the sketch (PS1.5), as an undoable step.
+/// The eye on a sketch's row shows or hides the sketch (PS1.5), and on a Plane's the plane
+/// (#66), as an undoable step.
 fn on_sketch_eye(ev: On<cadrs_ui::TreeRowToggled>, q: Query<&FeatureRow>, mut commands: Commands) {
     let Ok(row) = q.get(ev.entity) else {
         return;
     };
     let sketch = row.0;
     commands.queue(move |world: &mut World| {
-        let shown = !world
-            .resource::<crate::parts::PartCache>()
-            .hidden_sketches
-            .contains(&sketch);
+        let shown = crate::feature_menu::sketch_shown(world, sketch);
         let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
             return;
         };
@@ -5044,7 +5101,7 @@ fn document_shortcuts(
     mut keys_in: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    q_fields: Query<(), With<TextInputField>>,
+    q_fields: Query<(), With<cadrs_ui::KeyboardField>>,
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     doc: Option<ResMut<ActiveDocument>>,
     (session, extrude): (

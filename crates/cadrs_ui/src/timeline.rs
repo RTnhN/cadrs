@@ -155,7 +155,7 @@ impl TimelineRow {
                     t.list_active,
                     Color::NONE,
                 )
-                .with_selected(Color::srgb_u8(0xcf, 0xe3, 0xf7)),
+                .with_selected(t.timeline_selected),
                 border: crate::style::StateColors::all(Color::NONE),
                 foreground: crate::style::StateColors::all(t.foreground),
                 focus_ring: t.focus_ring,

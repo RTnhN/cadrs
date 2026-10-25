@@ -1,0 +1,35 @@
+// #72: switching an extrude to Remove turns it into the material, and back to Add away from
+// it. A 40 x 40 block extruded 20 down from Top; a Ø16 circle on Top extrudes up (New); the
+// Remove tab flips it down into the block (a hole); the Add tab flips it back up. A circle on
+// Top under a block (its default way already cuts into it) keeps its direction.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("sketch top rect 0 0 40 40"),
+        Key("Shift+E"),
+        WaitFor("extrude-dialog"),
+        Click(xyz(20, 20, 0)),
+        Click(ui("extrude-flip")),
+        Click(ui("extrude-depth-field")),
+        Key("Ctrl+A"),
+        Type("20"),
+        Key("Enter"),
+        Custom("sketch top circle 20 20 8"),
+        Key("Shift+E"),
+        WaitFor("extrude-dialog"),
+        Click(ui("feature-sketch-2")),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("01-new-grows-up"),
+        Click(ui("extrude-operation-2")),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("02-remove-flips-down-into-block"),
+        Click(ui("extrude-operation-1")),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("03-add-flips-back-up"),
+        Key("Escape"),
+    ],
+)

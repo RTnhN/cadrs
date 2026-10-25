@@ -1332,7 +1332,10 @@ fn compute_draw(world: &mut World) {
                 l.into_iter()
                     .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32))
                     .collect(),
-                Color::srgb_u8(0x3c, 0x40, 0x46),
+                cadrs_ui::by_scheme(
+                    Color::srgb_u8(0x3c, 0x40, 0x46),
+                    Color::srgb_u8(0xa0, 0xa5, 0xac),
+                ),
             ));
         }
     }

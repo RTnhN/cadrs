@@ -36,7 +36,6 @@ use cadrs_sketch::hit::hit_test;
 use cadrs_sketch::{
     CurveId, CurveKind, CurveRef, DimensionKind, PlaneFrame, Sketch, SketchEntity, SketchOp,
 };
-use cadrs_ui::input::TextInputField;
 
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
 use crate::sketch_draw::SketchRubberGizmos;
@@ -441,7 +440,7 @@ const ARROW_LEN: f32 = 28.0;
 fn edit_tools_keys(
     mut keys_in: MessageReader<KeyboardInput>,
     focus: Res<InputFocus>,
-    q_fields: Query<(), With<TextInputField>>,
+    q_fields: Query<(), With<cadrs_ui::KeyboardField>>,
     keys: Res<ButtonInput<KeyCode>>,
     dialogs: (
         Query<(), With<cadrs_ui::DialogRoot>>,
@@ -1249,12 +1248,16 @@ fn draw_offset_preview(
             tip - dir * 9.0 - side * 5.0,
         ];
         let to_w = |p: Vec2| map.to_sketch(p).map(|q| world(&frame, q));
+        let arrow = cadrs_ui::by_scheme(
+            Color::srgb_u8(0x33, 0x33, 0x33),
+            Color::srgb_u8(0xd0, 0xd3, 0xd8),
+        );
         if let (Some(a), Some(b)) = (to_w(base), to_w(tip)) {
-            gizmos.line(a, b, Color::srgb_u8(0x33, 0x33, 0x33));
+            gizmos.line(a, b, arrow);
         }
         let pts: Vec<Vec3> = head.iter().filter_map(|p| to_w(*p)).collect();
         if pts.len() == 3 {
-            gizmos.linestrip(pts, Color::srgb_u8(0x33, 0x33, 0x33));
+            gizmos.linestrip(pts, arrow);
         }
     }
 }

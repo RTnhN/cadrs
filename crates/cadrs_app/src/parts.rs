@@ -55,7 +55,8 @@ pub struct HoverParts(pub Vec<PartId>, pub Vec<PartId>);
 
 impl Plugin for PartsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PartCache>()
+        app.init_resource::<EdgesOnly>()
+            .init_resource::<PartCache>()
             .init_resource::<PartOverride>()
             .init_resource::<PartGhosts>()
             .init_resource::<FailedReferences>()
@@ -516,6 +517,9 @@ pub struct PartCache {
     pub sketch_curves: Vec<SketchCurves>,
     /// Bumped whenever the parts change (or which are shown).
     pub generation: u64,
+    /// Bumped by every rebuild taken (its errors are the current ones once `rebuilding` is
+    /// false).
+    pub builds: u64,
     /// The parts' settings (names, hidden, appearances, materials), from the Part Studio.
     pub props: Vec<cadrs_core::PartProps>,
     /// The features' and sketches' appearances (PS9.4, PS9.5), from the Part Studio.
@@ -1142,6 +1146,7 @@ impl PartCache {
             .collect();
         self.uses = build.uses.clone();
         self.names = build.names.clone();
+        self.builds += 1;
         self.rebuilding = false;
     }
 }
@@ -2001,6 +2006,11 @@ pub fn part_lines_culled(part: &Part, view: &ViewState, cull: bool) -> Vec<Vec<V
 // ---------------------------------------------------------------------------------------------
 // Scene
 
+/// Whether the shown parts' faces are hidden and their edges stand alone on the view (the
+/// simulation's undeformed outline, P3F.5): light edges in dark, where black ones would vanish.
+#[derive(Resource, Default, PartialEq)]
+pub(crate) struct EdgesOnly(pub(crate) bool);
+
 /// A part's mesh entity (P3F.5: the simulation hides the parts its results cover).
 #[derive(Component)]
 pub(crate) struct PartMesh {
@@ -2435,10 +2445,11 @@ fn draw_part_edges(
     mut reference_edges: Gizmos<ReferenceEdgeGizmos>,
     dialog: Option<Res<crate::extrude::ExtrudeSession>>,
     mut vertices: Gizmos<VertexGizmos>,
-    (failed, ghosts, analysis): (
+    (failed, ghosts, analysis, edges_only): (
         Res<FailedReferences>,
         Res<PartGhosts>,
         Res<crate::analysis::ShadingAnalysis>,
+        Res<EdgesOnly>,
     ),
     (hover_parts, extra, mut lines_cache): (
         Res<HoverParts>,
@@ -2482,6 +2493,13 @@ fn draw_part_edges(
     // P3E.3b: under the zebra stripes the edges are mid-grey, apart from both bands.
     let edge_color = if analysis.mode == 1 {
         Color::srgb_u8(0x8a, 0x8a, 0x8a)
+    } else if !mode.shaded() || edges_only.0 {
+        // The hidden-line modes draw the faces in the viewport's grey, and edges without their
+        // faces lie on it: light lines in dark.
+        cadrs_ui::by_scheme(
+            Color::srgb_u8(0x14, 0x14, 0x14),
+            Color::srgb_u8(0xd6, 0xd9, 0xde),
+        )
     } else {
         Color::srgb_u8(0x14, 0x14, 0x14)
     };
@@ -3168,10 +3186,16 @@ fn tint_selection(
 struct SketchPlaneTint;
 
 /// A faint white over the faces on the sketch plane: shows where the sketch lies and which of
-/// the parts' faces, edges and points it can draw from.
-const SKETCH_PLANE_TINT: Color = Color::srgba(1.0, 1.0, 1.0, 0.35);
+/// the parts' faces, edges and points it can draw from. In dark a shade instead, so the sketch's
+/// light lines read over the face.
+fn sketch_plane_tint() -> Color {
+    cadrs_ui::by_scheme(
+        Color::srgba(1.0, 1.0, 1.0, 0.35),
+        Color::srgba(0.0, 0.0, 0.0, 0.45),
+    )
+}
 
-/// While a sketch is edited, tints the part faces that lie on its plane ([`SKETCH_PLANE_TINT`]).
+/// While a sketch is edited, tints the part faces that lie on its plane ([`sketch_plane_tint`]).
 #[allow(clippy::too_many_arguments)]
 fn tint_sketch_plane(
     cache: Res<PartCache>,
@@ -3238,7 +3262,7 @@ fn tint_sketch_plane(
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
     .with_inserted_indices(Indices::U32(indices));
     let material = materials.add(StandardMaterial {
-        base_color: SKETCH_PLANE_TINT,
+        base_color: sketch_plane_tint(),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         cull_mode: None,
@@ -3300,6 +3324,8 @@ pub struct PickFilter {
     /// Faces, edges and vertices this operation made are not picked (the open Extrude
     /// dialog's own preview: a click goes through it).
     pub skip_op: Option<cadrs_sketch::OpId>,
+    /// A face picks its whole part ([`Pick::Part`]; a merge scope).
+    pub whole_parts: bool,
 }
 
 impl PickFilter {
@@ -3318,6 +3344,7 @@ impl PickFilter {
             connectors: false,
             dots: None,
             skip_op: None,
+            whole_parts: false,
         }
     }
 
@@ -3338,6 +3365,7 @@ impl PickFilter {
             connectors: true,
             dots: None,
             skip_op: None,
+            whole_parts: false,
         }
     }
 }
@@ -3795,6 +3823,7 @@ pub fn pick_scene(
         (Some((_, _, tf)), Some((s, i, tr))) if tr <= tf + 1e-2 => {
             return Some(Pick::Region(s, i as u32));
         }
+        (Some((f, _, _)), _) if filter.whole_parts => return Some(Pick::Part(f)),
         (Some((f, tag, _)), _) => return Some(Pick::Face(f, tag)),
         (None, Some((s, i, _))) => return Some(Pick::Region(s, i as u32)),
         (None, None) => {}

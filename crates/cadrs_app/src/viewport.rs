@@ -31,7 +31,6 @@ use bevy::text::FontWeight;
 use bevy::ui::{UiGlobalTransform, UiTransform};
 use cadrs_core::{ElementId, FeatureId, PartId};
 use cadrs_sketch::PlaneRef;
-use cadrs_ui::input::TextInputField;
 use cadrs_ui::{FinishAnimations, RenderSurface, Selected, Theme};
 
 use crate::camera::{self, StandardView, ViewState, ease_in_out, ray_square};
@@ -70,6 +69,10 @@ impl Plugin for ViewportPlugin {
             )
             .add_systems(OnEnter(AppState::Document), spawn_scene)
             .add_systems(OnExit(AppState::Document), reset_viewport)
+            .add_systems(
+                Update,
+                recolor_planes.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
+            )
             .add_systems(
                 Update,
                 (
@@ -695,7 +698,7 @@ fn no_light_clusters(add: On<Add, Camera3d>, mut commands: Commands) {
         .insert(bevy::light::cluster::ClusterConfig::None);
 }
 
-fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme: Res<Theme>) {
+fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>) {
     let view = ViewState::default();
     let projection = || ortho_projection(view.scale);
     let transform =
@@ -705,8 +708,9 @@ fn spawn_main_camera(mut commands: Commands, surface: Res<RenderSurface>, theme:
         MainCamera,
         Camera3d::default(),
         surface.target.clone(),
+        // The `ClearColor` resource: the scheme's viewport background (`cadrs_ui::color_scheme`).
         Camera {
-            clear_color: ClearColorConfig::Custom(theme.viewport_background),
+            clear_color: ClearColorConfig::Default,
             ..default()
         },
         projection(),
@@ -763,8 +767,24 @@ pub fn isometric_transform() -> Transform {
 
 /// The plane fill: pale blue at low opacity. Chosen in linear space so one plane over white is
 /// `#f4f8fb` and two overlapping planes about `#e9eff5`, as measured in the reference.
+/// In dark, fainter, so the three planes don't tint the whole view.
 pub fn plane_fill() -> Color {
-    Color::LinearRgba(LinearRgba::new(0.047, 0.387, 0.647, 0.10))
+    cadrs_ui::by_scheme(
+        Color::LinearRgba(LinearRgba::new(0.047, 0.387, 0.647, 0.10)),
+        Color::LinearRgba(LinearRgba::new(0.16, 0.42, 0.78, 0.06)),
+    )
+}
+
+/// Gives the planes the scheme's fill.
+fn recolor_planes(
+    planes: Option<Res<PlaneMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if let Some(planes) = planes
+        && let Some(mut m) = materials.get_mut(&planes.normal)
+    {
+        m.base_color = plane_fill();
+    }
 }
 
 fn spawn_scene(
@@ -1352,6 +1372,7 @@ pub fn pick_filter(
             dots: None,
             // A click goes through the extrude's own preview.
             skip_op: Some(x.feature.0),
+            whole_parts: false,
         };
         return Some(match x.field {
             // Regions (a click through the translucent preview reaches the region under it) and
@@ -1363,13 +1384,17 @@ pub fn pick_filter(
                 ..none
             },
             // Faces, edges and vertices (a part through any of them).
-            ExtrudeField::UpTo | ExtrudeField::SecondUpTo | ExtrudeField::MergeScope => {
-                PickFilter {
-                    faces: true,
-                    edges: true,
-                    ..none
-                }
-            }
+            ExtrudeField::UpTo | ExtrudeField::SecondUpTo => PickFilter {
+                faces: true,
+                edges: true,
+                ..none
+            },
+            // Whole parts only: no edges or vertices to hover.
+            ExtrudeField::MergeScope => PickFilter {
+                faces: true,
+                whole_parts: true,
+                ..none
+            },
             // P3.7 (PS12.3): a plane's normal is a direction too; P3.8: a mate connector's Z.
             ExtrudeField::Direction => PickFilter {
                 faces: true,
@@ -1517,7 +1542,7 @@ fn view_shortcuts(
     mut keys_in: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
-    q_fields: Query<(), With<TextInputField>>,
+    q_fields: Query<(), With<cadrs_ui::KeyboardField>>,
     q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     mut view: ResMut<ViewportView>,
     mut selection: ResMut<Selection>,

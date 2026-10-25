@@ -655,6 +655,7 @@ impl Feature {
             FeatureKind::Thicken(x) => x.problem().is_none(),
             FeatureKind::Helix(x) => x.problem().is_none(),
             FeatureKind::Fill(x) => x.problem().is_none(),
+            FeatureKind::Thread(x) => x.problem().is_none(),
             FeatureKind::Variable(x) => x.problem().is_none(),
             FeatureKind::SheetMetalModel(x) => x.problem().is_none(),
             FeatureKind::ModifyJoint(x) => x.problem().is_none(),
@@ -696,6 +697,7 @@ impl Feature {
             FeatureKind::Thicken(x) => x.problem(),
             FeatureKind::Helix(x) => x.problem(),
             FeatureKind::Fill(x) => x.problem(),
+            FeatureKind::Thread(x) => x.problem(),
             FeatureKind::Variable(x) => x.problem(),
             FeatureKind::SheetMetalModel(x) => x.problem(),
             FeatureKind::ModifyJoint(x) => x.problem(),
@@ -863,6 +865,7 @@ impl Feature {
             FeatureKind::Thicken(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Helix(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::Fill(x) => x.parents().into_iter().for_each(&mut add),
+            FeatureKind::Thread(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::SheetMetalModel(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::ModifyJoint(x) => x.parents().into_iter().for_each(&mut add),
             FeatureKind::SheetMetalLoft(x) => x.parents().into_iter().for_each(&mut add),
@@ -1027,6 +1030,8 @@ pub enum FeatureKind {
     Helix(crate::surfacing::HelixFeature),
     /// A surface filling a closed boundary (Onshape's Fill).
     Fill(crate::surfacing::FillFeature),
+    /// A modelled screw thread on a cylinder or in a hole ([`crate::thread`]).
+    Thread(crate::thread::ThreadFeature),
     /// A variable, `#name = expression` (P3F.4, P5.2; [`crate::variables`]).
     Variable(crate::variables::VariableFeature),
     /// A sheet metal model: Convert, Extrude or Thicken (P3I.2, SM2; [`crate::sheetmetal`]).
@@ -1417,9 +1422,13 @@ pub struct ExtrudeFeature {
     #[serde(default)]
     pub merge_all: bool,
     /// The parts the boolean acts on; empty: the parts the new body touches (Add) or overlaps
-    /// (Remove, Intersect).
+    /// (Remove, Intersect), unless `merge_scope_set`.
     #[serde(default)]
     pub merge_scope: Vec<PartId>,
+    /// The merge scope was edited in the dialog: it is `merge_scope` as it stands, even empty
+    /// (an Add then makes a new part), and no longer the parts found by themselves.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_scope_set: bool,
     /// The first end: its type...
     #[serde(default)]
     pub end: EndType,
@@ -1471,6 +1480,7 @@ impl Default for ExtrudeFeature {
             op: BooleanOp::New,
             merge_all: false,
             merge_scope: Vec::new(),
+            merge_scope_set: false,
             end: EndType::Blind,
             depth: DEFAULT_DEPTH,
             depth_expr: "25 mm".into(),
@@ -1670,6 +1680,9 @@ pub struct RevolveFeature {
     pub merge_all: bool,
     #[serde(default)]
     pub merge_scope: Vec<PartId>,
+    /// As [`ExtrudeFeature::merge_scope_set`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merge_scope_set: bool,
     /// The "Revolve axis" field.
     #[serde(default)]
     pub axis: Option<AxisRef>,
@@ -1708,6 +1721,7 @@ impl Default for RevolveFeature {
             op: BooleanOp::New,
             merge_all: false,
             merge_scope: Vec::new(),
+            merge_scope_set: false,
             axis: None,
             kind: RevolveType::Full,
             angle: DEFAULT_REVOLVE_ANGLE,

@@ -676,6 +676,7 @@ fn item_bundle(
                             ..default()
                         },
                         BackgroundColor(dot.unwrap_or(Color::NONE)),
+                        crate::color_scheme::KeepFill,
                         Pickable::IGNORE,
                     ));
                 }
