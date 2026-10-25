@@ -107,6 +107,7 @@ pub mod suppress_variable;
 pub mod surfacing_ui;
 pub mod tab_folders;
 pub mod tab_manager;
+pub mod thread_ui;
 pub mod threads_ui;
 pub mod thumbnail;
 pub mod tool_input;

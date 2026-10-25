@@ -3499,6 +3499,7 @@ enum RowKind {
     /// The surfacing features.
     Thicken,
     Helix,
+    Thread,
     Fill,
     /// Move face, Delete face, Simplify (their icon).
     DirectEdit(&'static str),
@@ -3546,6 +3547,7 @@ impl RowKind {
             RowKind::Thicken => "thicken",
             // icon-rs has no helix or fill icon yet (recorded in PROGRESS.md).
             RowKind::Helix => "thread",
+            RowKind::Thread => "thread",
             RowKind::Fill => "surface",
             RowKind::Variable => "variables",
             RowKind::SheetMetalModel => "sheet-metal-model",
@@ -3656,6 +3658,7 @@ fn rebuild_feature_rows(
                 cadrs_core::FeatureKind::Derived(_) => RowKind::Derived,
                 cadrs_core::FeatureKind::Thicken(_) => RowKind::Thicken,
                 cadrs_core::FeatureKind::Helix(_) => RowKind::Helix,
+                cadrs_core::FeatureKind::Thread(_) => RowKind::Thread,
                 cadrs_core::FeatureKind::Fill(_) => RowKind::Fill,
                 cadrs_core::FeatureKind::Variable(_) => RowKind::Variable,
                 cadrs_core::FeatureKind::SheetMetalModel(_) => RowKind::SheetMetalModel,
