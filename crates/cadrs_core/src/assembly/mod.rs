@@ -732,13 +732,25 @@ pub fn instance_parts(
 #[derive(Debug, Default)]
 pub struct PlacedSolids(std::collections::HashMap<PartId, (Arc<Solid>, Pose, Arc<Solid>)>);
 
+/// `build_of` asked once per source studio: it may be dear (the app's checks that a build is
+/// current by comparing the studio's features), and an assembly has many occurrences of few
+/// studios (a large one's ~600 lookups of one studio cost a quarter of a second on each
+/// pointer move of a drag).
+fn once_per_studio(
+    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+) -> impl FnMut(ElementId) -> Option<Arc<Build>> {
+    let mut known = std::collections::HashMap::new();
+    move |e| known.entry(e).or_insert_with(|| build_of(e)).clone()
+}
+
 /// [`instance_parts`], reusing the solids `placed` holds from the last call.
 pub fn instance_parts_placed(
     doc: &Document,
     asm: &Assembly,
-    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+    build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
     placed: &mut PlacedSolids,
 ) -> (Vec<Part>, Vec<PartProps>) {
+    let mut build_of = once_per_studio(build_of);
     let mut last = std::mem::take(&mut placed.0);
     let mut parts = Vec::new();
     let mut props = Vec::new();
@@ -803,8 +815,9 @@ pub fn instance_parts_placed(
 /// connectors. `build_of` gives each source Part Studio's current rebuild.
 pub fn source_solids(
     asm: &Assembly,
-    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+    build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
 ) -> std::collections::HashMap<InstanceId, Arc<Solid>> {
+    let mut build_of = once_per_studio(build_of);
     let mut out = std::collections::HashMap::new();
     for inst in &asm.instances {
         if let Some(part) = inst.source.part()
@@ -823,8 +836,9 @@ pub fn source_solids(
 pub fn occurrence_solids(
     doc: &Document,
     asm: &Assembly,
-    mut build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
+    build_of: impl FnMut(ElementId) -> Option<Arc<Build>>,
 ) -> std::collections::HashMap<InstanceId, Arc<Solid>> {
+    let mut build_of = once_per_studio(build_of);
     let mut out = std::collections::HashMap::new();
     for o in structure::occurrences(doc, asm) {
         if let Some(b) = build_of(o.element)
