@@ -327,7 +327,33 @@ impl SketchOp {
     /// layer restores it.
     pub fn apply(&self, s: &mut Sketch) -> Result<(), String> {
         self.pre_move(s);
+        let old: Vec<(DimensionId, f64)> = s.dimensions.iter().map(|(k, d)| (k, d.value)).collect();
         self.apply_raw(s)?;
+        let changed: Vec<(DimensionId, f64, f64)> = old
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let d = s.dimensions.get(k)?;
+                (d.value != v && d.kind.quantity() != crate::units::Quantity::Count)
+                    .then_some((k, v, d.value))
+            })
+            .collect();
+        let edited = (!changed.is_empty()).then(|| s.clone());
+        let mut report = self.solve(s);
+        if let Some(edited) = edited
+            && misses(&report, &changed)
+            && let Some((t, r)) = self.solve_in_steps(&edited, &changed)
+        {
+            *s = t;
+            report = r;
+        }
+        self.merge_coincident(s, &report.conflicting);
+        s.prune_derived();
+        Ok(())
+    }
+
+    /// Solves the sketch after the edit, first keeping still what the edit holds or moving
+    /// what it moves first.
+    fn solve(&self, s: &mut Sketch) -> solve::SolveReport {
         let mut held = Vec::new();
         self.held(s, &mut held);
         if !held.is_empty() {
@@ -335,10 +361,41 @@ impl SketchOp {
         } else if let Some(w) = self.weights(s) {
             solve_moving_first(s, &w);
         }
-        let report = solve::solve(s);
-        self.merge_coincident(s, &report.conflicting);
-        s.prune_derived();
-        Ok(())
+        solve::solve(s)
+    }
+
+    /// Solves new dimension values (`changed`: each dimension's old and new value) the solve
+    /// could not reach in one go in equal steps from the old values, each solve starting where
+    /// the last ended: halves, then quarters, up to [`MAX_DIMENSION_STEPS`]. A mirror axis
+    /// turned 35° swings what it mirrors 70°, too far from where the solve starts (#93).
+    /// `edited` is the sketch with the edit applied, before solving.
+    fn solve_in_steps(
+        &self,
+        edited: &Sketch,
+        changed: &[(DimensionId, f64, f64)],
+    ) -> Option<(Sketch, solve::SolveReport)> {
+        let mut n = 2;
+        while n <= MAX_DIMENSION_STEPS {
+            let mut s = edited.clone();
+            let mut report = None;
+            for k in 1..=n {
+                let t = k as f64 / n as f64;
+                for (id, old, new) in changed {
+                    s.dimensions[*id].value = old + (new - old) * t;
+                }
+                let r = self.solve(&mut s);
+                if misses(&r, changed) {
+                    report = None;
+                    break;
+                }
+                report = Some(r);
+            }
+            if let Some(r) = report {
+                return Some((s, r));
+            }
+            n *= 2;
+        }
+        None
     }
 
     /// A first guess before solving: a new Normal turns a free line about its middle to point
@@ -1067,6 +1124,16 @@ impl SketchOp {
             }
         }
     }
+}
+
+/// The most steps [`SketchOp::solve_in_steps`] splits a dimension change into.
+const MAX_DIMENSION_STEPS: usize = 8;
+
+/// Whether the solve left any of the `changed` dimensions unsolved.
+fn misses(report: &solve::SolveReport, changed: &[(DimensionId, f64, f64)]) -> bool {
+    changed
+        .iter()
+        .any(|(id, ..)| report.conflicting.contains(&Source::Dimension(*id)))
 }
 
 /// Solves with the `held` fixes added, if that can be satisfied without conflicts; otherwise

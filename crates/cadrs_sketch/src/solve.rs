@@ -665,7 +665,9 @@ impl Equation {
 pub const TOLERANCE: f64 = 1e-9;
 /// Lines shorter than this (mm), and radii smaller, have collapsed.
 const MIN_SIZE: f64 = 1e-6;
-const MAX_ITERATIONS: usize = 60;
+/// Gauss–Newton/Levenberg–Marquardt steps per solve. A big change to a dimension that turns a
+/// mirror axis can creep for most of them before converging (#93 took 79).
+const MAX_ITERATIONS: usize = 100;
 
 /// The unknowns and equations of a sketch.
 #[derive(Debug, Clone)]
