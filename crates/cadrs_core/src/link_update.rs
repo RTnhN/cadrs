@@ -523,13 +523,14 @@ fn derived_site(
     let el = doc
         .element_mut(element)
         .ok_or(CommandError::ElementNotFound(element))?;
-    if let ElementKind::CamStudio(c) = &mut el.kind {
-        return c
-            .component_derived_mut(feature)
-            .ok_or_else(|| CommandError::Invalid("CAM component not found".into()));
-    }
-    let ElementKind::PartStudio { features, .. } = &mut el.kind else {
-        return Err(CommandError::ElementNotFound(element));
+    let features = match &mut el.kind {
+        ElementKind::CamStudio(c) => {
+            return c
+                .component_derived_mut(feature)
+                .ok_or_else(|| CommandError::Invalid("CAM component not found".into()));
+        }
+        ElementKind::PartStudio { features, .. } => features,
+        _ => return Err(CommandError::ElementNotFound(element)),
     };
     match features
         .iter_mut()
