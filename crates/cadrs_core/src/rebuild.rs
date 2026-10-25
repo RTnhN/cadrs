@@ -371,7 +371,10 @@ static KEEP_UNUSED: AtomicU64 = AtomicU64::new(KEEP_REBUILDS);
 pub fn keep_unused_for(rebuilds: u64) {
     KEEP_UNUSED.store(rebuilds, Ordering::Relaxed);
 }
-/// And the oldest are dropped beyond this many.
+/// And the oldest are dropped beyond this many, or beyond twice the part features of the largest
+/// rebuild so far if that is more: a Part Studio of over a thousand part features kept losing
+/// its first outputs to the cap, so every rebuild of it (opening a feature's dialog, closing
+/// it) computed them again.
 const MAX_ENTRIES: usize = 1024;
 
 /// A kernel session and the per-feature cache. The app uses the one on the worker thread
@@ -396,6 +399,8 @@ pub struct Rebuilder {
     /// The generation of the last top-level rebuild: the outputs it used (its Derived sources'
     /// too) have `last_used` at or after it ([`Self::used_keys`]).
     top_generation: u64,
+    /// The most part features a top-level rebuild has had (the cache keeps twice as many).
+    largest: usize,
     /// The board components (meshes) the feature being computed left alone
     /// ([`Self::body_or_skip`]).
     skipped_meshes: std::cell::RefCell<Vec<String>>,
@@ -543,6 +548,7 @@ impl Rebuilder {
             sketch_times: HashMap::new(),
             depth: 0,
             top_generation: 0,
+            largest: 0,
             skipped_meshes: Default::default(),
             board_bodies: Vec::new(),
             placed_components: HashMap::new(),
@@ -625,12 +631,15 @@ impl Rebuilder {
         // feature (the variables themselves and sketches are reported after the loop).
         // (Which unit a bare number is in changes values, not whether they evaluate.)
         let var_errors = crate::variables::check(features, &cadrs_sketch::units::Units::default());
+        let total = features[..last.map_or(0, |l| l + 1)]
+            .iter()
+            .filter(|f| f.is_part_feature())
+            .count();
+        if self.depth == 0 {
+            self.largest = self.largest.max(total);
+        }
         let report = self.depth == 0 && REPORTS_PROGRESS.with(|r| r.get());
         if report {
-            let total = features[..last.map_or(0, |l| l + 1)]
-                .iter()
-                .filter(|f| f.is_part_feature())
-                .count();
             PROGRESS_DONE.store(0, Ordering::Relaxed);
             PROGRESS_TOTAL.store(total, Ordering::Relaxed);
             process::emit(&process::Event::Progress(0, total));
@@ -911,17 +920,18 @@ impl Rebuilder {
             })
             .map(|(k, _)| *k)
             .collect();
-        if self.entries.len() - stale.len() > MAX_ENTRIES {
+        let cap = MAX_ENTRIES.max(self.largest.saturating_mul(2));
+        if self.entries.len() - stale.len() > cap {
+            // The oldest first, never what the rebuild in progress (or the last) used.
             let mut all: Vec<(u64, u64)> = self
                 .entries
                 .iter()
+                .filter(|(_, e)| e.last_used < self.top_generation)
                 .map(|(k, e)| (*k, e.last_used))
                 .collect();
             all.sort_by_key(|(_, used)| *used);
-            stale = all[..self.entries.len() - MAX_ENTRIES]
-                .iter()
-                .map(|(k, _)| *k)
-                .collect();
+            let over = (self.entries.len() - cap).min(all.len());
+            stale = all[..over].iter().map(|(k, _)| *k).collect();
         }
         if stale.is_empty() {
             return;
