@@ -63,6 +63,7 @@ impl Plugin for PartsPlugin {
             .init_resource::<FaceSelection>()
             .init_resource::<RebuildBudget>()
             .init_resource::<HoverParts>()
+            .init_resource::<PartMeshStore>()
             .init_resource::<RetainedEdges>()
             .init_gizmo_group::<PartEdgeGizmos>()
             .init_gizmo_group::<PreviewEdgeGizmos>()
@@ -2036,7 +2037,83 @@ struct PartMaterials {
 type GhostKey = (Vec<PartId>, Vec<(PartId, u32)>);
 type MeshKey = (u64, Option<FeatureId>, GhostKey, bool, Vec<PartId>);
 
-/// Keeps one mesh entity per part, rebuilt when the parts change.
+/// The part meshes of the last few tabs shown, so going back to a tab (or rebuilding with most
+/// parts unchanged) reuses their meshes, uploaded to the GPU already, instead of making them
+/// again: switching to a large assembly made and uploaded every part's mesh each time (over a
+/// second). A mesh is made again only when its part's mesh, preview or face colours change.
+#[derive(Resource, Default)]
+struct PartMeshStore {
+    meshes: HashMap<(Option<ElementId>, PartId), StoredMesh>,
+    /// The tabs shown, most recent first.
+    recent: Vec<Option<ElementId>>,
+}
+
+/// How many tabs' part meshes are kept.
+const KEEP_TABS: usize = 4;
+
+struct StoredMesh {
+    solid: std::sync::Arc<cadrs_core::solid::Solid>,
+    preview: bool,
+    bases: Vec<FaceBase>,
+    handle: Handle<Mesh>,
+    /// The selection colouring in the mesh now ([`shade_parts`]): the part selected, the
+    /// picked faces.
+    shading: (bool, Vec<usize>),
+}
+
+impl PartMeshStore {
+    /// The mesh of `part` as `preview` with these face colours: the stored one if it is still
+    /// that, else a new one.
+    fn mesh(
+        &mut self,
+        meshes: &mut Assets<Mesh>,
+        element: Option<ElementId>,
+        part: &Part,
+        preview: bool,
+        bases: Vec<FaceBase>,
+    ) -> Handle<Mesh> {
+        match self.meshes.get(&(element, part.id)) {
+            Some(m)
+                if std::sync::Arc::ptr_eq(&m.solid, &part.solid)
+                    && m.preview == preview
+                    && m.bases == bases =>
+            {
+                m.handle.clone()
+            }
+            _ => {
+                let handle = meshes.add(part_base_mesh(part, preview, &bases));
+                self.meshes.insert(
+                    (element, part.id),
+                    StoredMesh {
+                        solid: part.solid.clone(),
+                        preview,
+                        bases,
+                        handle: handle.clone(),
+                        shading: (false, Vec::new()),
+                    },
+                );
+                handle
+            }
+        }
+    }
+
+    /// Drops the meshes of this tab's parts not shown now, and of tabs not shown lately.
+    fn keep(&mut self, element: Option<ElementId>, shown: &HashSet<PartId>) {
+        self.recent.retain(|e| *e != element);
+        self.recent.insert(0, element);
+        self.recent.truncate(KEEP_TABS);
+        let recent = &self.recent;
+        self.meshes.retain(|(e, id), _| {
+            if *e == element {
+                shown.contains(id)
+            } else {
+                recent.contains(e)
+            }
+        });
+    }
+}
+
+/// Keeps one mesh entity per part, its mesh from [`PartMeshStore`].
 #[allow(clippy::too_many_arguments)]
 fn sync_part_meshes(
     cache: Res<PartCache>,
@@ -2048,12 +2125,13 @@ fn sync_part_meshes(
     mut q: Query<(
         Entity,
         &mut PartMesh,
-        &Mesh3d,
+        &mut Mesh3d,
         &mut MeshMaterial3d<PartShading>,
     )>,
     mut last: Local<Option<MeshKey>>,
     view: Res<ViewportView>,
     section: Res<crate::section_view::SectionClip>,
+    (mut store, doc): (ResMut<PartMeshStore>, Option<Res<ActiveDocument>>),
     mut commands: Commands,
 ) {
     // Nothing to do while the parts, their overrides, the render mode and the section are as
@@ -2152,8 +2230,9 @@ fn sync_part_meshes(
             pick(0, &solid)
         }
     };
+    let element = doc.and_then(|d| d.active);
     let mut have: HashMap<PartId, Entity> = HashMap::new();
-    for (e, mut pm, mesh, mut mat) in &mut q {
+    for (e, mut pm, mut mesh, mut mat) in &mut q {
         let Some(part) = cache.drawn(pm.id) else {
             commands.entity(e).try_despawn();
             continue;
@@ -2162,11 +2241,12 @@ fn sync_part_meshes(
             || cache.tool.iter().any(|t| t.id == part.id)
             || crate::assembly::standard::is_ghost(part.id);
         let bases = ghosted_bases(&cache, &over, &ghosts, part);
-        if let Some(mut m) = meshes.get_mut(&mesh.0) {
-            *m = part_base_mesh(part, preview, &bases);
+        let want = material_for(part, preview, &bases);
+        let handle = store.mesh(&mut meshes, element, part, preview, bases);
+        if mesh.0 != handle {
+            mesh.0 = handle;
         }
         pm.preview = preview;
-        let want = material_for(part, preview, &bases);
         if mat.0 != want {
             mat.0 = want;
         }
@@ -2187,7 +2267,8 @@ fn sync_part_meshes(
             || cache.tool.iter().any(|t| t.id == part.id)
             || crate::assembly::standard::is_ghost(part.id);
         let bases = ghosted_bases(&cache, &over, &ghosts, part);
-        let mesh = meshes.add(part_base_mesh(part, preview, &bases));
+        let material = material_for(part, preview, &bases);
+        let mesh = store.mesh(&mut meshes, element, part, preview, bases);
         let mut e = commands.spawn((
             Name::new(format!(
                 "part-{}",
@@ -2198,7 +2279,7 @@ fn sync_part_meshes(
                 preview,
             },
             Mesh3d(mesh),
-            MeshMaterial3d(material_for(part, preview, &bases)),
+            MeshMaterial3d(material),
             Transform::IDENTITY,
             DespawnOnExit(AppState::Document),
         ));
@@ -2208,6 +2289,12 @@ fn sync_part_meshes(
             e.insert(RenderLayers::layer(crate::viewport::OVERLAY_LAYER));
         }
     }
+    let shown: HashSet<PartId> = cache
+        .shown()
+        .chain(cache.tool.iter())
+        .map(|p| p.id)
+        .collect();
+    store.keep(element, &shown);
 }
 
 /// A mesh of [`PartCache::ghost`].
@@ -2342,6 +2429,7 @@ fn shade_parts(
     q: Query<(&PartMesh, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut last: Local<Option<(u64, Option<FeatureId>, Vec<PartId>, GhostKey, Vec<Pick>)>>,
+    (mut store, doc): (ResMut<PartMeshStore>, Option<Res<ActiveDocument>>),
 ) {
     let selected: Vec<PartId> = if cache.assembly.is_some() && selection.contains(Pick::Assembly) {
         // The assembly's root row: every instance (P3B.1).
@@ -2383,25 +2471,39 @@ fn shade_parts(
         return;
     }
     *last = Some(key);
+    let element = doc.and_then(|d| d.active);
     for (pm, mesh) in &q {
         let Some(part) = cache.drawn(pm.id) else {
             continue;
         };
+        let sel = selected.contains(&part.id);
+        let picked: Vec<usize> = part
+            .solid
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| faces.0.contains(&Pick::Face(part.id, f.name)))
+            .map(|(i, _)| i)
+            .collect();
+        // Only the parts whose colouring changes (writing every part's colours re-sent every
+        // mesh to the GPU).
+        let Some(stored) = store
+            .meshes
+            .get_mut(&(element, part.id))
+            .filter(|m| m.handle == mesh.0)
+        else {
+            continue;
+        };
+        let want = (sel, picked);
+        if stored.shading == want {
+            continue;
+        }
         if let Some(mut m) = meshes.get_mut(&mesh.0) {
-            let sel = selected.contains(&part.id);
-            let bases = ghosted_bases(&cache, &over, &ghosts, part);
-            let picked: Vec<usize> = part
-                .solid
-                .faces
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| faces.0.contains(&Pick::Face(part.id, f.name)))
-                .map(|(i, _)| i)
-                .collect();
-            let (colors, flags) = base_colors(part, pm.preview, sel, &bases, &picked);
+            let (colors, flags) = base_colors(part, pm.preview, want.0, &stored.bases, &want.1);
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
             m.insert_attribute(Mesh::ATTRIBUTE_UV_0, flags);
         }
+        stored.shading = want;
     }
 }
 
@@ -2781,6 +2883,7 @@ fn draw_part_edges(
     retain_lines(
         &mut retained.plain,
         plain_key,
+        || plain.iter().map(|(l, _)| l.clone() as KeptAlive).collect(),
         |asset| {
             for (lines, clip) in &plain {
                 for line in lines.iter() {
@@ -2802,6 +2905,7 @@ fn draw_part_edges(
     retain_lines(
         &mut retained.free,
         free_key,
+        || free.iter().map(|(s, _)| s.clone() as KeptAlive).collect(),
         |asset| {
             for (solid, clip) in &free {
                 for e in solid
@@ -2833,6 +2937,10 @@ pub struct RetainedEdges {
 struct RetainedLines {
     key: Option<RetainedKey>,
     handle: Option<Handle<GizmoAsset>>,
+    /// The lines of the last few keys, newest first, with what their keys point at (kept
+    /// alive, so an address in a key can't be reused): going back to a tab shows its lines
+    /// again without making and uploading them (a large assembly's took most of a second).
+    recent: Vec<(RetainedKey, Handle<GizmoAsset>, Vec<KeptAlive>)>,
     entity: Option<Entity>,
     /// The line width, depth bias and on/off the entity was made with (the gizmo group's
     /// config, which the view's perspective changes).
@@ -2841,11 +2949,17 @@ struct RetainedLines {
 
 /// What a retained gizmo's lines were made from: each part's lines (or solid) by identity and
 /// its section cut, and the colour.
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 struct RetainedKey {
     items: Vec<(usize, Option<crate::section_view::Cut>)>,
     color: Color,
 }
+
+/// What a [`RetainedKey`]'s addresses point at.
+type KeptAlive = std::sync::Arc<dyn std::any::Any + Send + Sync>;
+
+/// How many keys' lines [`RetainedLines`] keeps.
+const KEEP_LINES: usize = 4;
 
 /// Marks the retained edge gizmos (removed with the parts when a document closes).
 #[derive(Component)]
@@ -2854,27 +2968,43 @@ struct RetainedEdgeGizmo;
 fn retain_lines(
     slot: &mut RetainedLines,
     key: RetainedKey,
+    keep: impl FnOnce() -> Vec<KeptAlive>,
     fill: impl FnOnce(&mut GizmoAsset),
     config: &GizmoConfig,
     assets: &mut Assets<GizmoAsset>,
     commands: &mut Commands,
 ) {
     let enabled = config.enabled;
-    if slot.key.as_ref() != Some(&key) || slot.config.is_some_and(|c| c.2 != enabled) {
-        let mut asset = GizmoAsset::default();
-        if enabled {
-            fill(&mut asset);
-        }
-        match &slot.handle {
-            Some(h) => {
-                let _ = assets.insert(h.id(), asset);
+    let toggled = slot.config.is_some_and(|c| c.2 != enabled);
+    if toggled {
+        slot.recent.clear();
+    }
+    let mut new_handle = false;
+    if slot.key.as_ref() != Some(&key) || toggled {
+        let handle = match slot.recent.iter().position(|(k, ..)| *k == key) {
+            Some(i) => {
+                let entry = slot.recent.remove(i);
+                let h = entry.1.clone();
+                slot.recent.insert(0, entry);
+                h
             }
-            None => slot.handle = Some(assets.add(asset)),
-        }
+            None => {
+                let mut asset = GizmoAsset::default();
+                if enabled {
+                    fill(&mut asset);
+                }
+                let h = assets.add(asset);
+                slot.recent.insert(0, (key.clone(), h.clone(), keep()));
+                slot.recent.truncate(KEEP_LINES);
+                h
+            }
+        };
+        new_handle = slot.handle.as_ref() != Some(&handle);
+        slot.handle = Some(handle);
         slot.key = Some(key);
     }
     let want = (config.line.width, config.depth_bias, enabled);
-    if slot.entity.is_none() || slot.config != Some(want) {
+    if slot.entity.is_none() || slot.config != Some(want) || new_handle {
         let Some(handle) = slot.handle.clone() else {
             return;
         };
@@ -3286,8 +3416,10 @@ fn clear_parts(
     mut over: ResMut<PartOverride>,
     mut retained: ResMut<RetainedEdges>,
     q_retained: Query<Entity, With<RetainedEdgeGizmo>>,
+    mut store: ResMut<PartMeshStore>,
     mut commands: Commands,
 ) {
+    *store = PartMeshStore::default();
     *cache = PartCache::default();
     *over = PartOverride::default();
     *retained = RetainedEdges::default();

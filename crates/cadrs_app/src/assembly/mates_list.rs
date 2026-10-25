@@ -189,6 +189,28 @@ fn update_mate_errors(world: &mut World) {
     if world.resource::<MateErrors>().key == Some((element, tick)) {
         return;
     }
+    // No mates, none lost: gathering every occurrence's solid cost a large assembly a fifth of a
+    // second on each switch to its tab.
+    let any_mates = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.active_element()?.assembly_model())
+        .is_some_and(|a| {
+            cadrs_core::assembly::structure::solver_model(
+                &world.resource::<ActiveDocument>().doc,
+                a,
+            )
+            .mates
+            .iter()
+            .any(|f| !f.suppressed && f.mate().is_some())
+        });
+    if !any_mates {
+        let mut e = world.resource_mut::<MateErrors>();
+        if !e.lost.is_empty() {
+            e.lost.clear();
+        }
+        e.key = Some((element, tick));
+        return;
+    }
     if !parts_built(world, element) {
         return;
     }

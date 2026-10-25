@@ -22,6 +22,7 @@ pub mod change_preview;
 pub mod composite_ui;
 pub mod create_selection;
 pub mod cursor;
+pub mod debug_tools;
 pub mod derived_ui;
 pub mod direct_edit_ui;
 pub mod document;
@@ -652,6 +653,7 @@ impl Plugin for CadrsAppPlugin {
                 accept::AcceptPlugin,
                 frame_stats::FrameStatsPlugin,
                 frame_profile::FrameProfilePlugin,
+                debug_tools::DebugToolsPlugin,
                 update::UpdatePlugin,
             ))
             .add_plugins((
