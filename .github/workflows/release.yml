@@ -26,15 +26,15 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  # On Ubuntu 22.04, so the binary needs only glibc 2.35, and on stable without mold (the repo's
-  # .cargo/config.toml and rust-toolchain.toml are for nightly development builds).
+  # On Ubuntu 22.04, so the binary needs only glibc 2.35, on the nightly pinned in
+  # rust-toolchain.toml (what development builds use, so the release compiles what they do), but
+  # without .cargo/config.toml's mold and nightly flags (no mold on 22.04).
   linux:
     name: Build (Linux)
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
       RUSTFLAGS: ""
-      RUSTUP_TOOLCHAIN: stable
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: cc
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +46,7 @@ jobs:
             pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Rust toolchain
-        run: rustup toolchain install stable --profile minimal && rustc -V
+        run: rustup toolchain install --profile minimal && rustc -V
 
       - uses: Swatinem/rust-cache@v2
         with:

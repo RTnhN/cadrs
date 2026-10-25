@@ -18,18 +18,20 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-image=cadrs-linux-build
+# The image carries the nightly pinned in rust-toolchain.toml, so a new pin builds a new image.
+toolchain="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+image="cadrs-linux-build:$toolchain"
 dist="$root/dist"
 echo "cadrs v$version"
 
 if ! docker image inspect "$image" >/dev/null 2>&1; then
-    docker build -t "$image" tools/release
+    docker build -t "$image" --build-arg "TOOLCHAIN=$toolchain" tools/release
 fi
 
 # The container runs as you, with its own CARGO_HOME (the host's has a config the container
-# can't use) holding the host's crate downloads. The repo's .cargo/config.toml links with mold and
-# passes a nightly flag, and rust-toolchain.toml asks for nightly; the container has none of
-# these, so the linker, flags and toolchain are reset to its own (stable).
+# can't use) holding the host's crate downloads. The repo's .cargo/config.toml links with clang and
+# mold, which the container doesn't have, so the linker and flags are reset; the toolchain is the
+# image's copy of rust-toolchain.toml's nightly.
 cargo_home="$root/target/linux-release/cargo-home"
 mkdir -p "$cargo_home/registry" "$cargo_home/git" "$HOME/.cargo/registry" "$HOME/.cargo/git"
 docker run --rm \
@@ -42,7 +44,7 @@ docker run --rm \
     -e CARGO_TARGET_DIR=/src/target/linux-release \
     -e CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
     -e RUSTFLAGS= \
-    -e RUSTUP_TOOLCHAIN=stable \
+    -e RUSTUP_TOOLCHAIN="$toolchain" \
     "$image" cargo build --release --locked -p cadrs
 
 cargo build --release --locked --target x86_64-pc-windows-gnu -p cadrs

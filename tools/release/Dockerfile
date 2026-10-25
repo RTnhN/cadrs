@@ -1,5 +1,6 @@
 # The Linux release build environment: Ubuntu 22.04, so the binary runs on glibc 2.35 and newer.
-# `tools/release/build.sh` builds this image as `cadrs-linux-build` when it is missing.
+# `tools/release/build.sh` builds this image as `cadrs-linux-build:<toolchain>` when it is missing,
+# with TOOLCHAIN set to the nightly pinned in rust-toolchain.toml.
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -8,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
     && rm -rf /var/lib/apt/lists/*
 
+ARG TOOLCHAIN
 ENV RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:$PATH
-RUN curl -sSf https://sh.rustup.rs | CARGO_HOME=/usr/local/cargo sh -s -- -y --profile minimal --default-toolchain stable \
+RUN curl -sSf https://sh.rustup.rs | CARGO_HOME=/usr/local/cargo sh -s -- -y --profile minimal --default-toolchain "$TOOLCHAIN" \
     && chmod -R a+rX /usr/local/rustup /usr/local/cargo
