@@ -1,4 +1,4 @@
-//! **Import…** (P3F.2; `essential-tips.md` T8, X5): STEP and IGES files, from the documents
+//! **Import…** (P3F.2; `essential-tips.md` T8, X5): STEP, IGES and BREP files, from the documents
 //! page's **Create ▸ Import files…** (into a new document named after the file) and the tab
 //! bar's **+ ▸ Import…** (new tabs in this document, one undo step). The tabs hold an ordinary
 //! Import feature ([`cadrs_core::import::ImportFeature`], read with its assembly structure),
@@ -160,7 +160,7 @@ fn on_file_picked(
     }
 }
 
-/// Reads a STEP or IGES file for an import to `target` (picked, or dropped on the window): the
+/// Reads a STEP, IGES or BREP file for an import to `target` (picked, or dropped on the window): the
 /// kernel reads it on its thread, then the Import dialog asks how to bring it in.
 pub fn read(commands: &mut Commands, theme: &Theme, target: ImportTarget, path: &std::path::Path) {
     let file_name = path
@@ -172,7 +172,7 @@ pub fn read(commands: &mut Commands, theme: &Theme, target: ImportTarget, path: 
             commands,
             theme,
             Notification::warning(format!(
-                "{file_name}: only STEP and IGES files can be imported"
+                "{file_name}: only STEP, IGES and BREP files can be imported"
             ))
             .name("import-toast"),
         );

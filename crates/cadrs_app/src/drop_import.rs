@@ -6,7 +6,7 @@
 //! | Native: cadrs | a new library copy | (note) | (note) | (note) |
 //! | Drawing: SVG, EPS, PS, PDF, AI, DXF, DWG | (note) | a new sketch of it | its curves added | (note) |
 //! | Picture: PNG, JPEG, GIF | (note) | an Image ([`crate::picture`]) | (note) | (note) |
-//! | Model: STEP, IGES | a new document ([`crate::import_file`]) | an Import ([`crate::import_dialog`]) | (note) | new tabs ([`crate::import_file`]) |
+//! | Model: STEP, IGES, BREP | a new document ([`crate::import_file`]) | an Import ([`crate::import_dialog`]) | (note) | new tabs ([`crate::import_file`]) |
 //! | Model: STL | a new document | an Import | (note) | (note) |
 //!
 //! - **Drawings** ([`cadrs_core::vector_import`]) are centred where they are dropped: in a Part
@@ -49,7 +49,7 @@ pub enum DropKind {
     Native,
     Drawing,
     Picture,
-    /// STEP or IGES.
+    /// STEP, IGES or BREP.
     Model,
     Mesh,
 }
@@ -150,7 +150,7 @@ pub fn dropped(world: &mut World, paths: Vec<PathBuf>) {
             .to_string();
         let Some(kind) = DropKind::of_path(&path) else {
             notes.push(Notification::warning(format!(
-                "{name}: drop drawings (SVG, EPS, PDF, DXF, DWG), pictures (PNG, JPEG, GIF), models (STEP, IGES, STL) or native documents (cadrs)"
+                "{name}: drop drawings (SVG, EPS, PDF, DXF, DWG), pictures (PNG, JPEG, GIF), models (STEP, IGES, BREP, STL) or native documents (cadrs)"
             )));
             continue;
         };

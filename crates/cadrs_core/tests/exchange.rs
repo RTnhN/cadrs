@@ -340,6 +340,49 @@ fn iges_keeps_the_box() {
 }
 
 #[test]
+fn brep_keeps_the_box() {
+    let f = Arc::new(rect_studio(100.0, 60.0, 25.0));
+    let mut r = Rebuilder::new();
+    let its = items(&f, &mut r, 1);
+    let files = r
+        .export_files(&ExportRequest::new(ModelFormat::Brep, "Box", its))
+        .unwrap();
+    let text = String::from_utf8(files[0].bytes.clone()).unwrap();
+    assert!(text.starts_with("CASCADE Topology V1"));
+    let plan = r.plan_import(ImportFormat::Brep, text.as_bytes()).unwrap();
+    let doc = imported_document(
+        &plan,
+        "Box.brep",
+        text,
+        ImportAs::PartStudio,
+        ImportIds::fresh(),
+    );
+    close(volume_of(&doc), 150_000.0, 1e-6);
+}
+
+/// A file OpenCASCADE wrote (`BRepTools::Write` of a 1 × 2 × 3 box): one part, named after the
+/// file (the format has no names).
+#[test]
+fn an_occt_brep_file_imports_as_a_part() {
+    let import = cadrs_core::import::ImportFeature::from_file(
+        "box.brep",
+        include_bytes!("../../cadrs_kernel/tests/data/occt_box.brep").to_vec(),
+    )
+    .unwrap();
+    assert_eq!(import.format, ImportFormat::Brep);
+    let feature = Feature {
+        id: FeatureId::new(),
+        name: "Import".into(),
+        kind: FeatureKind::Import(import),
+        suppress_by: None,
+    };
+    let build = Rebuilder::new().rebuild(&[feature]);
+    assert!(build.errors.is_empty(), "{:?}", build.errors);
+    assert_eq!(build.parts.len(), 1);
+    close(build.parts[0].mass.unwrap().volume, 6.0, 1e-9);
+}
+
+#[test]
 fn planar_faces_as_dxf() {
     let mut r = Rebuilder::new();
     // The box's top: 4 lines, no circle; the pin's: 1 circle.
