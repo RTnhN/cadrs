@@ -980,7 +980,10 @@ fn triad_pointer(
                     TriadHandle::Arrow(i) => {
                         let a = d.axes[i];
                         let px = view.view.project_vector(a);
-                        if px.length() < 0.05 {
+                        // Pointing (nearly) at the viewer. (Its on-screen share, not px per mm:
+                        // a large assembly zoomed out shows well under 0.05 px a mm, and no
+                        // arrow moved at all.)
+                        if px.length() * view.view.scale < 0.05 {
                             continue;
                         }
                         let along = delta.dot(px.normalize()) / px.length();
