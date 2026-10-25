@@ -1974,11 +1974,12 @@ fn update_hover(
         Res<PickFilterOverride>,
         Option<Res<crate::assembly::triad::Triad>>,
     ),
-    (zoom_window, section_arrow, eda2d, fit): (
+    (zoom_window, section_arrow, eda2d, fit, asm_parts): (
         Option<Res<crate::view_options::ZoomWindow>>,
         Res<crate::section_view::SectionArrow>,
         Res<crate::eda::Eda2d>,
         Res<crate::board_fit::FitState>,
+        Res<crate::assembly::AssemblyParts>,
     ),
     mut last: Local<Option<(Vec2, crate::parts::PickFilter, Option<Pick>)>>,
     box_select: Option<Res<crate::assembly::box_select::AssemblyBox>>,
@@ -2012,12 +2013,15 @@ fn update_hover(
         && !layout_edit;
     let query = match filter {
         Some(f) if over && !drag.navigating && *kind == ActiveKind::PartStudio => Some(f),
-        // No pre-highlight while a triad drag or its value box is active (P3H.6 judge).
+        // No pre-highlight while a triad drag or its value box is active (P3H.6 judge), nor
+        // while the parts are drawn moved from their solids (a drag, an animation: picking
+        // would find them where they were).
         Some(f)
             if over
                 && !drag.navigating
                 && *kind == ActiveKind::Assembly
-                && !triad.as_deref().is_some_and(|t| t.busy()) =>
+                && !triad.as_deref().is_some_and(|t| t.busy())
+                && !asm_parts.live =>
         {
             Some(if pick_override.0.is_some() {
                 f

@@ -107,7 +107,7 @@ impl Material for HiddenLineMaterial {
 
 /// A part's hidden-edge lines.
 #[derive(Component)]
-struct HiddenLines;
+pub(crate) struct HiddenLines(pub(crate) PartId);
 
 /// The line mesh of a part's edges: segment pairs, UV x the distance along each edge (mm).
 pub fn edge_lines(part: &cadrs_core::parts::Part) -> Mesh {
@@ -178,7 +178,7 @@ fn sync_hidden_edges(
                 "hidden-edges-{}",
                 part.name.to_lowercase().replace(' ', "-")
             )),
-            HiddenLines,
+            HiddenLines(part.id),
             Mesh3d(meshes.add(edge_lines(part))),
             MeshMaterial3d(material.clone()),
             Transform::IDENTITY,

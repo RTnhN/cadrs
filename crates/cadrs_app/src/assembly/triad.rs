@@ -980,7 +980,10 @@ fn triad_pointer(
                     TriadHandle::Arrow(i) => {
                         let a = d.axes[i];
                         let px = view.view.project_vector(a);
-                        if px.length() < 0.05 {
+                        // Pointing (nearly) at the viewer. (Its on-screen share, not px per mm:
+                        // a large assembly zoomed out shows well under 0.05 px a mm, and no
+                        // arrow moved at all.)
+                        if px.length() * view.view.scale < 0.05 {
                             continue;
                         }
                         let along = delta.dot(px.normalize()) / px.length();
@@ -1546,6 +1549,13 @@ fn draw_silhouettes(
             if cache.is_hidden_part(part.id) {
                 continue;
             }
+            // Drawn moved (a drag, `PartCache::moved`): seen from the view turned back into its
+            // solid's frame, its outline moved as drawn.
+            let moved = cache.moved.get(&part.id).copied();
+            let look = moved.map_or(back, |m| {
+                m.inverse().transform_vector3(back).normalize_or_zero()
+            });
+            let xf = |p: Vec3| moved.map_or(p, |m| m.transform_point3(p));
             let entry = match outlines.entry(part.id) {
                 Entry::Occupied(o) if Arc::ptr_eq(&o.get().0, &part.solid) => o.into_mut(),
                 e => {
@@ -1560,7 +1570,8 @@ fn draw_silhouettes(
                 }
             };
             seen.push(part.id);
-            for [a, b] in contour(part, &entry.1, back) {
+            for [a, b] in contour(part, &entry.1, look) {
+                let (a, b) = (xf(a), xf(b));
                 // P3E.3a: cut by a section view.
                 match section.plane {
                     None => gizmos.line(a, b, OUTLINE),
