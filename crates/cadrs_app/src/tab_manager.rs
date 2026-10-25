@@ -169,6 +169,7 @@ pub fn tab_icon(el: &cadrs_core::Element) -> &'static str {
         ElementKind::Drawing(_) => "details",
         ElementKind::Render(_) => "render-studio",
         ElementKind::PcbStudio(_) => "pcb-studio",
+        ElementKind::CamStudio(_) => "cam-studio",
     }
 }
 
@@ -180,6 +181,7 @@ pub fn tab_type(el: &cadrs_core::Element) -> &'static str {
         ElementKind::Drawing(_) => "Drawing",
         ElementKind::Render(_) => "Render Studio",
         ElementKind::PcbStudio(_) => "PCB Studio",
+        ElementKind::CamStudio(_) => "CAM Studio",
     }
 }
 

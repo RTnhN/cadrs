@@ -39,6 +39,7 @@ pub mod file_picker;
 pub mod float_bar;
 pub mod floating_panel;
 pub mod fonts;
+pub mod form;
 pub mod gallery;
 pub mod glyphs;
 pub mod icon;
