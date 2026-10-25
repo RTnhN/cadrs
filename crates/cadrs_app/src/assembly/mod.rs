@@ -286,6 +286,17 @@ pub struct AssemblyParts {
     /// carries on meanwhile, [`Self::build_within`]).
     pending: HashMap<ElementId, (Vec<Feature>, cadrs_core::rebuild::Pending)>,
     key: Option<AssemblyKey>,
+    /// Each assembly's view parts with the key they were placed for: going back to its tab
+    /// reuses them (the same meshes, [`crate::parts`] keeps theirs) instead of placing every
+    /// instance's parts again.
+    placed: HashMap<
+        ElementId,
+        (
+            AssemblyKey,
+            Vec<cadrs_core::Part>,
+            Vec<cadrs_core::PartProps>,
+        ),
+    >,
     /// Poses shown instead of the document's (a triad drag in progress).
     pub preview: HashMap<InstanceId, Pose>,
     /// P3B.8: the top-level instances' placements of the exploded view shown (a view state:
@@ -524,8 +535,17 @@ pub fn update_assembly_parts(
         .iter()
         .filter_map(|s| Some((*s, asm.builds.get(s)?.1.clone())))
         .collect();
-    let (parts, props) =
-        cadrs_core::assembly::instance_parts(d, &view, |e| builds.get(&e).cloned());
+    let (parts, props) = match asm.placed.get(&el.id) {
+        Some((k, parts, props)) if *k == key => (parts.clone(), props.clone()),
+        _ => {
+            let (parts, props) =
+                cadrs_core::assembly::instance_parts(d, &view, |e| builds.get(&e).cloned());
+            asm.placed.retain(|e, _| doc.doc.element(*e).is_some());
+            asm.placed
+                .insert(el.id, (key.clone(), parts.clone(), props.clone()));
+            (parts, props)
+        }
+    };
     // The source studios' feature appearances (faces keep their feature's colour).
     let mut appearances = Vec::new();
     for s in &sources {

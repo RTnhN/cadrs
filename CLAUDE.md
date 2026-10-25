@@ -32,6 +32,8 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
 - Kernel debugging: `CADRS_PROFILE=1`, `CADRS_BOOL_DEBUG=1` and `CADRS_DUMP_DIR=<dir>` (inputs of
   failing shells/fillets, replayed by `crates/cadrs_kernel/tests/native_debug.rs`); see the
   kernel README. The kernel is pure Rust (`cadrs_kernel::native`); there is no OCCT any more.
+- App debugging: `CADRS_SLOW_FRAMES=<ms>` logs every frame slower than that with its slowest
+  systems (`cadrs_app::debug_tools`; add further env-switched aids there).
 - Cold builds take 4+ minutes. Never run two cargo builds at once.
 - Project site: `site/` is a Proa app of its own (stable toolchain, built with `RUSTFLAGS=`),
   exported to GitHub Pages by `.github/workflows/pages.yml`; see `site/README.md`.

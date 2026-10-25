@@ -23,6 +23,10 @@
 //!   Anti-align with Z; a ring → Rotate 90°, Rotate 180°; each followed by the instance menu
 //!   ([`super::menu`]).
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::sync::Arc;
+
 use bevy::camera::visibility::RenderLayers;
 use bevy::gizmos::config::GizmoLineJoint;
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
@@ -30,6 +34,7 @@ use bevy::prelude::*;
 use bevy::text::FontWeight;
 use cadrs_core::assembly::{self as core_asm, InstanceId, Pose};
 use cadrs_core::parts::Part;
+use cadrs_core::solid::Solid;
 use cadrs_ui::Theme;
 
 use crate::camera::ViewState;
@@ -1410,49 +1415,87 @@ pub struct SilhouetteGizmos;
 /// The outline orange of `ex1-step5.png`.
 const OUTLINE: Color = Color::srgb(0.96, 0.60, 0.10);
 
-/// The outline of a part seen along `back`: the pieces of its edges where a face toward the
-/// viewer meets one facing away, and the silhouettes of its curved faces.
-fn contour(part: &Part, back: Vec3) -> Vec<[Vec3; 2]> {
-    let s = &part.solid;
-    // Each face's triangles (centroid, normal), for the side of curved faces near a point.
-    let tris: Vec<Vec<(Vec3, Vec3)>> = s
-        .faces
-        .iter()
-        .map(|f| {
-            (f.first_triangle..f.first_triangle + f.triangle_count)
-                .map(|t| {
-                    let [a, b, c] =
-                        [0, 1, 2].map(|k| v3(s.positions[s.indices[3 * t + k] as usize]));
-                    ((a + b + c) / 3.0, (b - a).cross(c - a).normalize_or_zero())
-                })
-                .collect()
-        })
-        .collect();
-    let facing = |fi: usize, p: Vec3| -> bool {
-        if let Some(pl) = s.faces[fi].plane {
-            return v3(pl.u).cross(v3(pl.v)).dot(back) > 0.0;
+/// A part's edges as segments with the normals of the faces on either side, worked out once
+/// per mesh ([`Outline::of`]), so the outline of any view costs a dot product a segment.
+struct Outline {
+    segments: Vec<Segment>,
+}
+
+/// Start, end, and the normals of the faces on either side there (`None` for a seam of one
+/// face, which always shows).
+type Segment = (Vec3, Vec3, Option<(Vec3, Vec3)>);
+
+impl Outline {
+    fn of(s: &Solid) -> Self {
+        // Each face's triangle normals at their corners (by exact position: the edges' points
+        // are the face meshes' boundary vertices), for the side of a curved face at an edge.
+        let key = |p: Vec3| p.to_array().map(f32::to_bits);
+        let mut at: HashMap<(usize, [u32; 3]), Vec3> = HashMap::new();
+        let mut tris: Vec<Vec<(Vec3, Vec3)>> = Vec::with_capacity(s.faces.len());
+        for (fi, f) in s.faces.iter().enumerate() {
+            let mut face = Vec::with_capacity(f.triangle_count);
+            for t in f.first_triangle..f.first_triangle + f.triangle_count {
+                let [a, b, c] = [0, 1, 2].map(|k| v3(s.positions[s.indices[3 * t + k] as usize]));
+                let n = (b - a).cross(c - a).normalize_or_zero();
+                if f.plane.is_none() {
+                    for p in [a, b, c] {
+                        *at.entry((fi, key(p))).or_insert(Vec3::ZERO) += n;
+                    }
+                }
+                face.push(((a + b + c) / 3.0, n));
+            }
+            tris.push(face);
         }
-        tris[fi]
-            .iter()
-            .min_by(|a, b| a.0.distance_squared(p).total_cmp(&b.0.distance_squared(p)))
-            .is_some_and(|(_, n)| n.dot(back) > 0.0)
-    };
-    let mut out = Vec::new();
-    for e in &s.edges {
-        let (Some(fa), Some(fb)) = (
-            s.faces.iter().position(|f| f.name == e.name.faces[0]),
-            s.faces.iter().position(|f| f.name == e.name.faces[1]),
-        ) else {
-            continue;
-        };
-        for w in e.points.windows(2) {
-            let (a, b) = (v3(w[0]), v3(w[1]));
+        let normal = |fi: usize, a: Vec3, b: Vec3| -> Vec3 {
+            if let Some(pl) = s.faces[fi].plane {
+                return v3(pl.u).cross(v3(pl.v));
+            }
+            let n = at.get(&(fi, key(a))).copied().unwrap_or(Vec3::ZERO)
+                + at.get(&(fi, key(b))).copied().unwrap_or(Vec3::ZERO);
+            if n != Vec3::ZERO {
+                return n;
+            }
+            // Not on the face's mesh: its nearest triangle.
             let m = (a + b) / 2.0;
-            if fa == fb || facing(fa, m) != facing(fb, m) {
-                out.push([a, b]);
+            tris[fi]
+                .iter()
+                .min_by(|x, y| x.0.distance_squared(m).total_cmp(&y.0.distance_squared(m)))
+                .map_or(Vec3::ZERO, |t| t.1)
+        };
+        let index: HashMap<_, usize> = s
+            .faces
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (&f.name, i))
+            .collect();
+        let mut segments = Vec::new();
+        for e in &s.edges {
+            let (Some(&fa), Some(&fb)) = (index.get(&e.name.faces[0]), index.get(&e.name.faces[1]))
+            else {
+                continue;
+            };
+            for w in e.points.windows(2) {
+                let (a, b) = (v3(w[0]), v3(w[1]));
+                let sides = (fa != fb).then(|| (normal(fa, a, b), normal(fb, a, b)));
+                segments.push((a, b, sides));
             }
         }
+        Self { segments }
     }
+}
+
+/// The outline of a part seen along `back`: the pieces of its edges where a face toward the
+/// viewer meets one facing away, and the silhouettes of its curved faces.
+fn contour(part: &Part, outline: &Outline, back: Vec3) -> Vec<[Vec3; 2]> {
+    let s = &part.solid;
+    let mut out: Vec<[Vec3; 2]> = outline
+        .segments
+        .iter()
+        .filter(|(.., sides)| {
+            sides.is_none_or(|(na, nb)| (na.dot(back) > 0.0) != (nb.dot(back) > 0.0))
+        })
+        .map(|(a, b, _)| [*a, *b])
+        .collect();
     for w in s.rulings.windows(2) {
         let (a, b) = (w[0], w[1]);
         if a.face != b.face || a.run != b.run {
@@ -1470,6 +1513,7 @@ fn contour(part: &Part, back: Vec3) -> Vec<[Vec3; 2]> {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_silhouettes(
     triad: Res<Triad>,
     selection: Res<Selection>,
@@ -1478,6 +1522,8 @@ fn draw_silhouettes(
     view: Res<ViewportView>,
     mut gizmos: Gizmos<SilhouetteGizmos>,
     section: Res<crate::section_view::SectionClip>,
+    // Each outlined part's [`Outline`], with the mesh it was worked out from.
+    mut outlines: Local<HashMap<cadrs_core::PartId, (Arc<Solid>, Outline)>>,
 ) {
     let Some(doc) = doc else { return };
     if super::active_assembly(&doc).is_none() {
@@ -1490,6 +1536,7 @@ fn draw_silhouettes(
     ids.sort();
     ids.dedup();
     let back = view.view.back();
+    let mut seen = Vec::new();
     for id in ids {
         // A subassembly: each of its parts.
         for pid in super::view_parts(&cache, &[id]) {
@@ -1499,7 +1546,21 @@ fn draw_silhouettes(
             if cache.is_hidden_part(part.id) {
                 continue;
             }
-            for [a, b] in contour(part, back) {
+            let entry = match outlines.entry(part.id) {
+                Entry::Occupied(o) if Arc::ptr_eq(&o.get().0, &part.solid) => o.into_mut(),
+                e => {
+                    let outline = (part.solid.clone(), Outline::of(&part.solid));
+                    match e {
+                        Entry::Occupied(mut o) => {
+                            o.insert(outline);
+                            o.into_mut()
+                        }
+                        Entry::Vacant(v) => v.insert(outline),
+                    }
+                }
+            };
+            seen.push(part.id);
+            for [a, b] in contour(part, &entry.1, back) {
                 // P3E.3a: cut by a section view.
                 match section.plane {
                     None => gizmos.line(a, b, OUTLINE),
@@ -1512,6 +1573,7 @@ fn draw_silhouettes(
             }
         }
     }
+    outlines.retain(|id, _| seen.contains(id));
 }
 
 /// The editable value box after a drag (A3.4, P3B.1 judge): a quick-dimension box with the

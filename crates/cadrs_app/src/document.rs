@@ -1,8 +1,8 @@
 //! The document shell, laid out like Onshape's (see `reference/onshape/screens/05*`):
 //!
 //! - **Top bar** (36 px): the cadrs mark (back to documents), ☰, the document name (click to
-//!   rename in place), "Main", the versions and branches counters, Create version, and help
-//!   and settings on the right (what does nothing yet is left out: issue #13).
+//!   rename in place), "Main", the versions and branches counters, Create version, and the
+//!   version and settings on the right (what does nothing yet is left out: issue #13).
 //! - **Icon rail** (36 px) on the left, with the feature-list toggle at the top.
 //! - **Toolbar** (34 px): undo, redo, **Sketch** (the only text button) and the feature tools,
 //!   disabled until later milestones, then "Search tools… alt c". Assemblies get their own
@@ -602,72 +602,14 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             ..default()
         })
         .with_children(|r| {
+            crate::update::spawn_version(r, t);
             // Light, dark or the system's scheme.
             r.spawn(cadrs_ui::scheme_toggle(t))
                 .entry::<Node>()
                 .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // (Explore, notifications, apps and Share are left out until they do something:
-            // issue #13.)
-            r.spawn((
-                Button::new("help")
-                    .icon("help")
-                    .icon_size(20.0)
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Help")
-                    .build(t),
-                observe(
-                    |a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
-                        let menu = Menu::new("help-menu")
-                            .min_width(200.0)
-                            .item(
-                                MenuItem::new("help-center", "Help center")
-                                    .icon("help")
-                                    .planned(),
-                            )
-                            .item(
-                                MenuItem::new("help-shortcuts", "Keyboard shortcuts")
-                                    .icon("keyboard")
-                                    .shortcut("Shift+/"),
-                            )
-                            .separator()
-                            .item(
-                                MenuItem::new("help-about", "About cadrs")
-                                    .icon("info")
-                                    .planned(),
-                            );
-                        open_menu(&mut commands, a.entity, menu.build(&theme));
-                    },
-                ),
-                observe(|ev: On<MenuAction>, mut commands: Commands| {
-                    if ev.item == "help-shortcuts" {
-                        commands.queue(crate::shortcuts::open_shortcuts);
-                    }
-                }),
-            ))
-            .insert(dark.clone())
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.padding = UiRect::horizontal(Val::Px(4.0));
-                n.column_gap = Val::Px(4.0);
-            });
-            // The settings menu (Preferences…). No profile name or avatar: there are no
-            // accounts yet (issue #13).
-            r.spawn(
-                Button::new("account")
-                    .icon("settings")
-                    .icon_size(20.0)
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Settings")
-                    .build(t),
-            )
-            .insert(dark.clone())
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.padding = UiRect::horizontal(Val::Px(4.0));
-                n.column_gap = Val::Px(4.0);
-            });
+            // (Explore, notifications, apps, help and Share are left out until they do
+            // something: issue #13.)
+            crate::preferences_ui::spawn_settings_button(r, t);
         });
     });
 }

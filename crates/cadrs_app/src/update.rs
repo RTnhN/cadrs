@@ -132,7 +132,32 @@ struct UpdateJob(Mutex<Receiver<Msg>>);
 
 /// The top bar's slot for the update button, filled by [`sync_update_slot`].
 #[derive(Component)]
-pub struct UpdateSlot;
+struct UpdateSlot;
+
+/// The top bar's update button once a newer release is out, then the version: the same in the
+/// landing page's and the document's bars.
+pub fn spawn_version(r: &mut ChildSpawnerCommands, t: &Theme) {
+    r.spawn((
+        Name::new("update-slot"),
+        UpdateSlot,
+        Node {
+            align_items: AlignItems::Center,
+            margin: UiRect::right(Val::Px(8.0)),
+            ..default()
+        },
+    ));
+    r.spawn((
+        Name::new("version"),
+        t.text(
+            concat!("v", env!("CARGO_PKG_VERSION")),
+            t.font_xs,
+            FontWeight::NORMAL,
+            t.muted_foreground,
+        ),
+    ))
+    .entry::<Node>()
+    .and_modify(|mut n| n.margin = UiRect::right(Val::Px(10.0)));
+}
 
 /// The release notes dialog.
 #[derive(Component)]

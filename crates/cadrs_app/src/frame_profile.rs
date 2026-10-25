@@ -195,6 +195,11 @@ pub struct Summary {
 }
 
 impl FrameProfile {
+    /// The newest frame.
+    pub fn last(&self) -> Option<&FrameSample> {
+        self.frames.back()
+    }
+
     pub fn push(&mut self, sample: FrameSample) {
         let now = sample.at;
         self.frames.push_back(sample);
@@ -319,7 +324,7 @@ pub fn short_name(name: &str) -> String {
 
 /// Ends the frame's tally: the spans timed since the last frame and the GPU passes measured.
 #[allow(clippy::too_many_arguments)]
-fn take_frame(
+pub(crate) fn take_frame(
     time: Res<Time<Real>>,
     tally: Option<Res<ProfilerTally>>,
     store: Option<Res<DiagnosticsStore>>,

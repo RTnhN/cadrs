@@ -2,8 +2,8 @@
 //!
 //! The interface is always built from [`Theme::light`] (the `Theme` resource), and so are the
 //! colors code writes later: hover states, selected rows, fixed swatches. While the dark scheme
-//! is on, [`apply_scheme`] maps every UI color it finds to the dark one just before the frame is
-//! laid out, and puts the light color back when the scheme turns light again. A color is mapped
+//! is on, [`apply_scheme`] maps every UI color it finds to the dark one once the frame is laid
+//! out (before it is drawn), and puts the light color back when the scheme turns light again. A color is mapped
 //! by what it paints ([`ColorRole`]: a fill, a raised surface, text and icons, a line):
 //!
 //! - A [`Theme`] token becomes its counterpart in [`Theme::dark`].
@@ -53,9 +53,11 @@ impl Plugin for ColorSchemePlugin {
                     finish_scheme,
                 )
                     .chain()
-                    .after(crate::icon::sync_icon_layers)
-                    .after(crate::style::apply_visuals)
-                    .before(bevy::ui::UiSystems::Prepare),
+                    // After layout, so after every system that writes a light color before
+                    // it: unordered, such a write and its mapping alternated, and the color
+                    // flickered (a number field's underline in Preferences). Colors are only
+                    // read when the frame is extracted.
+                    .after(bevy::ui::UiSystems::PostLayout),
             );
     }
 }

@@ -2386,25 +2386,29 @@ fn place_plane_labels(
     // The parts' screen bounds (viewport-relative): a label over a part would draw over its
     // edges, so it hides. From the corners of each part's 3D box (a little larger than its
     // outline; projecting every vertex of every part each frame cost a large assembly most of
-    // its frame).
-    let part_boxes: Vec<Rect> = parts
-        .iter()
-        .flat_map(|c| c.parts.iter())
-        .filter_map(|part| {
-            let (lo, hi) = part.solid.pick_index().bounds?;
-            let mut pts = (0..8).map(|k| {
-                let c = [
-                    if k & 1 == 0 { lo[0] } else { hi[0] },
-                    if k & 2 == 0 { lo[1] } else { hi[1] },
-                    if k & 4 == 0 { lo[2] } else { hi[2] },
-                ];
-                rect.to_screen(v.project(Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)))
-                    - rect.0.min
-            });
-            let first = pts.next()?;
-            Some(pts.fold(Rect::from_corners(first, first), |r, p| r.union_point(p)))
-        })
-        .collect();
+    // its frame). Worked out once a label is shown (an assembly shows none, and building every
+    // part's boxes cost a large one half a second on each switch to its tab).
+    let mut part_boxes: Option<Vec<Rect>> = None;
+    let mut boxes = || -> Vec<Rect> {
+        parts
+            .iter()
+            .flat_map(|c| c.parts.iter())
+            .filter_map(|part| {
+                let (lo, hi) = part.solid.pick_index().bounds?;
+                let mut pts = (0..8).map(|k| {
+                    let c = [
+                        if k & 1 == 0 { lo[0] } else { hi[0] },
+                        if k & 2 == 0 { lo[1] } else { hi[1] },
+                        if k & 4 == 0 { lo[2] } else { hi[2] },
+                    ];
+                    rect.to_screen(v.project(Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32)))
+                        - rect.0.min
+                });
+                let first = pts.next()?;
+                Some(pts.fold(Rect::from_corners(first, first), |r, p| r.union_point(p)))
+            })
+            .collect()
+    };
     for (label, children, mut node, mut transform, mut vis) in &mut q {
         let Some(&child) = children.first() else {
             continue;
@@ -2485,6 +2489,7 @@ fn place_plane_labels(
         if behind_fill
             || outside
             || part_boxes
+                .get_or_insert_with(&mut boxes)
                 .iter()
                 .any(|r| !r.intersect(label_box).is_empty())
         {
