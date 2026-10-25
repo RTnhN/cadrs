@@ -25,6 +25,9 @@ pub enum ExchangeFormat {
     Step,
     /// IGES 5.3 (solids as MSBO solids).
     Iges,
+    /// OpenCASCADE's BRep text format (what `BRepTools::Write` writes): exact geometry only,
+    /// no names, colours or assembly structure.
+    Brep,
 }
 
 impl ExchangeFormat {
@@ -33,15 +36,18 @@ impl ExchangeFormat {
         match self {
             ExchangeFormat::Step => "STEP",
             ExchangeFormat::Iges => "IGES",
+            ExchangeFormat::Brep => "BREP",
         }
     }
 
-    /// The format a file name's extension says (`.step`/`.stp`, `.iges`/`.igs`).
+    /// The format a file name's extension says (`.step`/`.stp`, `.iges`/`.igs`,
+    /// `.brep`/`.brp`).
     pub fn of_path(path: &std::path::Path) -> Option<Self> {
         let ext = path.extension()?.to_string_lossy().to_lowercase();
         match ext.as_str() {
             "step" | "stp" => Some(ExchangeFormat::Step),
             "iges" | "igs" => Some(ExchangeFormat::Iges),
+            "brep" | "brp" => Some(ExchangeFormat::Brep),
             _ => None,
         }
     }

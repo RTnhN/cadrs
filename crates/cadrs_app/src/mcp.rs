@@ -1820,7 +1820,7 @@ fn import_step(world: &mut World, path: &str) -> Result<Value, String> {
     let path = std::path::Path::new(path);
     let format = ImportFormat::of_path(path)
         .filter(|f| f.kernel().is_some())
-        .ok_or("only STEP and IGES files can be imported")?;
+        .ok_or("only STEP, IGES and BREP files can be imported")?;
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let data = String::from_utf8_lossy(&bytes).into_owned();
     let plan = cadrs_core::rebuild::exchange::plan_import(format, data.clone().into_bytes())

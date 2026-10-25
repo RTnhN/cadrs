@@ -22,7 +22,7 @@ use crate::{BodyId, KernelError, Motion, Result};
 
 use super::kernel::NativeKernel;
 use super::math::Affine;
-use super::step::{ReadModel, WriteInstance, motion_affine};
+use super::step::{ReadModel, ReadOccurrence, ReadPart, WriteInstance, motion_affine};
 use super::topo::{Body, Shell, Solid};
 
 /// A file or body that can't be read: the data's fault, not the operation's.
@@ -34,6 +34,7 @@ fn read(format: ExchangeFormat, bytes: &[u8]) -> Result<ReadModel> {
     let r = match format {
         ExchangeFormat::Step => super::step::read(bytes),
         ExchangeFormat::Iges => super::iges::read(bytes),
+        ExchangeFormat::Brep => read_brep(bytes),
     };
     let what = format!("{} import", format.label());
     let m = r.map_err(|e| failed(&what, e))?;
@@ -55,6 +56,34 @@ fn read(format: ExchangeFormat, bytes: &[u8]) -> Result<ReadModel> {
         }
     }
     Ok(m)
+}
+
+/// A BRep file as a model: one part per solid (the rest, sheets and wires, as one more), each
+/// once where the file has it. The format has no names, colours or assemblies.
+fn read_brep(bytes: &[u8]) -> std::result::Result<ReadModel, String> {
+    let (body, warnings) = super::brep_occt::read(bytes)?;
+    let parts: Vec<ReadPart> = split_into_solids(&body)
+        .into_iter()
+        .map(|body| ReadPart {
+            body,
+            name: String::new(),
+            colors: Vec::new(),
+        })
+        .collect();
+    let occurrences = (0..parts.len())
+        .map(|part| ReadOccurrence {
+            part,
+            placement: Affine::identity(),
+            name: String::new(),
+            color: None,
+        })
+        .collect();
+    Ok(ReadModel {
+        name: String::new(),
+        parts,
+        occurrences,
+        warnings,
+    })
 }
 
 /// Refuses bodies a writer can't put in a file (non-finite numbers, dangling indices).
@@ -137,6 +166,19 @@ pub fn export_model(
                     placed.iter().map(|(b, n)| (b, n.as_str())).collect();
                 super::iges::write(&named)
             }
+        }
+        // Names are dropped (the format has none); an assembly's instances are placed copies.
+        ExchangeFormat::Brep => {
+            let placed: Vec<Body> = instances
+                .iter()
+                .map(|i| bodies[i.part].transformed(&motion_affine(&i.placement)))
+                .collect();
+            let all: Vec<&Body> = if instances.is_empty() {
+                bodies.clone()
+            } else {
+                placed.iter().collect()
+            };
+            super::brep_write::write(&all).into_bytes()
         }
     })
 }
@@ -723,6 +765,50 @@ mod tests {
     }
 
     #[test]
+    fn brep_round_trips_through_the_exchange_api() {
+        let mut k = NativeKernel::new();
+        let mut all = bodies(&mut k);
+        let nb = nurbs_top_box(&mut k);
+        all.push(("NURBS top face", nb, 6000.0));
+        for (name, b, vol) in all {
+            let bytes = k
+                .export_model(ExchangeFormat::Brep, name, &[(b, name.into())], &[])
+                .unwrap();
+            let m = k.import_model(ExchangeFormat::Brep, &bytes).unwrap();
+            assert_eq!(m.parts.len(), 1, "{name}");
+            assert_eq!(m.occurrences.len(), 1, "{name}");
+            assert_eq!(k.solid_count(m.parts[0].body).unwrap(), 1, "{name}");
+            check_same(&k, name, b, m.parts[0].body, vol, 1e-9);
+        }
+        // Two solids: two parts; an assembly's instances: placed copies.
+        let (_, a, _) = bodies(&mut k)[0];
+        let insts = [
+            ExportInstance {
+                part: 0,
+                placement: Motion::identity(),
+                name: "one".into(),
+            },
+            ExportInstance {
+                part: 0,
+                placement: Motion {
+                    linear: nalgebra::Matrix3::identity(),
+                    translation: nalgebra::Vector3::new(100.0, 0.0, 0.0),
+                },
+                name: "two".into(),
+            },
+        ];
+        let bytes = k
+            .export_model(ExchangeFormat::Brep, "asm", &[(a, "a".into())], &insts)
+            .unwrap();
+        let m = k.import_model(ExchangeFormat::Brep, &bytes).unwrap();
+        assert_eq!(m.parts.len(), 2);
+        assert_eq!(
+            ExchangeFormat::of_path("x.BRP".as_ref()),
+            Some(ExchangeFormat::Brep)
+        );
+    }
+
+    #[test]
     fn bodies_as_bytes_round_trip_exactly() {
         let mut k = NativeKernel::new();
         for (name, b, _) in bodies(&mut k) {
@@ -761,6 +847,7 @@ mod tests {
             let m = match fmt {
                 ExchangeFormat::Step => super::super::step::read(&bytes),
                 ExchangeFormat::Iges => super::super::iges::read(&bytes),
+                ExchangeFormat::Brep => super::read_brep(&bytes),
             };
             let dt = t0.elapsed().as_secs_f64();
             let m = match m {

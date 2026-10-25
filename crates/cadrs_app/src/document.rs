@@ -1699,7 +1699,7 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 "import",
                 "file-import",
                 false,
-                "Import (a STEP or STL file)",
+                "Import (a STEP, IGES, BREP or STL file)",
             ),
             (
                 "derived",
