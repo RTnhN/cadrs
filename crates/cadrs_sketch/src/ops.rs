@@ -1224,6 +1224,93 @@ mod tests {
         );
     }
 
+    /// Issue #93's sketch: a vertical line from the origin, a quarter arc split where a
+    /// construction line from its center meets it, and a line from the arc's top. The line and
+    /// the arc's two halves mirror each other in that construction line, whose angle to the
+    /// horizontal is dimensioned. Returns the sketch and the angle dimension.
+    fn split_quarter_arc() -> (Sketch, DimensionId) {
+        let mut s = Sketch::new();
+        let center = Vec2::new(65.0, 32.0);
+        let split = center + Vec2::new(-1.0, 1.0) * (65.0 / 2f64.sqrt());
+        let p = [
+            Vec2::ZERO,
+            Vec2::new(0.0, 32.0),
+            center,
+            split,
+            Vec2::new(65.0, 97.0),
+            Vec2::new(97.0, 97.0),
+        ]
+        .map(|v| s.add_point(v));
+        let mut curve = |kind, construction| s.curves.insert(Curve { kind, construction });
+        let side = curve(CurveKind::Line { a: p[0], b: p[1] }, false);
+        let horizontal = curve(CurveKind::Line { a: p[1], b: p[2] }, true);
+        let lower = curve(
+            CurveKind::Arc {
+                center: p[2],
+                start: p[3],
+                end: p[1],
+            },
+            false,
+        );
+        let axis = curve(CurveKind::Line { a: p[2], b: p[3] }, true);
+        let upper = curve(
+            CurveKind::Arc {
+                center: p[2],
+                start: p[4],
+                end: p[3],
+            },
+            false,
+        );
+        let top = curve(CurveKind::Line { a: p[5], b: p[4] }, false);
+        let c = CurveRef::Curve;
+        for k in [
+            ConstraintOf::Coincident(PointRef::Point(p[0]), PointRef::Origin),
+            ConstraintOf::Vertical(crate::Orient::Line(c(side))),
+            ConstraintOf::Horizontal(crate::Orient::Line(c(horizontal))),
+            ConstraintOf::SymmetricCurves(c(side), c(top), c(axis)),
+            ConstraintOf::SymmetricCurves(c(lower), c(upper), c(axis)),
+        ] {
+            s.add_constraint(k);
+        }
+        s.dimensions.insert(Dimension::new(
+            DimensionKind::Aligned { a: p[0], b: p[1] },
+            32.0,
+            -1.75,
+        ));
+        s.dimensions.insert(Dimension::new(
+            DimensionKind::Radius { curve: lower },
+            65.0,
+            2.7,
+        ));
+        let angle = s.dimensions.insert(Dimension::new(
+            DimensionKind::Angle {
+                a: c(horizontal),
+                b: c(axis),
+                flip_a: true,
+                flip_b: false,
+            },
+            45.0,
+            53.0,
+        ));
+        assert!(solve::solve(&mut s).conflicting.is_empty());
+        (s, angle)
+    }
+
+    #[test]
+    fn a_large_angle_change_solves_in_one_edit() {
+        // #93: 45° to 10° failed (the dimension turned red) although 45° to 30° to 10° solved.
+        // 150° needs the change split into steps.
+        for value in [10.0, 150.0] {
+            let (mut s, angle) = split_quarter_arc();
+            SketchOp::SetDimensionValue { id: angle, value }
+                .apply(&mut s)
+                .unwrap();
+            assert!(solve::solve(&mut s.clone()).conflicting.is_empty());
+            let measured = crate::dimension::measure(&s, s.dimensions[angle].kind).unwrap();
+            assert!((measured - value).abs() < 1e-6, "{value}: {measured}");
+        }
+    }
+
     fn rect(s: &mut Sketch, w: f64, h: f64) {
         SketchOp::AddPolyline {
             points: vec![
