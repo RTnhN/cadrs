@@ -38,7 +38,7 @@ use cadrs_sketch::infer::{Guide, Kind};
 use cadrs_sketch::solve::Status;
 use cadrs_sketch::units::Units;
 use cadrs_sketch::{ArcGeom, CurveRef, PlaneFrame, PlaneRef, PointRef, Sketch, SketchEntity};
-use cadrs_ui::Theme;
+use cadrs_ui::{KeepColors, Theme, by_scheme};
 
 use crate::sketch::{ActiveSketchTool, SketchSession, SketchViewSettings};
 use crate::sketch_glyphs::{
@@ -97,6 +97,10 @@ impl Plugin for SketchDrawPlugin {
                     .before(bevy::ui::UiSystems::Layout)
                     .run_if(in_state(AppState::Document)),
             )
+            .add_systems(
+                Update,
+                recolor_fills.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
+            )
             .add_systems(OnExit(AppState::Document), clear_fills);
     }
 }
@@ -154,15 +158,21 @@ fn draw_list_hovered_sketch(
 
 // Colors.
 fn regular() -> Color {
-    Color::srgb_u8(0x00, 0x00, 0xd0)
+    by_scheme(
+        Color::srgb_u8(0x00, 0x00, 0xd0),
+        Color::srgb_u8(0x74, 0x95, 0xff),
+    )
 }
 /// Fully constrained geometry.
 fn defined() -> Color {
-    Color::BLACK
+    by_scheme(Color::BLACK, Color::srgb_u8(0xe8, 0xea, 0xed))
 }
 /// Geometry of a conflicting constraint, and conflicting dimensions.
 fn conflict() -> Color {
-    Color::srgb_u8(0xbe, 0x00, 0x00)
+    by_scheme(
+        Color::srgb_u8(0xbe, 0x00, 0x00),
+        Color::srgb_u8(0xff, 0x80, 0x80),
+    )
 }
 fn status_color(s: Status) -> Color {
     match s {
@@ -172,13 +182,19 @@ fn status_color(s: Status) -> Color {
     }
 }
 fn rubber() -> Color {
-    Color::srgb_u8(0x44, 0x9c, 0xcd)
+    by_scheme(
+        Color::srgb_u8(0x44, 0x9c, 0xcd),
+        Color::srgb_u8(0x62, 0xb6, 0xe8),
+    )
 }
 fn hover_band() -> Color {
     Color::srgb_u8(0xfe, 0xc6, 0x85)
 }
 fn hover_core() -> Color {
-    Color::srgb_u8(0xcd, 0xa1, 0x6f)
+    by_scheme(
+        Color::srgb_u8(0xcd, 0xa1, 0x6f),
+        Color::srgb_u8(0xf2, 0xba, 0x7a),
+    )
 }
 /// Trim's hover band and core (`edit_tools/trim-points-03.png`).
 fn trim_band() -> Color {
@@ -198,31 +214,44 @@ fn selected() -> Color {
     Color::srgb_u8(0xf6, 0xbc, 0x1a)
 }
 fn fill() -> Color {
-    Color::srgb_u8(0xdd, 0xe2, 0xe6)
+    by_scheme(
+        Color::srgb_u8(0xdd, 0xe2, 0xe6),
+        Color::srgb_u8(0x4a, 0x54, 0x60),
+    )
 }
 /// A visible sketch that isn't being edited: Onshape's grey (`screens/20`), dark enough to read
 /// over a part (P3B.7 judge: the light hairline made a sketch like "Hole Positions" hard to
 /// see).
 fn accepted_edge() -> Color {
-    Color::srgb_u8(0x70, 0x75, 0x7b)
+    by_scheme(
+        Color::srgb_u8(0x70, 0x75, 0x7b),
+        Color::srgb_u8(0xa6, 0xab, 0xb2),
+    )
 }
 fn dimension_color() -> Color {
-    Color::BLACK
+    by_scheme(Color::BLACK, Color::srgb_u8(0xd4, 0xd7, 0xdc))
 }
 /// Dimension values (`screens/16a`, `17a`).
 fn dimension_text() -> Color {
-    Color::BLACK
+    by_scheme(Color::BLACK, Color::srgb_u8(0xec, 0xee, 0xf0))
 }
 /// Driven dimensions (`dimension/dimension-driven-01.png`).
 fn dimension_driven() -> Color {
-    Color::srgb_u8(0x95, 0xa1, 0xab)
+    by_scheme(
+        Color::srgb_u8(0x95, 0xa1, 0xab),
+        Color::srgb_u8(0xaa, 0xb4, 0xbe),
+    )
 }
 /// Behind dimension values: the sketch plane's colour.
 fn knockout(inside_plane: bool) -> Color {
     if inside_plane {
-        Color::srgb_u8(0xf4, 0xf8, 0xfb)
+        by_scheme(
+            Color::srgb_u8(0xf4, 0xf8, 0xfb),
+            Color::srgb_u8(0x3a, 0x48, 0x58),
+        )
     } else {
-        Color::WHITE
+        // The dark viewport (`Theme::dark().viewport_background`).
+        by_scheme(Color::WHITE, Color::srgb_u8(0x39, 0x3c, 0x42))
     }
 }
 /// A hovered dimension.
@@ -246,7 +275,10 @@ fn guide_color() -> Color {
 }
 /// Glyph leaders (`screens/12a`).
 fn leader_color() -> Color {
-    Color::srgb_u8(0xbc, 0xc4, 0xcb)
+    by_scheme(
+        Color::srgb_u8(0xbc, 0xc4, 0xcb),
+        Color::srgb_u8(0x6e, 0x77, 0x80),
+    )
 }
 
 /// Committed geometry: 2 px, anti-aliased, centered on pixels (one solid pixel, soft edges).
@@ -1474,7 +1506,7 @@ fn draw_sketches(
                     ppm as f64,
                 );
                 dot(&mut dots, &frame, h.pos, 3.5, ppm, rubber());
-                dot(&mut dots, &frame, h.pos, 2.0, ppm, Color::WHITE);
+                dot(&mut dots, &frame, h.pos, 2.0, ppm, knockout(false));
             }
             if let Some(h) = draw.spline_handle
                 && let Some(op) = crate::sketch_tools::spline_handle_op(sketch, h)
@@ -1537,7 +1569,10 @@ fn draw_sketches(
                 thin.line(
                     world(&frame, edge),
                     world(&frame, end),
-                    Color::srgb_u8(0xb4, 0xb8, 0xbb),
+                    by_scheme(
+                        Color::srgb_u8(0xb4, 0xb8, 0xbb),
+                        Color::srgb_u8(0x6a, 0x70, 0x76),
+                    ),
                 );
             }
         }
@@ -2742,7 +2777,10 @@ fn draw_accepted(
     let point_color = if error {
         conflict()
     } else {
-        Color::srgb_u8(0x9a, 0x9e, 0xa1)
+        by_scheme(
+            Color::srgb_u8(0x9a, 0x9e, 0xa1),
+            Color::srgb_u8(0x8a, 0x8f, 0x95),
+        )
     };
     for (id, c) in &s.curves {
         if skip(id) {
@@ -2808,7 +2846,10 @@ fn draw_accepted(
             g.circle(
                 Isometry3d::new(world(&frame, p.pos), rot),
                 2.5 / ppm,
-                Color::srgb_u8(0x70, 0x74, 0x78),
+                by_scheme(
+                    Color::srgb_u8(0x70, 0x74, 0x78),
+                    Color::srgb_u8(0xa2, 0xa6, 0xab),
+                ),
             )
             .resolution(16);
         } else if !(any_ellipse && s.hidden_point(id)) {
@@ -3085,6 +3126,22 @@ fn sync_fills(
     }
 }
 
+/// Gives the sketch fills the scheme's grey.
+fn recolor_fills(cache: Res<FillCache>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    for h in [
+        &cache.material,
+        &cache.overlay_material,
+        &cache.face_material,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(mut m) = materials.get_mut(h) {
+            m.base_color = fill().with_alpha(m.base_color.alpha());
+        }
+    }
+}
+
 fn clear_fills(mut cache: ResMut<FillCache>) {
     cache.fills.clear();
     cache.outlined.clear();
@@ -3309,6 +3366,8 @@ fn sync_labels(
                 },
                 UiTransform::default(),
                 BackgroundColor(Color::NONE),
+                // Drawn in the sketch's own colors for the scheme, like the lines.
+                KeepColors,
                 Visibility::Hidden,
                 Pickable::IGNORE,
                 // Over the glyphs, under the sketch dialog and other overlays in the viewport.

@@ -2023,8 +2023,10 @@ fn hide_result_parts(
     session: Option<Res<LoadSession>>,
     mut q: Query<(&PartMesh, &mut Visibility)>,
     mut pick: ResMut<PickFilterOverride>,
+    mut edges_only: ResMut<crate::parts::EdgesOnly>,
 ) {
     let shown = shown_result(&open, &kind, inputs.key, &state, session.is_some());
+    edges_only.set_if_neq(crate::parts::EdgesOnly(shown.is_some()));
     // While results show, the view reads values (the probe) rather than picking the hidden
     // parts; the load dialog picks faces.
     let want = if session.is_some() {

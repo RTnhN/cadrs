@@ -668,7 +668,14 @@ fn draw_measure(
             }
         }
     }
-    g.line(a, b, Color::srgb_u8(0x20, 0x20, 0x20));
+    g.line(
+        a,
+        b,
+        cadrs_ui::by_scheme(
+            Color::srgb_u8(0x20, 0x20, 0x20),
+            Color::srgb_u8(0xe0, 0xe2, 0xe6),
+        ),
+    );
 }
 
 #[cfg(test)]

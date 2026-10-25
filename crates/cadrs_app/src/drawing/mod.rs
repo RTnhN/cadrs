@@ -72,8 +72,20 @@ use crate::{ActiveDocument, AppState};
 pub const DRAWING_LAYER: usize = 7;
 
 /// The grey around the sheet (`lesson-drawing-interface.png`).
+/// Gives the ground around the paper the scheme's grey (the paper stays white).
+fn recolor_ground(mut q: Query<(&Name, &mut Sprite), With<SheetEntity>>) {
+    for (name, mut sprite) in &mut q {
+        if name.as_str() == "drawing-ground" {
+            sprite.color = ground_color();
+        }
+    }
+}
+
 pub fn ground_color() -> Color {
-    Color::srgb_u8(0xe3, 0xe3, 0xe3)
+    cadrs_ui::by_scheme(
+        Color::srgb_u8(0xe3, 0xe3, 0xe3),
+        Color::srgb_u8(0x2c, 0x2e, 0x33),
+    )
 }
 
 /// Sheet line and text colour.
@@ -95,6 +107,10 @@ impl Plugin for DrawingPlugin {
             .init_gizmo_group::<SheetThick>()
             .add_systems(Startup, (spawn_drawing_camera, configure_gizmos))
             .add_systems(OnExit(AppState::Document), reset_drawing_ui)
+            .add_systems(
+                Update,
+                recolor_ground.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
+            )
             .add_systems(
                 Update,
                 (

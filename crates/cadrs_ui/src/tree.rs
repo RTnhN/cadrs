@@ -391,6 +391,7 @@ impl TreeItem {
                                 ..default()
                             },
                             BackgroundColor(c),
+                            crate::color_scheme::KeepFill,
                             Pickable::IGNORE,
                             children![(
                                 Node {

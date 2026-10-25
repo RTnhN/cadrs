@@ -8,6 +8,10 @@
 //! **Interface › UI scale** (issue #12): 75–200 % of the display's own scale, for large or
 //! high-resolution screens; applied to the whole window as soon as OK is pressed.
 //!
+//! **Color scheme**: the top bar's light / dark / system toggle ([`cadrs_ui::scheme_toggle`])
+//! is saved here too, as soon as it's clicked. `CADRS_COLOR_SCHEME=light|dark|system` overrides
+//! it for one run without saving (scenarios use it to render in dark).
+//!
 //! Below it, **AI assistants (MCP)**: the *Enable MCP server* switch and the endpoint it serves
 //! (`crate::mcp` starts and stops the server as OK changes it).
 
@@ -16,7 +20,7 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontWeight};
 use bevy::ui_widgets::{Activate, observe};
 use cadrs_core::preferences::{
-    Modifiers, MouseButton, MousePreset, Preferences, UI_SCALES, ViewAction,
+    ColorScheme, Modifiers, MouseButton, MousePreset, Preferences, UI_SCALES, ViewAction,
 };
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
@@ -32,7 +36,7 @@ impl Plugin for PreferencesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LocalPreferences>()
             .add_systems(Startup, load_preferences)
-            .add_systems(Update, apply_ui_scale)
+            .add_systems(Update, (apply_ui_scale, save_color_scheme))
             .add_observer(on_account)
             .add_observer(on_account_action)
             .add_observer(on_preset_change)
@@ -50,10 +54,52 @@ impl LocalPreferences {
     }
 }
 
-fn load_preferences(store: Option<Res<DocumentStore>>, mut prefs: ResMut<LocalPreferences>) {
+fn load_preferences(
+    store: Option<Res<DocumentStore>>,
+    mut prefs: ResMut<LocalPreferences>,
+    mut appearance: ResMut<cadrs_ui::Appearance>,
+) {
     if let Some(store) = store {
         prefs.0 = Preferences::load(store.0.root());
     }
+    appearance.preference = to_ui(scheme_override().unwrap_or(prefs.0.color_scheme));
+}
+
+/// `CADRS_COLOR_SCHEME`, when set to a scheme.
+fn scheme_override() -> Option<ColorScheme> {
+    match std::env::var("CADRS_COLOR_SCHEME").ok()?.as_str() {
+        "light" => Some(ColorScheme::Light),
+        "dark" => Some(ColorScheme::Dark),
+        "system" => Some(ColorScheme::System),
+        _ => None,
+    }
+}
+
+fn to_ui(c: ColorScheme) -> cadrs_ui::SchemePreference {
+    match c {
+        ColorScheme::System => cadrs_ui::SchemePreference::System,
+        ColorScheme::Light => cadrs_ui::SchemePreference::Light,
+        ColorScheme::Dark => cadrs_ui::SchemePreference::Dark,
+    }
+}
+
+fn from_ui(p: cadrs_ui::SchemePreference) -> ColorScheme {
+    match p {
+        cadrs_ui::SchemePreference::System => ColorScheme::System,
+        cadrs_ui::SchemePreference::Light => ColorScheme::Light,
+        cadrs_ui::SchemePreference::Dark => ColorScheme::Dark,
+    }
+}
+
+/// Saves the scheme the toggle picks (not one `CADRS_COLOR_SCHEME` set).
+fn save_color_scheme(world: &mut World) {
+    let picked = from_ui(world.resource::<cadrs_ui::Appearance>().preference);
+    let prefs = world.resource::<LocalPreferences>().0;
+    if prefs.color_scheme == picked || scheme_override() == Some(picked) {
+        return;
+    }
+    world.resource_mut::<LocalPreferences>().0.color_scheme = picked;
+    save(world);
 }
 
 /// Draws the interface at the preferred size (issue #12): the window's scale factor is the

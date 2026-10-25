@@ -497,6 +497,8 @@ type CapMeshKey = (usize, u64);
 type ShadingKey = (
     Option<[[u32; 4]; MAX_PLANES]>,
     bool,
+    // The dark scheme (the hidden-line modes' face grey).
+    bool,
     bool,
     usize,
     [u32; 4],
@@ -1733,6 +1735,7 @@ fn sync_shading(
     let key = (
         cut.map(|_| planes.map(|p| p.to_array().map(f32::to_bits))),
         !mode.shaded(),
+        cadrs_ui::dark_in_force(),
         mode.translucent(),
         materials.len(),
         analysis_v.to_array().map(f32::to_bits),
@@ -1758,7 +1761,8 @@ fn sync_shading(
                 } else {
                     1.0
                 },
-                0.0,
+                // The hidden-line modes' faces: white paper, or the dark viewport's grey.
+                if cadrs_ui::dark_in_force() { 0.27 } else { 1.0 },
                 0.0,
             ),
             analysis: if m.cap { Vec4::ZERO } else { analysis_v },

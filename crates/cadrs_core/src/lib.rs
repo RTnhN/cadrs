@@ -69,6 +69,7 @@ pub mod store;
 pub mod studio;
 pub mod surfacing;
 pub mod tab_tree;
+pub mod thread;
 pub mod thumbnail;
 pub mod time;
 pub mod transform;

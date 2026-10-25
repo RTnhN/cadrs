@@ -33,6 +33,21 @@ fn hex(s: &str) -> Color {
     Color::Srgba(Srgba::hex(s).expect("valid hex color"))
 }
 
+/// What a color paints, which decides its dark counterpart ([`crate::color_scheme`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColorRole {
+    /// Backgrounds of panels, rows and buttons.
+    Fill,
+    /// Backgrounds of surfaces above the page: dialogs, floating panels.
+    Raised,
+    /// Backgrounds of surfaces above everything: menus, popups, toasts.
+    Floating,
+    /// Text and icons.
+    Ink,
+    /// Borders, outlines and separators.
+    Line,
+}
+
 /// All design tokens. Insert a modified copy as a resource to restyle the app.
 #[derive(Resource, Clone, Debug)]
 pub struct Theme {
@@ -43,6 +58,8 @@ pub struct Theme {
     pub sidebar: Color,
     pub viewport_background: Color,
     pub popover: Color,
+    /// Menus and popups, over dialogs and the 3D view alike.
+    pub floating: Color,
     pub overlay: Color,
     pub shadow: Color,
 
@@ -69,6 +86,9 @@ pub struct Theme {
     pub primary_active: Color,
     pub primary_disabled: Color,
     pub primary_foreground: Color,
+    /// A disabled primary button's label: white to the eye in light, but its own token so the
+    /// dark theme can dim it.
+    pub primary_disabled_foreground: Color,
     pub secondary: Color,
     pub secondary_hover: Color,
     pub secondary_active: Color,
@@ -82,6 +102,8 @@ pub struct Theme {
     pub list_selected: Color,
     pub list_selected_bar: Color,
     pub menu_hover: Color,
+    /// The current point of a history timeline.
+    pub timeline_selected: Color,
 
     // Inputs
     pub input_background: Color,
@@ -122,6 +144,8 @@ pub struct Theme {
     pub cancel: Color,
     pub checkbox_border: Color,
     pub checkbox_checked: Color,
+    /// A checkbox that doesn't apply (its fill and border).
+    pub checkbox_unavailable: Color,
     /// A selection field waiting for input.
     pub selection_field_active: Color,
     pub selection_field_active_border: Color,
@@ -202,6 +226,7 @@ impl Theme {
             sidebar: hex("#ffffff"),
             viewport_background: hex("#ffffff"),
             popover: hex("#ffffff"),
+            floating: hex("#ffffff"),
             // UI blends in linear space: 0.79 alpha dims white to about #7f7f7f, like the browser's 50%.
             overlay: Color::srgba(0.0, 0.0, 0.0, 0.79),
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.18),
@@ -225,6 +250,7 @@ impl Theme {
             primary_active: hex("#0f4491"),
             primary_disabled: hex("#9bb6dc"),
             primary_foreground: hex("#ffffff"),
+            primary_disabled_foreground: hex("#f8fafd"),
             secondary: hex("#dadada"),
             secondary_hover: hex("#cecece"),
             secondary_active: hex("#bfbfbf"),
@@ -237,6 +263,7 @@ impl Theme {
             list_selected: hex("#dce8f8"),
             list_selected_bar: hex("#2750a2"),
             menu_hover: hex("#eef3fb"),
+            timeline_selected: hex("#cfe3f7"),
 
             input_background: hex("#ffffff"),
             input_disabled_background: hex("#eeeeee"),
@@ -268,6 +295,7 @@ impl Theme {
             cancel: hex("#c42b3c"),
             checkbox_border: hex("#a6a6a6"),
             checkbox_checked: hex("#28549d"),
+            checkbox_unavailable: hex("#a8a8a8"),
             selection_field_active: hex("#def1ff"),
             selection_field_active_border: hex("#7a8a97"),
 
@@ -322,6 +350,235 @@ impl Theme {
             caret_blink_period: Duration::from_secs(1),
             fade_duration: Duration::from_millis(150),
         }
+    }
+
+    /// The dark theme: the light theme's tokens on charcoal surfaces. The interface is always
+    /// built from [`Theme::light`]; [`crate::color_scheme`] maps what it draws to these values
+    /// while the dark scheme is on, so sizes, fonts and behavior are the light theme's.
+    pub fn dark() -> Self {
+        Self {
+            background: hex("#1f2023"),
+            title_bar: hex("#2a2b2f"),
+            tab_bar: hex("#18191b"),
+            sidebar: hex("#1f2023"),
+            viewport_background: hex("#393c42"),
+            popover: hex("#2c2e33"),
+            floating: hex("#44474e"),
+            overlay: Color::srgba(0.0, 0.0, 0.0, 0.79),
+            shadow: Color::srgba(0.0, 0.0, 0.0, 0.45),
+
+            foreground: hex("#e3e4e6"),
+            muted_foreground: hex("#a9abb0"),
+            subtle_foreground: hex("#8b8e95"),
+            disabled_foreground: hex("#7a7d84"),
+            link: hex("#7aaaf0"),
+
+            border: hex("#3d3f44"),
+            border_strong: hex("#4c4e54"),
+            separator: hex("#35373b"),
+            row_separator: hex("#28292d"),
+            focus_ring: hex("#5c8fd6"),
+
+            primary: hex("#2f6fd0"),
+            primary_hover: hex("#3e7ddc"),
+            primary_open: hex("#4f88dc"),
+            primary_open_border: hex("#7aa5e8"),
+            primary_active: hex("#2861b8"),
+            primary_disabled: hex("#2c4469"),
+            primary_foreground: hex("#ffffff"),
+            primary_disabled_foreground: hex("#8c9bb4"),
+            secondary: hex("#3a3c41"),
+            secondary_hover: hex("#45474d"),
+            secondary_active: hex("#50535a"),
+            secondary_disabled: hex("#2c2d31"),
+            ghost_hover: hex("#34363b"),
+            ghost_active: hex("#3e4046"),
+
+            list_hover: hex("#2a2e36"),
+            list_active: hex("#2f3747"),
+            list_selected: hex("#263a57"),
+            list_selected_bar: hex("#5b8fe0"),
+            menu_hover: hex("#2d3544"),
+            timeline_selected: hex("#263a57"),
+
+            input_background: hex("#18191c"),
+            input_disabled_background: hex("#26272b"),
+            input_border: hex("#46484e"),
+            input_border_focus: hex("#4f86da"),
+            caret: hex("#e6e6e6"),
+            selection: hex("#3b78e0"),
+            selection_foreground: hex("#ffffff"),
+
+            info_background: hex("#1b3340"),
+            info_border: hex("#2a5266"),
+            warning_background: hex("#3d3517"),
+            danger: hex("#f0605a"),
+            success: hex("#4cc15c"),
+            tooltip_background: hex("#4d515a"),
+            tooltip_foreground: hex("#ececec"),
+            toast_background: hex("#1c3545"),
+            toast_border: hex("#2d5068"),
+            toast_foreground: hex("#d8ecfa"),
+            toast_icon: hex("#7fb0d6"),
+            warning_banner_background: hex("#36311d"),
+            warning_banner_border: hex("#5a5232"),
+            warning_icon: hex("#f0bd45"),
+
+            feature_error: hex("#ff9a9e"),
+            feature_editing: hex("#22476a"),
+            accept: hex("#3dc23d"),
+            accept_disabled: hex("#2b4a2b"),
+            cancel: hex("#ff6070"),
+            checkbox_border: hex("#6c6f75"),
+            checkbox_checked: hex("#4a80d2"),
+            checkbox_unavailable: hex("#45474d"),
+            selection_field_active: hex("#1d3a54"),
+            selection_field_active_border: hex("#6d8ca8"),
+
+            rail_background: hex("#232427"),
+            panel_border: hex("#35373b"),
+            tool_foreground: hex("#d5d6d9"),
+            tool_disabled_foreground: hex("#686b72"),
+            toolbar_separator: hex("#404247"),
+            kbd_border: hex("#6c6f75"),
+            search_background: hex("#2a2b2f"),
+            tab_inactive: hex("#2a2b2f"),
+            tab_hover: hex("#313338"),
+            tab_underline: hex("#5b8fe0"),
+            feature_icon: hex("#9c9fa5"),
+            tree_guide: hex("#404247"),
+            rollback_bar: hex("#6d7076"),
+
+            plane_fill: hex("#3b4456"),
+            plane_edge: hex("#7189ab"),
+            plane_label: hex("#a8bfe6"),
+            highlight: hex("#f0a860"),
+            selection_3d: hex("#ff8c1a"),
+            axis_x: hex("#ff5a52"),
+            axis_y: hex("#5fd255"),
+            axis_z: hex("#6278ff"),
+            ..Self::light()
+        }
+    }
+
+    /// The theme's colors with the roles they're drawn in, for pairing the light and dark
+    /// themes ([`crate::color_scheme`]). Where two tokens share a light color in one role, the
+    /// earlier one decides its dark color.
+    pub fn colors(&self) -> Vec<(ColorRole, Color)> {
+        use ColorRole::{Fill, Floating, Ink, Line, Raised};
+        vec![
+            (Fill, self.background),
+            (Fill, self.title_bar),
+            (Fill, self.tab_bar),
+            (Fill, self.sidebar),
+            (Floating, self.floating),
+            (Floating, self.tooltip_background),
+            // Status fills keep their own dark colors on every surface (a warning toast).
+            (Floating, self.toast_background),
+            (Floating, self.warning_banner_background),
+            (Floating, self.info_background),
+            (Floating, self.warning_background),
+            (Raised, self.toast_background),
+            (Raised, self.warning_banner_background),
+            (Raised, self.info_background),
+            (Raised, self.warning_background),
+            (Raised, self.popover),
+            (Raised, self.input_background),
+            (Raised, self.tooltip_background),
+            (Fill, self.rail_background),
+            (Fill, self.tab_inactive),
+            (Fill, self.tab_hover),
+            (Fill, self.search_background),
+            (Fill, self.input_disabled_background),
+            (Fill, self.secondary),
+            (Fill, self.secondary_hover),
+            (Fill, self.secondary_active),
+            (Fill, self.secondary_disabled),
+            (Fill, self.ghost_hover),
+            (Fill, self.ghost_active),
+            (Fill, self.list_hover),
+            (Fill, self.list_active),
+            (Fill, self.list_selected),
+            (Fill, self.list_selected_bar),
+            (Fill, self.menu_hover),
+            (Fill, self.timeline_selected),
+            (Fill, self.primary),
+            (Fill, self.primary_hover),
+            (Fill, self.primary_open),
+            (Fill, self.primary_active),
+            (Fill, self.primary_disabled),
+            (Fill, self.selection),
+            (Fill, self.info_background),
+            (Fill, self.warning_background),
+            (Fill, self.toast_background),
+            (Fill, self.warning_banner_background),
+            (Fill, self.feature_editing),
+            (Fill, self.accept),
+            (Fill, self.accept_disabled),
+            (Fill, self.checkbox_checked),
+            (Fill, self.checkbox_unavailable),
+            (Fill, self.selection_field_active),
+            (Fill, self.tab_underline),
+            (Fill, self.tree_guide),
+            (Fill, self.rollback_bar),
+            (Fill, self.separator),
+            (Fill, self.panel_border),
+            (Fill, self.toolbar_separator),
+            (Fill, self.border),
+            (Fill, self.row_separator),
+            (Fill, self.plane_fill),
+            (Ink, self.foreground),
+            (Ink, self.tool_foreground),
+            (Ink, self.muted_foreground),
+            (Ink, self.subtle_foreground),
+            (Ink, self.disabled_foreground),
+            (Ink, self.tool_disabled_foreground),
+            (Ink, self.feature_icon),
+            (Ink, self.link),
+            (Ink, self.primary),
+            (Ink, self.primary_foreground),
+            (Ink, self.primary_disabled_foreground),
+            (Ink, self.selection_foreground),
+            (Ink, self.tooltip_foreground),
+            (Ink, self.toast_foreground),
+            (Ink, self.toast_icon),
+            (Ink, self.warning_icon),
+            (Ink, self.danger),
+            (Ink, self.success),
+            (Ink, self.feature_error),
+            (Ink, self.accept),
+            (Ink, self.cancel),
+            (Ink, self.caret),
+            (Ink, self.checkbox_checked),
+            (Ink, self.list_selected_bar),
+            (Ink, self.plane_label),
+            (Line, self.border),
+            (Line, self.border_strong),
+            (Line, self.separator),
+            (Line, self.row_separator),
+            (Line, self.panel_border),
+            (Line, self.toolbar_separator),
+            (Line, self.input_border),
+            (Line, self.input_border_focus),
+            (Line, self.focus_ring),
+            (Line, self.kbd_border),
+            (Line, self.checkbox_border),
+            (Line, self.info_border),
+            (Line, self.toast_border),
+            (Line, self.warning_banner_border),
+            (Line, self.selection_field_active_border),
+            (Line, self.primary_open_border),
+            (Line, self.tree_guide),
+            (Line, self.primary),
+            (Line, self.primary_hover),
+            (Line, self.primary_active),
+            (Line, self.primary_disabled),
+            (Line, self.checkbox_checked),
+            (Line, self.checkbox_unavailable),
+            (Line, self.list_selected_bar),
+            (Line, self.tab_underline),
+            (Line, self.plane_edge),
+        ]
     }
 
     /// A [`TextFont`] using Inter at `size` px and `weight`.

@@ -137,6 +137,7 @@ impl ColorSwatch {
             },
             WidgetButton,
             Hovered::default(),
+            crate::color_scheme::KeepFill,
             Visuals {
                 background: StateColors::all(self.color),
                 border,

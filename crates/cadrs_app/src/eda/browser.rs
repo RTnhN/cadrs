@@ -713,6 +713,12 @@ fn set_image(w: &mut World, name: &str, list: Option<DrawList>) {
         .map(|i| w.resource_mut::<Assets<Image>>().add(i));
     let mut q = w.query::<(&Name, &mut ImageNode)>();
     if let Some((_, mut node)) = q.iter_mut(w).find(|(n, _)| n.as_str() == name) {
+        // Nothing to show: an empty frame, not the default image's white square.
+        node.color = if image.is_some() {
+            Color::WHITE
+        } else {
+            Color::NONE
+        };
         node.image = image.unwrap_or_default();
     }
 }
