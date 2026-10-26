@@ -2684,8 +2684,9 @@ pub fn chamfer_options(k: &mut dyn Kernel) {
     let tangent_rim = one(k.chamfer_with(cyl, &[rim], &tangent).unwrap());
     close(volume(k, tangent_rim), volume(k, offset_rim), 1e-6);
     // A D-shaped prism (half disc r 10, 10 high): its two straight vertical edges join the flat
-    // side to the curved side, which curves across them. There the tangent distance 2 becomes
-    // the chord 2·r·sin(atan(2/r)/2) on the curved side only, so it is a two-distance chord.
+    // side to the curved side, which curves across them. There the tangent distance 2 lands at
+    // the angle atan(2/r) round the curved side, the arc r·atan(2/r) round it (distances being
+    // measured round a cylinder along a straight edge), so it is a two-distance chamfer.
     let d_loop = Loop {
         curves: vec![
             arc(p(0.0, 0.0), 10.0, 0.0, PI),
@@ -2702,7 +2703,7 @@ pub fn chamfer_options(k: &mut dyn Kernel) {
         .find(|e| e.curve == CurveKind::Line && (e.length - 10.0).abs() < 1e-9 && e.start.x > 0.0)
         .expect("a vertical edge at x = 10")
         .id;
-    let chord = 2.0 * 10.0 * ((2.0f64 / 10.0).atan() / 2.0).sin();
+    let arc = 10.0 * (2.0f64 / 10.0).atan();
     let cut = |k: &mut dyn Kernel, opts: &ChamferOpts| {
         let c = one(k.chamfer_with(d, &[straight], opts).unwrap());
         volume(k, c)
@@ -2710,8 +2711,8 @@ pub fn chamfer_options(k: &mut dyn Kernel) {
     let offset_d = cut(k, &equal);
     let tangent_d = cut(k, &tangent);
     let two = |a, b| ChamferOpts::new(ChamferSpec::TwoDistances(a, b));
-    let a = cut(k, &two(chord, 2.0));
-    let b = cut(k, &two(2.0, chord));
+    let a = cut(k, &two(arc, 2.0));
+    let b = cut(k, &two(2.0, arc));
     assert!(
         (tangent_d - offset_d).abs() > 1e-3,
         "tangent {tangent_d} = offset {offset_d}"

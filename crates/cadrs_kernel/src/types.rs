@@ -885,7 +885,8 @@ pub enum ChamferMeasure {
     /// Along the faces' tangent planes at the edge, from where they meet. The same as Offset
     /// on a face that is straight across the edge (a plane, a cylinder's rim); on a face that
     /// curves across it (a sphere, a cylinder along a straight edge) of radius R a tangent
-    /// distance d is the chord `2R sin(atan(d/R)/2)` from the edge.
+    /// distance d lands at the angle `atan(d/R)` round it from the edge: the arc `R atan(d/R)`
+    /// (the chord `2R sin(atan(d/R)/2)`).
     Tangent,
 }
 
