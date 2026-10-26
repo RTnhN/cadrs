@@ -1,6 +1,6 @@
 //! Theme tokens (colors, spacing, sizes, fonts), modeled on gpui-component's `ThemeColor`.
 //!
-//! - Accent: cyan. Primary `#0b8a91` (dark `#5ad8d2`, with dark text on it), links `#0a7a84`,
+//! - Accent: cyan. Primary `#08767c` (dark `#5ad8d2`, with dark text on it), links `#08707a`,
 //!   selected rows `#d3eef0`, focus `#17a2aa`.
 //! - Surfaces: glass panels ([`crate::glass`]) over a soft cyan wallpaper: a see-through fill,
 //!   a light 1 px rim, a soft shadow and the 5 px radius every corner has.
@@ -229,27 +229,27 @@ impl Theme {
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.18),
             // Not quite white, so the dark theme pairs them with their own colors (the alpha
             // is kept).
-            glass_panel: hex("#fbfefe").with_alpha(0.62),
+            glass_panel: hex("#fbfefe").with_alpha(0.8),
             glass_rim: hex("#fbffff").with_alpha(0.9),
             glass_shadow: Color::srgba(0.02, 0.12, 0.16, 0.16),
 
             foreground: hex("#212121"),
             muted_foreground: hex("#5e5e5e"),
-            subtle_foreground: hex("#959595"),
+            subtle_foreground: hex("#7c7c7c"),
             disabled_foreground: hex("#b4b4b4"),
-            link: hex("#0a7a84"),
+            link: hex("#08707a"),
 
             border: hex("#d7d7d7"),
             border_strong: hex("#c4c4c4"),
             separator: hex("#e4e4e4"),
-            row_separator: hex("#f1f1f1"),
+            row_separator: hex("#e6ebec"),
             focus_ring: hex("#6cc4ca"),
 
-            primary: hex("#0b8a91"),
-            primary_hover: hex("#13999f"),
+            primary: hex("#08767c"),
+            primary_hover: hex("#0b868c"),
             primary_open: hex("#4cb6bb"),
             primary_open_border: hex("#95d6d9"),
-            primary_active: hex("#08767c"),
+            primary_active: hex("#06646a"),
             primary_disabled: hex("#9dd2d5"),
             primary_foreground: hex("#fdfefe"),
             primary_disabled_foreground: hex("#f8fafd"),
@@ -263,7 +263,7 @@ impl Theme {
             list_hover: hex("#eef7f8"),
             list_active: hex("#ddf0f2"),
             list_selected: hex("#d3eef0"),
-            list_selected_bar: hex("#0b8a91"),
+            list_selected_bar: hex("#08767c"),
             menu_hover: hex("#e8f5f6"),
             timeline_selected: hex("#c6e9ec"),
 
@@ -310,7 +310,7 @@ impl Theme {
             search_background: hex("#eeeeee"),
             tab_inactive: hex("#eaeaea"),
             tab_hover: hex("#f4f4f4"),
-            tab_underline: hex("#0b8a91"),
+            tab_underline: hex("#08767c"),
             feature_icon: hex("#8e8e8e"),
             tree_guide: hex("#dbdbdb"),
             rollback_bar: hex("#bababa"),

@@ -136,11 +136,12 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
     // Raven: panels and inputs take the panel color, controls their own; the rim catches
     // more light on a pale surface.
     let alpha = match (kind, dark) {
-        (GlassKind::Panel, false) => 0.62,
+        (GlassKind::Panel, false) => 0.72,
         (GlassKind::Panel, true) => 0.66,
         (GlassKind::Bar, false) => 0.5,
         (GlassKind::Bar, true) => 0.58,
-        (GlassKind::Control, _) => 0.55,
+        (GlassKind::Control, false) => 0.7,
+        (GlassKind::Control, true) => 0.55,
         (GlassKind::Input, _) => 0.6,
     };
     let base = if dark {
@@ -199,14 +200,25 @@ fn sync_glass(
         }
         let (tint, rim) = glass_look(&theme, dark, g.kind, g.material.unwrap_or(style.material));
         let white = |a: f32| Color::WHITE.with_alpha(a.clamp(0.0, 1.0));
-        // Lit from the top left: bright there, dim across the middle, an echo at the far
-        // side.
-        let border = BorderGradient::from(LinearGradient::to_bottom_right(vec![
-            ColorStop::new(white(rim), Val::Percent(0.0)),
-            ColorStop::new(white(rim * 0.22), Val::Percent(45.0)),
-            ColorStop::new(white(rim * 0.22), Val::Percent(70.0)),
-            ColorStop::new(white(rim * 0.5), Val::Percent(100.0)),
-        ]));
+        let border = if dark {
+            // Lit from the top left: bright there, dim across the middle, an echo at the far
+            // side.
+            BorderGradient::from(LinearGradient::to_bottom_right(vec![
+                ColorStop::new(white(rim), Val::Percent(0.0)),
+                ColorStop::new(white(rim * 0.22), Val::Percent(45.0)),
+                ColorStop::new(white(rim * 0.22), Val::Percent(70.0)),
+                ColorStop::new(white(rim * 0.5), Val::Percent(100.0)),
+            ]))
+        } else {
+            // A white rim vanishes on a pale page: light at the top edge over a soft dark
+            // outline that deepens toward the bottom.
+            let ink = |a: f32| Color::srgba(0.0, 0.2, 0.24, a);
+            BorderGradient::from(LinearGradient::to_bottom(vec![
+                ColorStop::new(white(0.95), Val::Percent(0.0)),
+                ColorStop::new(ink(0.12), Val::Percent(35.0)),
+                ColorStop::new(ink(0.2), Val::Percent(100.0)),
+            ]))
+        };
         let mut ec = commands.entity(e);
         ec.try_insert(border);
         if g.fill {
@@ -314,7 +326,7 @@ pub fn control_visuals(t: &Theme) -> crate::Visuals {
 
 /// Gives a button the secondary glass control's look and size: its colors, rim and shape.
 pub fn control(t: &Theme) -> impl Bundle {
-    (control_visuals(t), Glass::control_rim())
+    (control_visuals(t), Glass::control_rim(), control_shadow(t))
 }
 
 /// A control node's shape: the page's (or a top bar's) height and radius, with a 1 px rim.

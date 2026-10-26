@@ -319,14 +319,20 @@ mod tests {
             Motion::Wobbly,
         ] {
             let mut s = Spring::at(0.0);
-            let mut over = false;
+            let mut peak = 0.0_f32;
             for _ in 0..600 {
                 s.step(1.0, m, 1.0 / 120.0);
-                over |= s.value > 1.0;
+                peak = peak.max(s.value);
             }
             assert!(!s.moving(1.0), "{m:?}: {s:?}");
-            // Only the springs with a damping ratio well under 1 swing past.
-            assert_eq!(over, matches!(m, Motion::Bouncy | Motion::Wobbly), "{m:?}");
+            // Only the springs with a damping ratio well under 1 swing visibly past (snappy's
+            // 0.9 runs over by a hair).
+            let swings = peak > 1.02;
+            assert_eq!(
+                swings,
+                matches!(m, Motion::Bouncy | Motion::Wobbly),
+                "{m:?}: {peak}"
+            );
         }
     }
 

@@ -347,7 +347,7 @@ pub fn list_toolbar(a: &mut ChildSpawnerCommands, t: &Theme, state: &LandingStat
                 "Import",
                 "Import a STEP, IGES or STL file as a new document",
             ),
-            ("label-button", "tag-new", "Label", "Create a label"),
+            ("label-button", "tag-new", "New label", "Create a label"),
         ] {
             b.spawn((
                 Button::new(name)
@@ -709,8 +709,9 @@ pub fn open_details(world: &mut World, pick: Pick, tab: DetailsTab) {
                 b.spawn((
                     Name::new("details-panel"),
                     DetailsPanel,
+                    // As tall as its content, scrolling past most of the window.
                     Node {
-                        height: Val::Px(480.0),
+                        max_height: Val::Vh(70.0),
                         flex_direction: FlexDirection::Column,
                         ..default()
                     },
@@ -1369,7 +1370,7 @@ fn labels_section(
         dark.foreground = cadrs_ui::StateColors::all(t.foreground);
         x.spawn(
             Button::new("details-create-label")
-                .label("Create new label")
+                .label("New label")
                 .icon("tag-new")
                 .icon_size(16.0)
                 .ghost()

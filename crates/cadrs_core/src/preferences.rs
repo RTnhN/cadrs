@@ -507,6 +507,7 @@ mod tests {
             rotation_snap_tolerance_degrees: 15.0,
             ui_scale: 125,
             color_scheme: ColorScheme::Dark,
+            whats_new_seen: 1,
         };
         p.save(&dir).unwrap();
         assert_eq!(Preferences::load(&dir), p);

@@ -143,7 +143,7 @@ impl Dialog {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
-                align_items: AlignItems::FlexStart,
+                align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(overlay.with_alpha(0.0)),
@@ -158,14 +158,18 @@ impl Dialog {
                 p.spawn((
                     Name::new("dialog-panel"),
                     crate::color_scheme::RaisedSurface,
+                    // Centered, and it springs into place.
+                    crate::spring::Appear::fly_up(),
                     Node {
                         width: Val::Px(width),
-                        margin: UiRect::top(Val::Px(24.0)),
+                        max_height: Val::Percent(90.0),
                         flex_direction: FlexDirection::Column,
+                        border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(theme.radius_lg)),
                         ..default()
                     },
                     BackgroundColor(theme.background),
+                    BorderColor::all(theme.border),
                     BoxShadow::new(
                         Color::srgba(0.0, 0.0, 0.0, 0.25),
                         Val::Px(0.0),

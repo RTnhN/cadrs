@@ -459,10 +459,13 @@ fn fill_heading(
 ) {
     if filter != Filter::OwnedByMe {
         h.spawn((
-            IconButton::new("filter-back", "chevron-left")
-                .icon_size(16.0)
+            Button::new("filter-back")
+                .label("All documents")
+                .icon("chevron-left")
+                .icon_size(14.0)
+                .ghost()
                 .small()
-                .tooltip("Back to documents")
+                .tooltip("Back to all documents")
                 .build(t),
             observe(|_: On<Activate>, mut state: ResMut<LandingState>| {
                 state.filter = Filter::OwnedByMe;
@@ -565,7 +568,7 @@ fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
         create_button(a, t);
         a.spawn((
             Button::new("new-folder-button")
-                .label("Folder")
+                .label("New folder")
                 .icon("folder-new")
                 .icon_size(16.0)
                 .outline()
@@ -586,7 +589,7 @@ fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
                 .placeholder("Search…")
                 .leading_icon("search")
                 .height(cadrs_ui::glass::CONTROL_HEIGHT)
-                .width(Val::Px(320.0))
+                .width(Val::Px(260.0))
                 .padding(12.0)
                 .radius(cadrs_ui::glass::CONTROL_RADIUS)
                 .background(t.glass_panel)
@@ -596,9 +599,13 @@ fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
         )
         .insert(cadrs_ui::glass::Glass::input_rim())
         .entry::<Node>()
-        .and_modify(|mut n| n.min_width = Val::Px(180.0));
+        .and_modify(|mut n| {
+            n.min_width = Val::Px(180.0);
+            n.max_width = Val::Px(520.0);
+            n.flex_grow = 1.0;
+        });
         a.spawn(Node {
-            flex_grow: 1.0,
+            flex_grow: 0.2,
             ..default()
         });
         a.spawn((
@@ -721,33 +728,37 @@ fn columns(state: &LandingState, labels: bool) -> Vec<Column> {
         }
     };
     // P3E.1: a Labels column once the library has labels (TD3.7); the others make room.
-    // Small capitals, as the caption; the name takes what the others leave.
+    // The name takes twice the others' share of the free width, so a narrow window still
+    // shows every column.
     let mut v = vec![
-        Column::new("name", "NAME")
-            .grow(1.0)
+        Column::new("name", "Name")
+            .grow(2.0)
             .min_width(200.0)
             .sortable()
             .sort(sort(SortKey::Name)),
     ];
     if labels {
-        v.push(Column::new("labels", "LABELS").width(200.0));
+        v.push(Column::new("labels", "Labels").width(200.0));
     }
     v.push(
-        Column::new("modified", "MODIFIED")
-            .width(if labels { 170.0 } else { 184.0 })
+        Column::new("modified", "Modified")
+            .grow(1.0)
+            .min_width(150.0)
             .sortable()
             .sort(sort(SortKey::Modified))
             .first_sort(ColumnSort::Descending),
     );
     v.push(
-        Column::new("modified-by", "MODIFIED BY")
-            .width(if labels { 150.0 } else { 184.0 })
+        Column::new("modified-by", "Modified by")
+            .grow(0.8)
+            .min_width(110.0)
             .sortable()
             .sort(sort(SortKey::ModifiedBy)),
     );
     v.push(
-        Column::new("owned-by", "OWNED BY")
-            .width(150.0)
+        Column::new("owned-by", "Owned by")
+            .grow(0.8)
+            .min_width(110.0)
             .sortable()
             .sort(sort(SortKey::OwnedBy)),
     );
@@ -1131,6 +1142,10 @@ fn rebuild_main(
                                     ..default()
                                 },
                             ));
+                            // Main goes without saying: only another workspace is tagged.
+                            if workspace == "Main" {
+                                return;
+                            }
                             c.spawn((
                                 Node {
                                     align_items: AlignItems::Center,
@@ -1255,19 +1270,42 @@ fn empty_state(
         e.spawn(t.text(title, t.font_md, FontWeight::SEMIBOLD, t.foreground));
         e.spawn(t.text(text, t.font_base, FontWeight::NORMAL, t.muted_foreground));
         if create {
-            e.spawn((
-                Button::new("empty-create")
-                    .label("Create document")
-                    .primary()
-                    .build(t),
-                observe(
-                    |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
-                        open_new_document_dialog(&mut commands, &theme);
-                    },
-                ),
-            ))
-            .entry::<Node>()
-            .and_modify(|mut n| n.margin = UiRect::top(Val::Px(8.0)));
+            e.spawn(Node {
+                column_gap: Val::Px(8.0),
+                margin: UiRect::top(Val::Px(8.0)),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn((
+                    Button::new("empty-create")
+                        .label("New document")
+                        .icon("file-new")
+                        .primary()
+                        .caps()
+                        .build(t),
+                    observe(
+                        |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                            open_new_document_dialog(&mut commands, &theme);
+                        },
+                    ),
+                ))
+                .entry::<Node>()
+                .and_modify(|mut n| page_control(&mut n));
+                r.spawn((
+                    Button::new("empty-samples")
+                        .label("Open a sample")
+                        .icon("idea")
+                        .outline()
+                        .caps()
+                        .build(t),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(|w: &mut World| show_filter(w, Filter::Explore));
+                    }),
+                ))
+                .insert(cadrs_ui::glass::control(t))
+                .entry::<Node>()
+                .and_modify(|mut n| page_control(&mut n));
+            });
         }
     });
 }
@@ -1375,8 +1413,8 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
     // Dark (#333) icons, as in `screens/02`.
     Menu::new(name)
         .strong_icons()
-        .item(MenuItem::new("new-document", "Document…").icon("file-new"))
-        .item(MenuItem::new("new-folder", "Folder…").icon("folder-new"))
+        .item(MenuItem::new("new-document", "New document…").icon("file-new"))
+        .item(MenuItem::new("new-folder", "New folder…").icon("folder-new"))
         .separator()
         .item(MenuItem::new("import-files", "Import files…").icon("file-import"))
         .item(
@@ -1394,7 +1432,7 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
                         .into(),
                 ]),
         )
-        .item(MenuItem::new("new-label", "Label…").icon("tag-new"))
+        .item(MenuItem::new("new-label", "New label…").icon("tag-new"))
         .item(MenuItem::new("open-samples", "From a sample…").icon("idea"))
         .separator()
         .item(MenuItem::new("join-shared", "Join shared document…").icon("share"))
