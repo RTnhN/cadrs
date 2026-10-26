@@ -72,7 +72,13 @@ pub enum DetailsTab {
 pub struct LandingDetails {
     pub open: bool,
     pub tab: DetailsTab,
+    /// The item the panel shows: the one last clicked.
     pub pick: Option<Pick>,
+    /// Everything selected (#112: Ctrl+click adds or removes one, Shift+click a range), in the
+    /// order picked.
+    pub selection: Vec<Pick>,
+    /// Where a Shift+click range starts.
+    pub anchor: Option<Pick>,
     /// The Document labels section is expanded.
     pub labels_open: bool,
 }
@@ -83,6 +89,8 @@ impl Default for LandingDetails {
             open: false,
             tab: DetailsTab::Info,
             pick: None,
+            selection: Vec::new(),
+            anchor: None,
             labels_open: true,
         }
     }
@@ -146,25 +154,74 @@ fn image_handle(images: &mut Assets<Image>, img: &image::RgbaImage) -> Handle<Im
 // ---------------------------------------------------------------------------------------------
 // Selection
 
-/// Selects `pick` (and opens the panel when `open`), marking its row or card.
+/// Selects `pick` alone (and opens the panel when `open`), marking its row or card.
 pub fn select(world: &mut World, pick: Pick, open: bool) {
+    set_selection(world, vec![pick], Some(pick), open);
+}
+
+/// Selects `picks` (`primary` shown in the panel, which opens when `open`), marking their rows
+/// and cards.
+pub fn set_selection(world: &mut World, picks: Vec<Pick>, primary: Option<Pick>, open: bool) {
     {
         let mut d = world.resource_mut::<LandingDetails>();
         let want_open = d.open || open;
-        if d.pick != Some(pick) || d.open != want_open {
-            d.pick = Some(pick);
+        if d.pick != primary || d.open != want_open || d.selection != picks {
+            d.pick = primary;
             d.open = want_open;
+            d.selection = picks.clone();
         }
     }
     let mut q = world.query::<(Entity, &PickRow, Has<Selected>)>();
     let rows: Vec<(Entity, Pick, bool)> = q.iter(world).map(|(e, p, s)| (e, p.0, s)).collect();
     for (e, p, selected) in rows {
-        if p == pick && !selected {
+        let want = picks.contains(&p);
+        if want && !selected {
             world.entity_mut(e).insert(Selected);
-        } else if p != pick && selected {
+        } else if !want && selected {
             world.entity_mut(e).remove::<Selected>();
         }
     }
+}
+
+/// The main list's items in the order shown (a Shift+click range runs over them).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ListOrder(pub Vec<Pick>);
+
+/// A click on `pick`: alone; with Ctrl, added to or taken from the selection; with Shift,
+/// everything listed from the last plain or Ctrl click to it (#112, as a file manager does).
+pub fn click_select(world: &mut World, pick: Pick, ctrl: bool, shift: bool) {
+    let (mut picks, anchor) = {
+        let d = world.resource::<LandingDetails>();
+        (d.selection.clone(), d.anchor)
+    };
+    let order = world.resource::<ListOrder>().0.clone();
+    let range = anchor.and_then(|a| {
+        let i = order.iter().position(|p| *p == a)?;
+        let j = order.iter().position(|p| *p == pick)?;
+        Some(order[i.min(j)..=i.max(j)].to_vec())
+    });
+    match (shift, range) {
+        (true, Some(r)) => {
+            set_selection(world, r, Some(pick), false);
+            return;
+        }
+        _ if ctrl => {
+            if let Some(i) = picks.iter().position(|p| *p == pick) {
+                picks.remove(i);
+            } else {
+                picks.push(pick);
+            }
+            let primary = if picks.contains(&pick) {
+                Some(pick)
+            } else {
+                picks.last().copied()
+            };
+            set_selection(world, picks, primary, false);
+        }
+        // A plain click opens the Details panel too (P3E.1).
+        _ => select(world, pick, true),
+    }
+    world.resource_mut::<LandingDetails>().anchor = Some(pick);
 }
 
 /// Opens `pick`: a document (not from the trash), a folder, or a sample's Open a copy.
@@ -198,10 +255,28 @@ pub fn open_pick(world: &mut World, pick: Pick) {
     }
 }
 
-pub fn on_pick_activate(ev: On<Activate>, q: Query<&PickRow>, mut commands: Commands) {
+pub fn on_pick_activate(
+    ev: On<Activate>,
+    q: Query<&PickRow>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+) {
     let Ok(p) = q.get(ev.entity) else { return };
     let pick = p.0;
-    commands.queue(move |world: &mut World| select(world, pick, true));
+    let ctrl = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    commands.queue(move |world: &mut World| {
+        // A click ending a drag selects nothing.
+        if world.resource::<super::organize::LandingDrag>().moved {
+            return;
+        }
+        click_select(world, pick, ctrl, shift);
+    });
 }
 
 pub fn on_pick_double_click(ev: On<DoubleClick>, q: Query<&PickRow>, mut commands: Commands) {
@@ -213,20 +288,23 @@ pub fn on_pick_double_click(ev: On<DoubleClick>, q: Query<&PickRow>, mut command
 // ---------------------------------------------------------------------------------------------
 // Main panel pieces
 
-/// Inside a folder: Back, the filter as a link, ›, the folder.
+/// Inside a folder: Back, the filter as a link, then each folder down to the open one, ›
+/// between (#112: folders nest). The filter and the folders above are links, and each takes
+/// documents and folders dropped on it.
 pub fn breadcrumb(
     h: &mut ChildSpawnerCommands,
     t: &Theme,
     filter: Filter,
     title: &str,
-    folder: &str,
+    path: &[(FolderId, String)],
 ) {
+    let parent = path.len().checked_sub(2).map(|k| path[k].0);
     h.spawn((
         IconButton::new("folder-back", "chevron-left")
             .icon_size(16.0)
             .tooltip("Back")
             .build(t),
-        observe(|_: On<Activate>, mut state: ResMut<LandingState>| state.folder = None),
+        observe(move |_: On<Activate>, mut state: ResMut<LandingState>| state.folder = parent),
     ));
     h.spawn(icon(super::filter_icon(filter), 20.0, t.foreground));
     h.spawn((
@@ -234,21 +312,35 @@ pub fn breadcrumb(
             .label(title.to_string())
             .link()
             .build(t),
+        super::organize::DropFolder(None),
         observe(|_: On<Activate>, mut state: ResMut<LandingState>| state.folder = None),
     ))
     .entry::<Node>()
     .and_modify(|mut n| n.padding = UiRect::horizontal(Val::Px(2.0)));
-    h.spawn(icon("chevron-right", 14.0, t.muted_foreground));
-    h.spawn(icon("folder", 20.0, t.foreground));
-    h.spawn((
-        Name::new("heading-title"),
-        t.text(
-            folder.to_string(),
-            t.font_md,
-            FontWeight::BOLD,
-            t.foreground,
-        ),
-    ));
+    for (k, (id, name)) in path.iter().enumerate() {
+        h.spawn(icon("chevron-right", 14.0, t.muted_foreground));
+        if k + 1 < path.len() {
+            let id = *id;
+            h.spawn((
+                Button::new(format!("crumb-folder-{k}"))
+                    .label(name.clone())
+                    .link()
+                    .build(t),
+                super::organize::DropFolder(Some(id)),
+                observe(move |_: On<Activate>, mut state: ResMut<LandingState>| {
+                    state.folder = Some(id)
+                }),
+            ))
+            .entry::<Node>()
+            .and_modify(|mut n| n.padding = UiRect::horizontal(Val::Px(2.0)));
+            continue;
+        }
+        h.spawn(icon("folder", 20.0, t.foreground));
+        h.spawn((
+            Name::new("heading-title"),
+            t.text(name.clone(), t.font_md, FontWeight::BOLD, t.foreground),
+        ));
+    }
 }
 
 /// The list's toolbar (left of "+ Add"): list and grid toggles and the Type filter.
@@ -327,7 +419,7 @@ pub fn grid(
     t: &Theme,
     folders: &[(FolderId, String)],
     rows: Vec<(DocumentEntry, Option<Handle<Image>>, String)>,
-    picked: Option<Pick>,
+    selection: &[Pick],
     labels: &[cadrs_core::LabelEntry],
 ) {
     m.spawn((
@@ -352,16 +444,19 @@ pub fn grid(
                 GridItem::new(format!("grid-folder-{i}"), name.clone())
                     .icon("folder")
                     .size(size)
-                    .selected(picked == Some(Pick::Folder(*id)))
+                    .selected(selection.contains(&Pick::Folder(*id)))
                     .build(t),
                 PickRow(Pick::Folder(*id)),
+                super::organize::FolderRow(*id),
+                super::organize::DropFolder(Some(*id)),
+                ContextMenuTarget,
                 cadrs_ui::DoubleClickable,
             ));
         }
         for (i, (e, thumb, _)) in rows.into_iter().enumerate() {
             let mut item = GridItem::new(format!("grid-doc-{i}"), e.name.clone())
                 .size(size)
-                .selected(picked == Some(Pick::Doc(e.id)));
+                .selected(selection.contains(&Pick::Doc(e.id)));
             if let Some(h) = thumb {
                 item = item.thumbnail(h);
             }
