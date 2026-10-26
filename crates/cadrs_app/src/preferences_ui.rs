@@ -25,7 +25,8 @@ use cadrs_core::preferences::{
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
     Button, DialogClose, MenuAction, MenuItem, NumberField, NumberFieldCommit, NumberFieldEdit,
-    NumberFieldState, Select, SelectChange, SelectState, Switch, SwitchState, form_row, open_menu,
+    NumberFieldState, Select, SelectChange, SelectState, SelectableText, Switch, SwitchState,
+    form_row, open_menu,
 };
 
 use crate::{AppState, DocumentStore};
@@ -278,6 +279,7 @@ pub fn open_preferences(world: &mut World) {
         std::net::Ipv4Addr::LOCALHOST,
         mcp.port,
     )));
+    let cadrs_id = cadrs_net::cadrs_id(world.get_resource::<cadrs_net::bevy_iroh::Iroh>());
     let state = *world.resource::<State<AppState>>().get();
     let theme = world.resource::<Theme>().clone();
     let (tb, tf) = (theme.clone(), theme.clone());
@@ -350,6 +352,35 @@ pub fn open_preferences(world: &mut World) {
                     Node { width: Val::Px(400.0), margin: UiRect::top(Val::Px(6.0)), ..default() },
                 ))
                 // Wrapped (the theme's text doesn't wrap).
+                .insert(TextLayout::default());
+                b.spawn((
+                    Name::new("pref-collab-heading"),
+                    t.text("Collaboration", t.font_base, FontWeight::BOLD, t.foreground),
+                    Node { margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(14.0), Val::Px(4.0)), ..default() },
+                ));
+                b.spawn(form_row(t, "pref-cadrs-id-row", "cadrs ID", 150.0)).with_children(|r| {
+                    match &cadrs_id {
+                        Some(id) => {
+                            r.spawn(SelectableText::new("pref-cadrs-id").value(id.clone()).font(t.font_sm, FontWeight::NORMAL).copy_button().build(t));
+                        }
+                        None => {
+                            r.spawn((
+                                Name::new("pref-cadrs-id"),
+                                t.text("Networking is off", t.font_base, FontWeight::NORMAL, t.muted_foreground),
+                            ));
+                        }
+                    }
+                });
+                b.spawn((
+                    Name::new("pref-collab-note"),
+                    t.text(
+                        "Documents are shared peer to peer, with no server. Give this ID to someone who wants to share a document with you.",
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node { width: Val::Px(400.0), margin: UiRect::top(Val::Px(6.0)), ..default() },
+                ))
                 .insert(TextLayout::default());
             })
             .footer(move |f| {

@@ -170,6 +170,17 @@ fn main() -> AppExit {
         // Only a person's own runs ask GitHub for a newer release.
         app.insert_resource(cadrs_app::update::CheckForUpdates);
     }
+    // Sharing and collaboration: only a person's own runs are a peer (`CADRS_NET=0` keeps
+    // one off the network). The identity lives with the documents, so each data dir is a peer.
+    if !scripted && !opts.headless && std::env::var_os("CADRS_NET").is_none_or(|v| v != "0") {
+        app.add_plugins(cadrs_net::NetPlugin {
+            identity: data_dir
+                .clone()
+                .or_else(Store::default_root)
+                .map(|d| d.join(cadrs_net::IDENTITY_FILE)),
+            display_name: UserProfile::system().display_name,
+        });
+    }
     if scripted || opts.headless {
         // The same light (or `CADRS_COLOR_SCHEME`) look on every machine.
         app.insert_resource(cadrs_ui::Appearance::without_system());

@@ -11,6 +11,7 @@ bevy.workspace = true
 cadrs_app.workspace = true
 cadrs_core.workspace = true
 cadrs_harness.workspace = true
+cadrs_net.workspace = true
 cadrs_ui.workspace = true
 
 [features]
