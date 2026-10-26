@@ -166,6 +166,12 @@ them, and `CADRS_BLESS=1` saves new ones.
 the kernel API, persistent face and edge naming, and the native kernel's design. The notes in
 `reference/onshape/` record how Onshape behaves, which is what cadrs is measured against.
 
+## Sponsors
+
+[Sponsor cadrs on GitHub](https://github.com/sponsors/rvdende). The list below updates daily.
+
+<!-- sponsors --><!-- sponsors -->
+
 ## License
 
 Licensed under either of

@@ -1,0 +1,38 @@
+name: Sponsors
+
+# Lists rvdende's GitHub Sponsors in README.md, between the two <!-- sponsors --> markers, and
+# commits the change to main. Needs a SPONSORS_TOKEN repository secret: a classic personal access
+# token from the sponsored account with the read:user and read:org scopes.
+on:
+  schedule:
+    - cron: '30 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sponsors
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the README
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: JamesIves/github-sponsors-readme-action@v1
+        with:
+          token: ${{ secrets.SPONSORS_TOKEN }}
+          file: README.md
+
+      # Pushed with the workflow's own token, so the commit doesn't start CI.
+      - name: Commit the README
+        run: |
+          git diff --quiet README.md && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'README: update sponsors' README.md
+          git push
