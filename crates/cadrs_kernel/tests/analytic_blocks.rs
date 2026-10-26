@@ -243,6 +243,72 @@ fn a_cube_with_two_round_holes_touching() {
     );
 }
 
+/// A torus band (minor radius r about a circle of radius R) made in two revolves, or one
+/// mirrored, joined: one torus face, as one revolve makes it (#114). Pappus: the volume
+/// πr²·Rθ, the side 2πr·Rθ, and the two end discs.
+#[test]
+fn a_torus_band_in_two_pieces_is_one_face() {
+    let (big, r) = (20.0, 5.0);
+    let axis = Axis {
+        origin: Point3::origin(),
+        dir: nalgebra::Unit::new_normalize(nalgebra::Vector3::new(0.0, -1.0, 0.0)),
+    };
+    let disc = |plane: Plane| {
+        Profile::new(
+            plane,
+            vec![Region {
+                outer: circle(big, 0.0, r),
+                holes: vec![],
+                source: None,
+            }],
+        )
+    };
+    let turned = |deg: f64| {
+        let rot = nalgebra::Rotation3::from_axis_angle(&axis.dir, deg.to_radians());
+        let top = Plane::top();
+        Plane {
+            origin: top.origin,
+            x_dir: nalgebra::Unit::new_normalize(rot * top.x_dir.into_inner()),
+            normal: nalgebra::Unit::new_normalize(rot * top.normal.into_inner()),
+        }
+    };
+    let expect = |k: &NativeKernel, b: BodyId, deg: f64| {
+        let issues = k.get(b).unwrap().check_with(CheckLevel::Full);
+        assert!(issues.is_empty(), "invalid body: {issues:?}");
+        let theta = deg.to_radians();
+        let m = k.mass_properties(b).unwrap();
+        assert!((m.volume - PI * r * r * big * theta).abs() < 1e-6 * m.volume);
+        let area = 2.0 * PI * r * big * theta + 2.0 * PI * r * r;
+        assert!((m.surface_area - area).abs() < 1e-6 * area);
+        assert_eq!(k.faces(b).unwrap().len(), 3, "one torus face and two ends");
+    };
+    // Revolved 15°, then on another 45°.
+    let mut k = NativeKernel::new();
+    let a = k
+        .revolve(&disc(Plane::top()), axis, 15f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let b = k
+        .revolve(&disc(turned(15.0)), axis, 45f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let u = k.boolean(BoolOp::Union, a, &[b]).unwrap().bodies[0];
+    expect(&k, u, 60.0);
+    // Mirrored across the plane holding the axis and its start.
+    let m = k
+        .transform_motion(
+            a,
+            &Motion::reflection(
+                Point3::origin(),
+                nalgebra::Unit::new_normalize(nalgebra::Vector3::z()),
+            ),
+        )
+        .unwrap()
+        .bodies[0];
+    let u = k.boolean(BoolOp::Union, a, &[m]).unwrap().bodies[0];
+    expect(&k, u, 30.0);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fillets
 
