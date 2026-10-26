@@ -49,14 +49,15 @@ use cadrs_core::sheetmetal::{
     CurveRef as SmCurveRef, SheetMetalExprs, SheetMetalModelFeature, SheetMetalOp,
 };
 use cadrs_core::sheetmetal_features::{FlangeFeature, HemFeature, SheetMetalFeature};
+use cadrs_core::sheetmetal_flat::FlatExtrudeFeature;
 use cadrs_core::surfacing::{FillEdge, FillFeature, ThickenFeature};
 use cadrs_core::{ElementId, Feature, FeatureId, History, Part, PartId};
 use cadrs_sheetmetal::model::HemAlignment;
 use cadrs_sheetmetal::sharp_edit::{FlangeAlignment, HemKind};
 use cadrs_sketch::region::regions;
 use cadrs_sketch::{
-    ConstraintSpec, CurveId, CurveKind, CurveRef, CurveSpec, Dimension, DimensionKind, Orient,
-    PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchOp, Vec2,
+    ConstraintSpec, CurveId, CurveKind, CurveRef, CurveSpec, Dimension, DimensionKind,
+    FeaturePlane, Orient, PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchOp, Vec2,
 };
 
 /// Volume and area: relative tolerance unless the case gives one (SolidCraft's default).
@@ -171,6 +172,10 @@ struct Recipe {
     helices: HashMap<String, FeatureId>,
     /// The sheet metal model and its rule as now edited.
     sheet: Option<(FeatureId, Rule)>,
+    /// Unfolded: sketches parallel to the flat go on the flat pattern's plane, and cuts of them
+    /// are flat extrudes.
+    flat: Option<(PlaneRef, Frame)>,
+    flat_sketches: Vec<FeatureId>,
 }
 
 /// A sheet metal rule (SolidCraft's, as its recipes name and edit them).
@@ -224,6 +229,8 @@ impl Recipe {
             notes: Vec::new(),
             helices: HashMap::new(),
             sheet: None,
+            flat: None,
+            flat_sketches: Vec::new(),
         }
     }
 
@@ -429,13 +436,21 @@ impl Recipe {
             return Ok(());
         }
         let rf = self.recipe_frame(&f["plane"])?;
-        let (pr, cf) = self.cadrs_plane(rf.o, rf.n)?;
+        // While unfolded, on the flat pattern's plane (its coordinates the flat's, laid on the
+        // stationary wall).
+        let (pr, cf) = match self.flat {
+            Some((pr, cf)) if dot(cf.n, unit(rf.n)).abs() > 1.0 - 1e-9 => (pr, cf),
+            _ => self.cadrs_plane(rf.o, rf.n)?,
+        };
         let id = FeatureId::new();
         self.exec(&AddSketch {
             element: self.el,
             feature: id,
             plane: Some(pr),
         })?;
+        if self.flat.is_some_and(|(p, _)| p == pr) {
+            self.flat_sketches.push(id);
+        }
         // Recipe sketch coordinates → cadrs sketch coordinates, through world space.
         let map = |p: [f64; 2]| -> Vec2 {
             let w = add(add(rf.o, scale(rf.x, p[0])), scale(rf.y, p[1]));
@@ -798,6 +813,20 @@ impl Recipe {
             let profiles = self.profiles(f)?;
             sketch = profiles[0].0;
             e.regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+            // A cut of a flat pattern sketch, while unfolded: out of the flat, then refolded.
+            if self.flat_sketches.contains(&sketch) {
+                if e.op != BooleanOp::Remove {
+                    return unsupported("a flat pattern extrude other than a cut");
+                }
+                return self.add(
+                    "Extrude",
+                    FeatureKind::FlatExtrude(FlatExtrudeFeature {
+                        remove: true,
+                        regions: e.regions,
+                        sketches: Vec::new(),
+                    }),
+                );
+            }
         }
         let x = &f["extent"];
         let negative = x["direction"].as_str() == Some("negative");
@@ -1463,6 +1492,45 @@ impl Recipe {
                         ..HemFeature::default()
                     })),
                 )?
+            }
+            "sm_unfold" => {
+                let Some((model, _)) = self.sheet else {
+                    return unsupported("an unfold with no sheet metal model");
+                };
+                if f["all_bends"].as_bool() != Some(true) {
+                    return unsupported("unfolding some of the bends");
+                }
+                // The flat pattern laid out from the stationary face's wall: cadrs lays its
+                // flat out from the model's anchor wall; check it is the same wall.
+                let plane = FeatureId(cadrs_core::sheetmetal_flat::flat_plane_id(model, 0));
+                let b = cadrs_core::rebuild::build(&self.features_now());
+                let Some(fr) = b.planes.get(&plane).copied() else {
+                    return failed("no flat pattern plane");
+                };
+                let n = unit(cross(fr.u, fr.v));
+                let stationary = f["stationary_face"]["point"]
+                    .as_array()
+                    .and_then(|_| v3(&f["stationary_face"]["point"]));
+                if let Some(q) = stationary
+                    && dot(sub(q, fr.origin), n).abs()
+                        > b.sheet_metal[0].model.params.thickness + 1e-6
+                {
+                    return unsupported("a flat pattern laid out from another wall");
+                }
+                self.flat = Some((
+                    PlaneRef::Feature(FeaturePlane::new(plane.0, fr)),
+                    Frame {
+                        o: fr.origin,
+                        x: fr.u,
+                        y: fr.v,
+                        n,
+                    },
+                ));
+                return Ok(());
+            }
+            "sm_refold" => {
+                self.flat = None;
+                return Ok(());
             }
             "sheet_metal_rule_edit" => {
                 let Some((id, mut rule)) = self.sheet else {
