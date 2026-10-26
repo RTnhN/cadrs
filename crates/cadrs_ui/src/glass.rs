@@ -1,0 +1,453 @@
+//! Glass surfaces: see-through slabs over a soft wallpaper, after the glass themes of Raven
+//! (`src/widgets/common.c`, `rvn_glass_style`).
+//!
+//! - A [`Glass`] node gets a tint (its fill), a rim of light and a shadow. The tint is a
+//!   gradient a little brighter at the top than at the bottom; the rim is brightest where it
+//!   faces the light (top left) with a faint echo on the far side.
+//! - The material ([`GlassMaterial`], one for the app in [`GlassStyle`] or one per node) says
+//!   how much shows through: **clear** glass is barely tinted with a bright rim, **frosted**
+//!   glass is milkier, **tinted** glass is frosted with the accent mixed into it (more on what
+//!   floats higher). Bevy has no backdrop blur, so frost is a milkier tint: over the soft
+//!   wallpaper the two look alike.
+//! - Gradients aren't mapped by [`crate::color_scheme`], so the tint and rim are set again
+//!   whenever the scheme or the material changes; the shadow is an ordinary [`BoxShadow`],
+//!   which the scheme deepens in dark.
+//! - [`wallpaper`] goes on a page's root: a cyan wash in light, deep teal in dark.
+//! - [`glow`] is the halo of a page's main action.
+//!
+//! ```ignore
+//! commands.spawn((panel_node(&theme), Glass::panel(), panel_shadow(&theme)));
+//! ```
+
+use bevy::prelude::*;
+
+use crate::color_scheme::{ActiveTheme, Appearance};
+use crate::theme::Theme;
+
+pub struct GlassPlugin;
+
+impl Plugin for GlassPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<GlassStyle>().add_systems(
+            PostUpdate,
+            (shape_frames, sync_wallpapers, sync_glass)
+                .chain()
+                .before(bevy::ui::UiSystems::Prepare),
+        );
+    }
+}
+
+/// What glass surfaces are made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GlassMaterial {
+    /// Barely tinted, a bright rim: the most of what is behind.
+    Clear,
+    /// Milky: what is behind shows as color, not shape.
+    #[default]
+    Frosted,
+    /// Frosted, with the accent mixed into the tint.
+    Tinted,
+}
+
+/// The app's glass material (a node can name its own).
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GlassStyle {
+    pub material: GlassMaterial,
+}
+
+/// What a glass surface is, which sets how thick its tint is and how much accent tinted
+/// glass takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlassKind {
+    /// A card or panel on the page.
+    Panel,
+    /// A bar across the window (the top bar).
+    Bar,
+    /// A button or pill.
+    Control,
+    /// A text field.
+    Input,
+}
+
+/// A glass surface. Give its node a border (the rim) and a radius ([`panel_node`]).
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Glass {
+    pub kind: GlassKind,
+    /// `None`: the app's [`GlassStyle`].
+    pub material: Option<GlassMaterial>,
+    /// Whether the glass paints its tint. A control leaves its fill to its
+    /// [`crate::Visuals`] (hover and press) and takes only the rim.
+    pub fill: bool,
+}
+
+impl Glass {
+    pub fn panel() -> Self {
+        Self {
+            kind: GlassKind::Panel,
+            material: None,
+            fill: true,
+        }
+    }
+
+    pub fn bar() -> Self {
+        Self {
+            kind: GlassKind::Bar,
+            material: None,
+            fill: true,
+        }
+    }
+
+    /// The rim of a control whose fill follows its state.
+    pub fn control_rim() -> Self {
+        Self {
+            kind: GlassKind::Control,
+            material: None,
+            fill: false,
+        }
+    }
+
+    /// The rim of a text field (its fill follows its focus).
+    pub fn input_rim() -> Self {
+        Self {
+            kind: GlassKind::Input,
+            material: None,
+            fill: false,
+        }
+    }
+
+    pub fn material(mut self, m: GlassMaterial) -> Self {
+        self.material = Some(m);
+        self
+    }
+}
+
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    let (a, b) = (a.to_linear(), b.to_linear());
+    Color::LinearRgba(LinearRgba::new(
+        a.red + (b.red - a.red) * t,
+        a.green + (b.green - a.green) * t,
+        a.blue + (b.blue - a.blue) * t,
+        a.alpha + (b.alpha - a.alpha) * t,
+    ))
+}
+
+/// The tint, rim light and how bright the top is, for `kind` in `material`.
+fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -> (Color, f32) {
+    // Raven: panels and inputs take the panel color, controls their own; the rim catches
+    // more light on a pale surface.
+    let alpha = match (kind, dark) {
+        (GlassKind::Panel, false) => 0.62,
+        (GlassKind::Panel, true) => 0.66,
+        (GlassKind::Bar, false) => 0.5,
+        (GlassKind::Bar, true) => 0.58,
+        (GlassKind::Control, _) => 0.55,
+        (GlassKind::Input, _) => 0.6,
+    };
+    let base = if dark {
+        Color::srgb_u8(0x15, 0x1c, 0x1f)
+    } else {
+        Color::srgb_u8(0xfb, 0xfe, 0xfe)
+    };
+    // Raven's 0.55 in dark reads as an outline on our charcoal: dimmer.
+    let mut rim = if dark { 0.32 } else { 0.85 };
+    let mut tint = base.with_alpha(alpha);
+    match material {
+        GlassMaterial::Clear => {
+            tint = tint.with_alpha(alpha * 0.55);
+            rim = (rim * 1.2_f32).min(1.0);
+        }
+        GlassMaterial::Frosted => {
+            // No blur: frost is a milkier tint.
+            tint = tint.with_alpha(alpha + 0.08);
+        }
+        GlassMaterial::Tinted => {
+            let strength = match kind {
+                GlassKind::Input => 0.25,
+                GlassKind::Bar => 0.4,
+                _ => 0.55,
+            };
+            let a = (alpha * 1.35 + 0.14).clamp(0.0, 0.78);
+            let accent = if dark { t.primary_active } else { t.primary };
+            tint = mix(base, accent, strength * if dark { 0.45 } else { 0.3 }).with_alpha(a);
+        }
+    }
+    // A palette made for solid surfaces would hide everything: glass keeps some of what is
+    // behind.
+    if tint.alpha() > 0.8 {
+        tint = tint.with_alpha(0.8);
+    }
+    if matches!(kind, GlassKind::Input) {
+        rim *= 0.55;
+    } else if matches!(kind, GlassKind::Bar) {
+        rim *= 0.6;
+    }
+    (tint, rim)
+}
+
+fn sync_glass(
+    appearance: Res<Appearance>,
+    style: Res<GlassStyle>,
+    theme: Res<ActiveTheme>,
+    mut commands: Commands,
+    q: Query<(Entity, &Glass, Ref<Glass>)>,
+) {
+    let all = appearance.is_changed() || style.is_changed() || theme.is_changed();
+    let dark = appearance.is_dark();
+    for (e, g, r) in &q {
+        if !(all || r.is_changed()) {
+            continue;
+        }
+        let (tint, rim) = glass_look(&theme, dark, g.kind, g.material.unwrap_or(style.material));
+        let white = |a: f32| Color::WHITE.with_alpha(a.clamp(0.0, 1.0));
+        // Lit from the top left: bright there, dim across the middle, an echo at the far
+        // side.
+        let border = BorderGradient::from(LinearGradient::to_bottom_right(vec![
+            ColorStop::new(white(rim), Val::Percent(0.0)),
+            ColorStop::new(white(rim * 0.22), Val::Percent(45.0)),
+            ColorStop::new(white(rim * 0.22), Val::Percent(70.0)),
+            ColorStop::new(white(rim * 0.5), Val::Percent(100.0)),
+        ]));
+        let mut ec = commands.entity(e);
+        ec.try_insert(border);
+        if g.fill {
+            // A slab is a little brighter at the top than at the bottom.
+            let top = mix(tint, Color::WHITE.with_alpha(tint.alpha()), rim * 0.08);
+            ec.try_insert(BackgroundGradient::from(LinearGradient::to_bottom(vec![
+                ColorStop::new(top, Val::Percent(0.0)),
+                ColorStop::new(tint, Val::Percent(100.0)),
+            ])));
+        }
+    }
+}
+
+/// The soft shadow under a glass panel.
+pub fn panel_shadow(t: &Theme) -> BoxShadow {
+    BoxShadow(vec![
+        ShadowStyle {
+            color: t.glass_shadow,
+            x_offset: Val::ZERO,
+            y_offset: Val::Px(10.0),
+            spread_radius: Val::Px(-4.0),
+            blur_radius: Val::Px(30.0),
+        },
+        ShadowStyle {
+            color: t.glass_shadow.with_alpha(t.glass_shadow.alpha() * 0.5),
+            x_offset: Val::ZERO,
+            y_offset: Val::Px(1.0),
+            spread_radius: Val::ZERO,
+            blur_radius: Val::Px(3.0),
+        },
+    ])
+}
+
+/// The small shadow under a glass control.
+pub fn control_shadow(t: &Theme) -> BoxShadow {
+    BoxShadow::new(
+        t.glass_shadow.with_alpha(t.glass_shadow.alpha() * 0.7),
+        Val::ZERO,
+        Val::Px(2.0),
+        Val::ZERO,
+        Val::Px(6.0),
+    )
+}
+
+/// A glass panel: its tint, rim and shadow (its node needs a border: [`panel_node`]).
+pub fn panel(t: &Theme) -> impl Bundle {
+    (Glass::panel(), panel_shadow(t))
+}
+
+/// A glass panel's node: a 1 px rim and the theme's panel radius.
+pub fn panel_node(t: &Theme) -> Node {
+    Node {
+        border: UiRect::all(Val::Px(1.0)),
+        border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
+        flex_direction: FlexDirection::Column,
+        ..default()
+    }
+}
+
+/// A soft halo in the primary color, for the one main action of a page.
+pub fn glow(t: &Theme) -> BoxShadow {
+    BoxShadow(vec![ShadowStyle {
+        color: t.primary.with_alpha(0.4),
+        x_offset: Val::ZERO,
+        y_offset: Val::Px(3.0),
+        spread_radius: Val::ZERO,
+        blur_radius: Val::Px(20.0),
+    }])
+}
+
+// ---------------------------------------------------------------------------------------------
+// Controls
+
+/// The height of a page's controls (buttons, fields, toggles), so a row of them lines up.
+pub const CONTROL_HEIGHT: f32 = 32.0;
+/// Their corner radius.
+pub const CONTROL_RADIUS: f32 = 5.0;
+/// The height of a top bar's controls.
+pub const BAR_CONTROL_HEIGHT: f32 = 30.0;
+/// Their corner radius.
+pub const BAR_CONTROL_RADIUS: f32 = 5.0;
+
+/// A secondary glass control's colors: the glass fill, lighter when hovered, the accent's
+/// label when selected; its rim is a [`Glass::control_rim`].
+pub fn control_visuals(t: &Theme) -> crate::Visuals {
+    crate::Visuals {
+        background: crate::StateColors::new(
+            t.glass_panel,
+            t.list_hover,
+            t.list_active,
+            t.glass_panel,
+        )
+        .with_selected(t.list_selected),
+        border: crate::StateColors::all(Color::NONE),
+        foreground: crate::StateColors::new(
+            t.foreground,
+            t.foreground,
+            t.foreground,
+            t.disabled_foreground,
+        )
+        .with_selected(t.link),
+        focus_ring: t.focus_ring,
+    }
+}
+
+/// Gives a button the secondary glass control's look and size: its colors, rim and shape.
+pub fn control(t: &Theme) -> impl Bundle {
+    (control_visuals(t), Glass::control_rim())
+}
+
+/// A control node's shape: the page's (or a top bar's) height and radius, with a 1 px rim.
+pub fn shape_control(n: &mut Node, height: f32, radius: f32) {
+    n.height = Val::Px(height);
+    n.border = UiRect::all(Val::Px(1.0));
+    n.border_radius = BorderRadius::all(Val::Px(radius));
+}
+
+/// A glass frame around a group of buttons (a segmented control, the top bar's settings):
+/// `height` and `radius` outside; the buttons in it get the radius less the inset, so the
+/// corners nest.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GlassFrame {
+    pub height: f32,
+    pub radius: f32,
+}
+
+impl GlassFrame {
+    /// A page control's frame.
+    pub fn page() -> Self {
+        Self {
+            height: CONTROL_HEIGHT,
+            radius: CONTROL_RADIUS,
+        }
+    }
+
+    /// A top bar control's frame.
+    pub fn bar() -> Self {
+        Self {
+            height: BAR_CONTROL_HEIGHT,
+            radius: BAR_CONTROL_RADIUS,
+        }
+    }
+}
+
+const FRAME_INSET: f32 = 3.0;
+
+#[allow(clippy::type_complexity)]
+fn shape_frames(
+    theme: Res<Theme>,
+    mut commands: Commands,
+    q: Query<(Entity, &GlassFrame, Option<&Children>), Or<(Added<GlassFrame>, Changed<Children>)>>,
+    mut nodes: Query<&mut Node>,
+) {
+    for (e, f, children) in &q {
+        if let Ok(mut n) = nodes.get_mut(e) {
+            shape_control(&mut n, f.height, f.radius);
+            n.padding = UiRect::all(Val::Px(FRAME_INSET - 1.0));
+            n.column_gap = Val::Px(2.0);
+            n.align_items = AlignItems::Center;
+        }
+        commands.entity(e).try_insert((
+            Glass::control_rim(),
+            BackgroundColor(theme.glass_panel),
+            BorderColor::all(Color::NONE),
+        ));
+        let inner = f.height - 2.0 * FRAME_INSET;
+        for c in children.into_iter().flatten() {
+            if let Ok(mut n) = nodes.get_mut(*c) {
+                n.height = Val::Px(inner);
+                n.min_width = Val::Px(inner);
+                n.border = UiRect::ZERO;
+                n.border_radius = BorderRadius::all(Val::Px((f.radius - FRAME_INSET).max(2.0)));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The wallpaper
+
+/// A node painted with the scheme's wallpaper.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct Wallpaper;
+
+/// The wallpaper for a page's root node.
+pub fn wallpaper() -> impl Bundle {
+    (Wallpaper, BackgroundGradient(wallpaper_layers(false)))
+}
+
+fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
+    Color::srgba_u8(r, g, b, (a * 255.0).round() as u8)
+}
+
+/// A wash from top left to bottom right with a cyan glow in one corner and a violet one in the
+/// other.
+fn wallpaper_layers(dark: bool) -> Vec<Gradient> {
+    let (from, to, cyan, violet) = if dark {
+        (
+            rgba(0x0b, 0x13, 0x17, 1.0),
+            rgba(0x11, 0x14, 0x1d, 1.0),
+            rgba(0x12, 0x8a, 0x94, 0.34),
+            rgba(0x4a, 0x3c, 0xa8, 0.24),
+        )
+    } else {
+        (
+            rgba(0xe3, 0xf2, 0xf4, 1.0),
+            rgba(0xec, 0xee, 0xf7, 1.0),
+            rgba(0x6c, 0xd4, 0xdd, 0.5),
+            rgba(0xb4, 0xaa, 0xf0, 0.36),
+        )
+    };
+    let glow = |at: UiPosition, c: Color| {
+        RadialGradient::new(
+            at,
+            RadialGradientShape::Ellipse(Val::Percent(75.0), Val::Percent(95.0)),
+            vec![
+                ColorStop::new(c, Val::Percent(0.0)),
+                ColorStop::new(c.with_alpha(0.0), Val::Percent(100.0)),
+            ],
+        )
+        .into()
+    };
+    vec![
+        LinearGradient::to_bottom_right(vec![
+            ColorStop::new(from, Val::Percent(0.0)),
+            ColorStop::new(to, Val::Percent(100.0)),
+        ])
+        .into(),
+        glow(UiPosition::TOP_LEFT, cyan),
+        glow(UiPosition::BOTTOM_RIGHT, violet),
+    ]
+}
+
+fn sync_wallpapers(
+    appearance: Res<Appearance>,
+    mut q: Query<(&mut BackgroundGradient, Ref<Wallpaper>)>,
+) {
+    let dark = appearance.is_dark();
+    for (mut g, w) in &mut q {
+        if appearance.is_changed() || w.is_added() {
+            g.0 = wallpaper_layers(dark);
+        }
+    }
+}

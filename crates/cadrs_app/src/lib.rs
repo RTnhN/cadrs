@@ -61,6 +61,7 @@ pub mod mcp_board;
 pub mod measure;
 pub mod move_document;
 pub mod native_document;
+pub mod notifications;
 pub mod panel_tab;
 pub mod part_shading;
 pub mod parts;
@@ -696,6 +697,7 @@ impl Plugin for CadrsAppPlugin {
                 debug_tools::DebugToolsPlugin,
                 collab::CollabPlugin,
                 update::UpdatePlugin,
+                notifications::NotificationsPlugin,
             ))
             .add_plugins((
                 parts::PartsPlugin,

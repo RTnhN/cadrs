@@ -210,6 +210,8 @@ fn main() -> AppExit {
     if scripted || opts.headless {
         // The same light (or `CADRS_COLOR_SCHEME`) look on every machine.
         app.insert_resource(cadrs_ui::Appearance::without_system());
+        // Everything drawn where it rests, so steps never act on a moving button.
+        app.insert_resource(cadrs_ui::spring::MotionSettings { enabled: false });
         app.insert_resource(cadrs_app::ExportDirOverride(Some(
             opts.resolved_out_dir().join("exports"),
         )));

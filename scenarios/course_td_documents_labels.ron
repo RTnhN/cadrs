@@ -3,29 +3,29 @@
 // `test-drive/lesson-documents-page.png`: the documents page with 8 seeded documents.
 // 01 Create ▾ open, the pointer on Label….
 // 02 Create label dialog, "Fixtures" typed.
-// 03 created: the sidebar's Labels section opens and lists Fixtures; the toast with Undo.
-// 04 two more labels (Hardware from the sidebar's tag icon, Medical Devices): the list.
-// 05 a click on a row selects it (no open): the Details panel opens on the right with the
-//    thumbnail, Owner, Document description and Document labels (search field, three
-//    checkboxes, Create new label), Created by.
+// 03 created: the toast with Undo.
+// 04 two more labels (Hardware from the Label button, Medical Devices): the settings menu's
+//    Labels ▸ lists them.
+// 05 right-click › Properties… on a row: the modal with the thumbnail, Owner, Document
+//    description and Document labels (search field, three checkboxes, Create new label),
+//    Created by.
 // 06 "har" typed in Search labels: only Hardware is left.
 // 07 Hardware checked: the Labels column appears in the list with the Hardware chip, and the
 //    chip under Document labels.
 // 08 the row menu's Labels ▸ submenu on another document (Fixtures hovered): each label with its
 //    colour dot, a check mark on those the document has.
 // 09 Fixtures given to two more documents from the menu: the Labels column.
-// 10 the sidebar's Fixtures clicked: only the 3 documents with Fixtures; heading "Fixtures".
-// 11 right-click Fixtures in the sidebar: Rename… / Delete….
+// 10 settings › Labels ▸ Fixtures: only the 3 documents with Fixtures; caption "FIXTURES".
+// 11 the caption's ⋯: Rename… / Delete….
 // 12 Rename label dialog → "Jigs".
-// 13 renamed: the sidebar, heading and chips read Jigs.
+// 13 renamed: the caption and chips read Jigs.
 // 14 Delete… confirmation ("taken off 3 documents").
-// 15 deleted: back to Owned by me, the chips gone.
+// 15 deleted: back to the documents, the chips gone.
 // 16 Ctrl+Z: Jigs back on its 3 documents.
-// 16b (P3E.2, P3E.1 judge) Owned by me in the grid view: the cards carry their label chips.
-// 16c the list: Motor mount selected (Details), then moved to the trash: the selection and the
-//     Details panel are cleared ("Select a document to see its details").
-// 16d the Trash: Motor mount selected: its Details are read-only (description and labels shown,
-//     not editable; "restore it to edit"). Then Ctrl+Z restores it.
+// 16b the grid view: the cards carry their label chips.
+// 16c the list: Motor mount selected, then moved to the trash: the selection is cleared.
+// 16d the Trash: Motor mount's Properties… are read-only (description and labels shown, not
+//     editable; "restore it to edit"). Then Ctrl+Z restores it.
 // 17 (ER1.2) a document opened by double-click → Assembly 1 → Insert → Other documents: the
 //    locations list the labels (Hardware, Jigs, Medical Devices) after the folders.
 // 18 the Jigs location: its documents.
@@ -44,22 +44,31 @@ Scenario(
         Type("Fixtures"),
         Screenshot("02-create-label-dialog"),
         Key("Enter"),
-        WaitFor("label-item-fixtures"),
+        WaitFor("toast"),
         Screenshot("03-label-created"),
-        Click(ui("labels-new")),
+        Click(ui("label-button")),
         WaitFor("new-label-dialog"),
         Type("Hardware"),
         Key("Enter"),
-        WaitFor("label-item-hardware"),
+        Wait(2),
         Click(ui("create")),
         WaitFor("new-label"),
         Click(ui("new-label")),
         WaitFor("new-label-dialog"),
         Type("Medical Devices"),
         Key("Enter"),
-        WaitFor("label-item-medical-devices"),
+        Wait(2),
+        Click(ui("account")),
+        WaitFor("account-labels"),
+        Hover(ui("account-labels")),
+        WaitFor("account-label-medical-devices"),
+        Wait(3),
         Screenshot("04-three-labels"),
-        Click(ui("doc-name-0")),
+        Key("Escape"),
+        Key("Escape"),
+        RightClick(ui("doc-name-0")),
+        WaitFor("ctx-properties"),
+        Click(ui("ctx-properties")),
         WaitFor("details-label-search"),
         Screenshot("05-row-selected-details"),
         Click(ui("details-label-search-field")),
@@ -68,6 +77,7 @@ Scenario(
         Click(ui("details-label-hardware")),
         WaitFor("doc-label-0-hardware"),
         Screenshot("07-label-assigned"),
+        Click(ui("details-dialog-close")),
         RightClick(ui("doc-name-1")),
         WaitFor("ctx-labels"),
         Hover(ui("ctx-labels")),
@@ -89,10 +99,14 @@ Scenario(
         MoveTo(900, 900),
         Wait(3),
         Screenshot("09-labels-column"),
-        Click(ui("label-item-fixtures")),
+        Click(ui("account")),
+        WaitFor("account-labels"),
+        Hover(ui("account-labels")),
+        WaitFor("account-label-fixtures"),
+        Click(ui("account-label-fixtures")),
         Screenshot("10-label-filter"),
-        RightClick(ui("label-item-fixtures")),
-        WaitFor("label-context-menu"),
+        Click(ui("label-more")),
+        WaitFor("label-menu"),
         Hover(ui("label-rename")),
         Wait(3),
         Screenshot("11-label-menu"),
@@ -101,9 +115,9 @@ Scenario(
         Type("Jigs"),
         Screenshot("12-rename-label-dialog"),
         Key("Enter"),
-        WaitFor("label-item-jigs"),
+        Wait(2),
         Screenshot("13-label-renamed"),
-        RightClick(ui("label-item-jigs")),
+        Click(ui("label-more")),
         WaitFor("label-delete"),
         Click(ui("label-delete")),
         WaitFor("delete-label-dialog"),
@@ -111,9 +125,8 @@ Scenario(
         Click(ui("delete-label-dialog-ok")),
         Screenshot("15-label-deleted"),
         Key("Ctrl+Z"),
-        WaitFor("label-item-jigs"),
+        Wait(2),
         Screenshot("16-delete-undone"),
-        Click(ui("filter-owned")),
         Click(ui("view-grid")),
         MoveTo(1420, 780),
         Wait(3),
@@ -128,13 +141,19 @@ Scenario(
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("16c-trashed-selection-cleared"),
-        Click(ui("filter-trash")),
-        Click(ui("doc-name-0")),
+        Click(ui("account")),
+        WaitFor("account-trash"),
+        Click(ui("account-trash")),
+        RightClick(ui("doc-name-0")),
+        WaitFor("ctx-properties"),
+        Click(ui("ctx-properties")),
+        WaitFor("details-owner"),
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("16d-trash-details-read-only"),
+        Key("Escape"),
         Key("Ctrl+Z"),
-        Click(ui("filter-owned")),
+        Click(ui("filter-back")),
         Wait(3),
         DoubleClick(ui("doc-name-3")),
         WaitFor("document-shell"),

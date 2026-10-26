@@ -604,11 +604,14 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
         .with_children(|r| {
             crate::update::spawn_version(r, t);
             // Light, dark or the system's scheme.
-            r.spawn(cadrs_ui::scheme_toggle(t))
-                .entry::<Node>()
-                .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // The collaborators' avatars (`crate::collab::presence`), then Share (Onshape's blue
-            // button; `crate::collab`).
+            r.spawn((
+                cadrs_ui::scheme_toggle(t),
+                cadrs_ui::glass::GlassFrame::bar(),
+            ))
+            .entry::<Node>()
+            .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
+            // The collaborators' avatars (`crate::collab::presence`), then Share
+            // (`crate::collab`).
             r.spawn((
                 Name::new("collab-people"),
                 crate::collab::presence::PeopleBar,
@@ -619,8 +622,6 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
                     ..default()
                 },
             ));
-            // (Explore, notifications, apps and help are left out until they do something:
-            // issue #13.)
             r.spawn((
                 Button::new("document-share")
                     .label("Share")
@@ -634,6 +635,7 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             ))
             .entry::<Node>()
             .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
+            crate::notifications::spawn_bell(r, t);
             crate::preferences_ui::spawn_settings_button(r, t);
         });
     });

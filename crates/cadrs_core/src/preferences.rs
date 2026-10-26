@@ -303,6 +303,9 @@ pub struct Preferences {
     pub ui_scale: u16,
     #[serde(default)]
     pub color_scheme: ColorScheme,
+    /// The last edition of the app's "What's new" notice the user has seen.
+    #[serde(default)]
+    pub whats_new_seen: u32,
 }
 
 fn default_rotation_snap_degrees() -> f64 {
@@ -321,6 +324,7 @@ impl Default for Preferences {
             rotation_snap_tolerance_degrees: default_rotation_snap_tolerance_degrees(),
             ui_scale: 100,
             color_scheme: ColorScheme::default(),
+            whats_new_seen: 0,
         }
     }
 }

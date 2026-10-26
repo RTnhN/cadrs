@@ -9,7 +9,7 @@
 //!   follows the pointer (`landing-drag-ghost`).
 //! - **Folders' menu** (right-click a folder's row or card, `folder-context-menu`): Open,
 //!   Rename… (`rename-folder-dialog`), Copy… (`copy-folder-dialog`: the folder with its folders
-//!   and documents), Move to ▸ (folders nest), Details…, Move to trash (what it holds goes with
+//!   and documents), Move to ▸ (folders nest), Properties…, Move to trash (what it holds goes with
 //!   it); in the Trash, Restore and Delete permanently… (`purge-folder-dialog`).
 //! - **A selection's menu** (right-click one of several selected, `multi-context-menu`): Copy,
 //!   Move to ▸, Move to trash, or in the Trash, Restore.
@@ -440,7 +440,7 @@ fn on_folder_context_menu(
                     .icon("move-to-folder")
                     .submenu(move_entries(&lib.lib, parent, &[id])),
             )
-            .item(MenuItem::new("folder-properties", "Details…").icon("list-details"))
+            .item(MenuItem::new("folder-properties", "Properties…").icon("info"))
             .separator()
             .item(MenuItem::new("folder-trash", "Move to trash").icon("delete"))
             .min_width(190.0)
@@ -470,9 +470,9 @@ fn on_folder_action(
         }
         "folder-rename" => open_rename_folder_dialog(&mut commands, &theme, &folder),
         "folder-copy" => open_copy_folder_dialog(&mut commands, &theme, &folder),
-        "folder-properties" => {
-            commands.queue(move |world: &mut World| details::select(world, Pick::Folder(id), true))
-        }
+        "folder-properties" => commands.queue(move |world: &mut World| {
+            details::open_details(world, Pick::Folder(id), details::DetailsTab::Info)
+        }),
         "folder-trash" => commands.queue(move |world: &mut World| trash_items(world, &items)),
         "folder-restore" => commands.queue(move |world: &mut World| restore_items(world, &items)),
         "folder-delete-forever" => open_purge_folder_dialog(&mut commands, &theme, &folder),

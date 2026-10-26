@@ -322,6 +322,25 @@ fn sync_update_slot(
     }
 }
 
+/// Opens the newer release's notes (the bell's notice), unless they are open.
+pub(crate) fn show_release_notes(world: &mut World) {
+    let open = world
+        .query_filtered::<(), With<UpdateDialog>>()
+        .iter(world)
+        .next()
+        .is_some();
+    let Some(release) = world.resource::<UpdateStatus>().release().cloned() else {
+        return;
+    };
+    if open {
+        return;
+    }
+    let theme = world.resource::<Theme>().clone();
+    let mut commands = world.commands();
+    open_dialog(&mut commands, &theme, &release);
+    world.flush();
+}
+
 fn open_dialog(commands: &mut Commands, theme: &Theme, release: &Release) {
     let t = theme.clone();
     let tb = theme.clone();

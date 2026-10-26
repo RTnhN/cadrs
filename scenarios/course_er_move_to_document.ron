@@ -89,7 +89,6 @@ Scenario(
         Screenshot("10-redo-moved-again"),
         Click(ui("back-to-documents")),
         WaitFor("landing"),
-        Click(ui("filter-created")),
         // Sorted by name: documents made in the same minute would otherwise be ordered by
         // their (random) ids.
         Click(ui("col-name")),

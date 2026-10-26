@@ -44,12 +44,14 @@ Scenario(
     steps: [
         WaitFor("doc-row-0"),
         // Step 1: Explore cadrs → the Drill sample → Open a copy.
-        Click(ui("filter-explore")),
+        Click(ui("create")),
+        WaitFor("open-samples"),
+        Click(ui("open-samples")),
         WaitFor("sample-row-6"),
-        Click(ui("sample-name-6")),
-        WaitFor("details-open-copy"),
+        RightClick(ui("sample-name-6")),
+        WaitFor("sample-open-copy"),
         Screenshot("01-sample-drill"),
-        Click(ui("details-open-copy")),
+        Click(ui("sample-open-copy")),
         WaitFor("sample-copy-dialog"),
         Click(ui("sample-copy-dialog-ok")),
         WaitFor("document-shell"),

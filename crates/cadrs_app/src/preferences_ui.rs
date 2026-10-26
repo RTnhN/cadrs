@@ -170,6 +170,16 @@ pub fn set_mcp_enabled(world: &mut World, on: bool) {
     save(world);
 }
 
+/// Remembers that the user has seen "What's new" up to `edition`
+/// ([`crate::notifications::WHATS_NEW`]).
+pub(crate) fn mark_whats_new_seen(world: &mut World, edition: u32) {
+    if world.resource::<LocalPreferences>().0.whats_new_seen >= edition {
+        return;
+    }
+    world.resource_mut::<LocalPreferences>().0.whats_new_seen = edition;
+    save(world);
+}
+
 fn save(world: &mut World) {
     let prefs = world.resource::<LocalPreferences>().0;
     if let Some(store) = world.get_resource::<DocumentStore>()
@@ -186,36 +196,56 @@ fn save(world: &mut World) {
 /// color scheme toggle beside it ([`cadrs_ui::segmented::frame`]). No profile name or avatar: there are no accounts yet
 /// (issue #13).
 pub fn spawn_settings_button(r: &mut ChildSpawnerCommands, t: &Theme) {
-    r.spawn((Name::new("settings"), cadrs_ui::segmented::frame(t)))
-        .with_children(|b| {
-            b.spawn(
-                Button::new("account")
-                    .icon("settings")
-                    .icon_size(14.0)
-                    .small()
-                    .ghost()
-                    .dropdown_caret()
-                    .tooltip("Settings")
-                    .build(t),
-            )
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.height = Val::Px(22.0);
-                n.border = UiRect::ZERO;
-                n.padding = UiRect::horizontal(Val::Px(6.0));
-                n.column_gap = Val::Px(4.0);
-            });
+    r.spawn((
+        Name::new("settings"),
+        cadrs_ui::segmented::frame(t),
+        cadrs_ui::glass::GlassFrame::bar(),
+    ))
+    .with_children(|b| {
+        b.spawn(
+            Button::new("account")
+                .icon("settings")
+                .icon_size(14.0)
+                .small()
+                .ghost()
+                .dropdown_caret()
+                .tooltip("Settings")
+                .build(t),
+        )
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Px(22.0);
+            n.border = UiRect::ZERO;
+            n.padding = UiRect::horizontal(Val::Px(6.0));
+            n.column_gap = Val::Px(4.0);
         });
+    });
 }
 
 /// The account button (top right, on the documents page and in a document): its menu.
-fn on_account(a: On<Activate>, q: Query<&Name>, theme: Res<Theme>, mut commands: Commands) {
+#[allow(clippy::too_many_arguments)]
+fn on_account(
+    a: On<Activate>,
+    q: Query<&Name>,
+    theme: Res<Theme>,
+    app_state: Res<State<crate::AppState>>,
+    lib: Res<crate::landing::DocLibrary>,
+    landing: Res<crate::landing::LandingState>,
+    mut commands: Commands,
+) {
     if q.get(a.entity).map(|n| n.as_str()) != Ok("account") {
         return;
     }
+    // On the documents page: its folder, the Trash and the labels first.
+    let page = if *app_state.get() == crate::AppState::Landing {
+        crate::landing::account_entries(&lib.lib, landing.filter)
+    } else {
+        Vec::new()
+    };
     let menu = cadrs_ui::Menu::new("account-menu")
         .align_end()
-        .min_width(180.0)
+        .min_width(200.0)
+        .entries(page)
         .item(MenuItem::new("account-preferences", "Preferences…").icon("settings"))
         .item(
             MenuItem::new("account-shortcuts", "Keyboard shortcuts")
@@ -229,6 +259,15 @@ fn on_account(a: On<Activate>, q: Query<&Name>, theme: Res<Theme>, mut commands:
 
 fn on_account_action(ev: On<MenuAction>, q: Query<&Name>, mut commands: Commands) {
     if q.get(ev.entity).map(|n| n.as_str()) != Ok("account") {
+        return;
+    }
+    let item = ev.item.clone();
+    if item.starts_with("account-")
+        && !matches!(item.as_str(), "account-preferences" | "account-shortcuts")
+    {
+        commands.queue(move |w: &mut World| {
+            crate::landing::account_action(w, &item);
+        });
         return;
     }
     match ev.item.as_str() {
