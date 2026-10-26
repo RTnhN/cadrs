@@ -1755,6 +1755,14 @@ fn measure(parts: &[Part]) -> Measured {
         volume += m.volume;
         area += m.surface_area;
         faces += p.solid.faces.len();
+        if std::env::var("DBG_FACES").is_ok() {
+            for f in &p.solid.faces {
+                eprintln!(
+                    "DBG {:?} r {:?} area {:?} c {:?}",
+                    f.kind, f.radius, f.area, f.center
+                );
+            }
+        }
         let c = [m.center_of_mass.x, m.center_of_mass.y, m.center_of_mass.z];
         for k in 0..3 {
             moment[k] += m.volume * c[k];

@@ -724,6 +724,19 @@ pub(crate) fn sweep_spines(
     if pieces.is_empty() {
         return Err(KernelError::InvalidParameter("Select a sweep path".into()));
     }
+    // Each piece's side faces, along a path of several, are its own (named after the piece).
+    if pieces.len() > 1 {
+        for (k, p) in pieces.iter_mut().enumerate() {
+            for tags in &mut p.tags {
+                if tags
+                    .iter()
+                    .any(|o| matches!(o, Origin::ProfileCurve { .. }))
+                {
+                    tags.push(Origin::PathSegment { segment: k as u32 });
+                }
+            }
+        }
+    }
     let mut acc = pieces.remove(0);
     corners.remove(0);
     for (p, corner) in pieces.into_iter().zip(corners) {

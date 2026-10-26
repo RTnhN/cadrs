@@ -13,6 +13,7 @@
 13-combine-join
 14-combine-cut
 15-combine-intersect
+16-sweep
 17-loft
 18-hole-features
 19-l-bracket-constrained
@@ -43,6 +44,7 @@
 46-shell-two-open-faces
 47-draft-curved-pocket
 48-pulley
+50-sweep-tight-bend
 51-loft-rect-circle-offset
 52-circular-pattern-fillet
 54-mirror-body-fillets

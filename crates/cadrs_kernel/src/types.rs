@@ -1173,6 +1173,14 @@ pub enum Origin {
         /// Its vertex.
         vertex: VertexId,
     },
+    /// Given besides [`Origin::ProfileCurve`] to a side face of a sweep along a path of
+    /// several pieces (its lines and arcs, a tangent run of other curves): the piece, 0, 1, …
+    /// along the path, it was swept along. A profile curve sweeps a face along each, as
+    /// Onshape's sweep has them (a cylinder, a torus, a cylinder), each a face of its own.
+    PathSegment {
+        /// The piece's place along the path.
+        segment: u32,
+    },
 }
 
 /// The curve id [`Origin::ProfileCurve`] uses for a profile curve without a `source`: the
