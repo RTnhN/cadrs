@@ -65,7 +65,8 @@ fn store(world: &World) -> Option<cadrs_core::Store> {
 
 /// Opens workspace `ws`: the document becomes its state, with its own undo and redo; the log
 /// and the document file are written (the file holds the open workspace, TD3.7). Nothing while
-/// a dialog or a sketch is open, or the document is read-only.
+/// a dialog or a sketch is open, or the document is read-only. (A shared document's live
+/// session follows Main: `crate::collab::versions`.)
 pub fn switch_workspace(world: &mut World, ws: WorkspaceId) {
     if editing(world)
         || world
@@ -328,6 +329,11 @@ fn commit_branch(world: &mut World) {
     let name = field(world, "branch-name-field");
     let description = field(world, "branch-description-field");
     close::<BranchFrom>(world);
+    create_branch(world, v, &name, &description);
+}
+
+/// Branches from version `v` and opens the new workspace (Branch to create workspace).
+pub fn create_branch(world: &mut World, v: VersionId, name: &str, description: &str) {
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
     let user = world
         .get_resource::<UserProfile>()
@@ -340,7 +346,7 @@ fn commit_branch(world: &mut World) {
     let ws = {
         let mut l = world.resource_mut::<DocLog>();
         let Some(log) = l.log.as_mut() else { return };
-        let Some(ws) = log.branch(v, &name, &description, now, &user) else {
+        let Some(ws) = log.branch(v, name, description, now, &user) else {
             return;
         };
         if let Some(s) = store.as_ref().filter(|_| stored) {

@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy_iroh::{Iroh, Relays};
 use cadrs_core::Document;
-use cadrs_core::collab::{Permission, Snapshot};
-use cadrs_net::{NetPlugin, ShareLink, SnapshotRequests, Welcome, transfer};
+use cadrs_core::collab::sync::Change;
+use cadrs_core::collab::{Access, Permission, Snapshot};
+use cadrs_net::{Ask, NetPlugin, Requests, ShareLink, Verdict, Welcome, transfer};
 
 const PATIENCE: Duration = Duration::from_secs(30);
 const TOPIC: [u8; 32] = [42; 32];
@@ -29,46 +30,60 @@ fn peer(name: &str) -> App {
 #[derive(Resource)]
 struct Shared(Document);
 
-fn serve(mut requests: ResMut<SnapshotRequests>, shared: Res<Shared>) {
+fn serve(mut requests: ResMut<Requests>, shared: Res<Shared>) {
     for r in requests.drain() {
-        let ok = r.document == shared.0.id && r.topic == TOPIC;
-        let doc = shared.0.clone();
-        r.answer(if ok {
-            Ok(Welcome {
-                permission: Permission::Edit,
-                owner_name: "Owner".into(),
-                snapshot: Snapshot {
-                    seq: 3,
-                    document: doc,
-                    blobs: Vec::new(),
-                },
-            })
-        } else {
-            Err("Link sharing is off".into())
-        });
+        if r.document != shared.0.id || r.topic != TOPIC {
+            r.refuse("Link sharing is off");
+            continue;
+        }
+        match &r.ask {
+            Ask::Join => {
+                let doc = shared.0.clone();
+                r.welcome(Ok(Welcome {
+                    access: Access::owner(),
+                    owner_name: "Owner".into(),
+                    epoch: 9,
+                    snapshot: Snapshot {
+                        seq: 3,
+                        document: doc,
+                        blobs: Vec::new(),
+                    },
+                    comments: Default::default(),
+                }))
+            }
+            // Numbered as 4 when it renames the document, refused otherwise.
+            Ask::Propose {
+                epoch: 9,
+                base: 3,
+                change,
+                ..
+            } if change.delta.head.is_some() => r.verdict(Verdict::Accepted(4)),
+            _ => r.verdict(Verdict::Refused("No".into())),
+        }
     }
 }
 
-fn fetch(owner: &mut App, joiner: &mut App, link: ShareLink) -> Result<Welcome, String> {
-    let mut task = transfer::start_fetch(joiner.world().resource::<Iroh>(), link);
+fn wait<T>(owner: &mut App, joiner: &mut App, mut task: bevy_iroh::IrohTask<T>) -> T {
     let start = Instant::now();
     loop {
         owner.update();
         joiner.update();
         if let Some(r) = task.try_take() {
-            eprintln!("fetched in {:?}", start.elapsed());
+            eprintln!("answered in {:?}", start.elapsed());
             return r;
         }
-        assert!(
-            start.elapsed() < PATIENCE,
-            "gave up waiting for the document"
-        );
+        assert!(start.elapsed() < PATIENCE, "gave up waiting for the owner");
         std::thread::sleep(Duration::from_millis(16));
     }
 }
 
+fn fetch(owner: &mut App, joiner: &mut App, link: ShareLink) -> Result<Welcome, String> {
+    let task = transfer::start_fetch(joiner.world().resource::<Iroh>(), link);
+    wait(owner, joiner, task)
+}
+
 #[test]
-fn a_document_travels_by_its_link_and_a_wrong_topic_is_refused() {
+fn a_document_and_edits_travel_by_its_link_and_a_wrong_topic_is_refused() {
     let mut owner = peer("Owner");
     let mut joiner = peer("Joiner");
     let mut doc = Document::new("Bracket");
@@ -86,9 +101,26 @@ fn a_document_travels_by_its_link_and_a_wrong_topic_is_refused() {
     };
 
     let welcome = fetch(&mut owner, &mut joiner, link.clone()).unwrap();
-    assert_eq!(welcome.permission, Permission::Edit);
+    assert_eq!(welcome.access.permission, Permission::Edit);
     assert_eq!(welcome.snapshot.seq, 3);
     assert_eq!(welcome.snapshot.document, doc);
+
+    // An edit, proposed to the owner.
+    let mut renamed = doc.clone();
+    renamed.name = "Bracket v2".into();
+    let change = Change::between(&doc, &renamed);
+    let iroh = joiner.world().resource::<Iroh>();
+    let task = transfer::start_propose(iroh, &link, 9, 1, 3, &change);
+    assert_eq!(
+        wait(&mut owner, &mut joiner, task),
+        Ok(Verdict::Accepted(4))
+    );
+    let iroh = joiner.world().resource::<Iroh>();
+    let task = transfer::start_propose(iroh, &link, 9, 2, 3, &Change::default());
+    assert_eq!(
+        wait(&mut owner, &mut joiner, task),
+        Ok(Verdict::Refused("No".into()))
+    );
 
     let wrong = ShareLink {
         topic: [0; 32],
