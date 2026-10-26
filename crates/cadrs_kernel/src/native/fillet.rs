@@ -3261,6 +3261,47 @@ fn plane_cut(
     Ok(pts)
 }
 
+/// The ball touching every face at a corner where the fillets `here` (of one radius) meet, one
+/// face per fillet: its centre and its contact with each face. Found on the first three faces
+/// (from each strip's ball at the vertex); any others must touch it too.
+fn corner_ball(
+    b: &Body,
+    efs: &[EdgeFillet],
+    here: &[(usize, usize)],
+) -> Option<(P3, Vec<(usize, Contact)>)> {
+    let mut faces: Vec<(usize, P2)> = Vec::new();
+    for &(i, j) in here {
+        let bl = efs[i].end_ball(b, j).ok()?;
+        for k in 0..2 {
+            if !faces.iter().any(|x| x.0 == efs[i].faces[k]) {
+                faces.push((efs[i].faces[k], bl.q[k].uv));
+            }
+        }
+    }
+    if faces.len() != here.len() {
+        return None;
+    }
+    let kk = efs[here[0].0].k_at(b.edges[efs[here[0].0].e].t[here[0].1])[0];
+    let fs = [
+        &b.faces[faces[0].0],
+        &b.faces[faces[1].0],
+        &b.faces[faces[2].0],
+    ];
+    let (c, q) = geom::ball3(fs, [kk; 3], [faces[0].1, faces[1].1, faces[2].1])?;
+    let mut contacts: Vec<(usize, Contact)> = (0..3).map(|i| (faces[i].0, q[i])).collect();
+    for &(fi, hint) in &faces[3..] {
+        let f = &b.faces[fi];
+        let q = geom::contact(f, geom::foot(f, &c, Some(hint)));
+        // The radius from the centre, along the face's normal there.
+        let (d, r, eps) = (c - q.p, kk.abs(), tol::REL_POINT * (1.0 + kk.abs()));
+        if (d.norm() - r).abs() > eps || (d.dot(&q.n).abs() - r).abs() > eps {
+            return None;
+        }
+        contacts.push((fi, q));
+    }
+    Some((c, contacts))
+}
+
 /// The patched corner at vertex v where the strips `here` (index, end) meet: each strip's
 /// rails stop where they cross the next strips' rails on their common faces.
 fn patch_corner(
@@ -5200,6 +5241,50 @@ fn plan(
                 let _ = n;
                 return Err(unsupported("chamfers meeting at a corner"));
             }
+            // Three fillets of one radius, or more whose faces (one per fillet) all touch one
+            // ball (a square pyramid's apex): a sphere corner, the ball's.
+            n if n >= 3
+                && n == all.len()
+                && !efs[here[0].0].flat
+                && here.iter().all(|&(i, j)| {
+                    (efs[i].k[0] < 0.0) == (efs[here[0].0].k[0] < 0.0)
+                        && (efs[i].radius_at(b.edges[efs[i].e].t[j])
+                            - efs[here[0].0].radius_at(b.edges[efs[here[0].0].e].t[here[0].1]))
+                        .abs()
+                            < tol::REL * (1.0 + efs[i].r())
+                })
+                && (n == 3 || corner_ball(b, &efs, here).is_some()) =>
+            {
+                let (c, contacts) = corner_ball(b, &efs, here).ok_or_else(|| {
+                    failed(
+                        "corner",
+                        "no ball touches the three faces at the fillets' corner",
+                    )
+                })?;
+                let on = |fi: usize| contacts.iter().find(|x| x.0 == fi).map(|x| x.1);
+                for &(i, j) in here {
+                    let ef = &efs[i];
+                    let (Some(qa), Some(qb)) = (on(ef.faces[0]), on(ef.faces[1])) else {
+                        return Err(failed("corner", "a corner fillet without its faces"));
+                    };
+                    let t = ef.spine.param_of(&c, b.edges[ef.e].t[j]);
+                    ends[i][j] = Some(End::Section {
+                        ball: Ball {
+                            c,
+                            q: [qa, qb],
+                            flat: false,
+                        },
+                        t,
+                        key: SectionKey::Corner(v, ef.e),
+                    });
+                }
+                corners.push(Corner {
+                    v,
+                    c,
+                    contacts,
+                    edges: here.iter().map(|&(i, _)| efs[i].e).collect(),
+                });
+            }
             n if n >= 3
                 && n == all.len()
                 && (n > 3
@@ -5225,69 +5310,7 @@ fn plan(
                 }
                 patches.push(pc);
             }
-            3 if all.len() == 3
-                && !efs[here[0].0].flat
-                && here.iter().all(|&(i, j)| {
-                    (efs[i].radius_at(b.edges[efs[i].e].t[j])
-                        - efs[here[0].0].radius_at(b.edges[efs[here[0].0].e].t[here[0].1]))
-                    .abs()
-                        < tol::REL * (1.0 + efs[i].r())
-                }) =>
-            {
-                // The three faces, with contacts near the corner to start from (each strip's
-                // ball at the vertex).
-                let mut faces: Vec<(usize, P2)> = Vec::new();
-                for &(i, j) in here {
-                    let bl = efs[i].end_ball(b, j)?;
-                    for k in 0..2 {
-                        if !faces.iter().any(|x| x.0 == efs[i].faces[k]) {
-                            faces.push((efs[i].faces[k], bl.q[k].uv));
-                        }
-                    }
-                }
-                if faces.len() != 3 {
-                    return Err(unsupported(
-                        "a fillet corner that isn't between three faces",
-                    ));
-                }
-                let kk = efs[here[0].0].k_at(b.edges[efs[here[0].0].e].t[here[0].1])[0];
-                let fs = [
-                    &b.faces[faces[0].0],
-                    &b.faces[faces[1].0],
-                    &b.faces[faces[2].0],
-                ];
-                let (c, q) = geom::ball3(fs, [kk; 3], [faces[0].1, faces[1].1, faces[2].1])
-                    .ok_or_else(|| {
-                        failed(
-                            "corner",
-                            "no ball touches the three faces at the fillets' corner",
-                        )
-                    })?;
-                let contacts: Vec<(usize, Contact)> = (0..3).map(|i| (faces[i].0, q[i])).collect();
-                let on = |fi: usize| contacts.iter().find(|x| x.0 == fi).map(|x| x.1);
-                for &(i, j) in here {
-                    let ef = &efs[i];
-                    let (Some(qa), Some(qb)) = (on(ef.faces[0]), on(ef.faces[1])) else {
-                        return Err(failed("corner", "a corner fillet without its faces"));
-                    };
-                    let t = ef.spine.param_of(&c, b.edges[ef.e].t[j]);
-                    ends[i][j] = Some(End::Section {
-                        ball: Ball {
-                            c,
-                            q: [qa, qb],
-                            flat: false,
-                        },
-                        t,
-                        key: SectionKey::Corner(v, ef.e),
-                    });
-                }
-                corners.push(Corner {
-                    v,
-                    c,
-                    contacts,
-                    edges: here.iter().map(|&(i, _)| efs[i].e).collect(),
-                });
-            }
+
             _ => {
                 debug(|| {
                     format!(
