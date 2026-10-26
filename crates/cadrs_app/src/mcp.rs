@@ -588,7 +588,7 @@ fn describe_assembly(d: &ActiveDocument, element: ElementId) -> Result<Value, St
         .map(|i| {
             // Only a part instance's name needs its Part Studio rebuilt (the part's name).
             let build = matches!(i.source, InstanceSource::Part { .. })
-                .then(|| d.doc.element(i.source.element()).map(|s| cadrs_core::rebuild::build(s.features())))
+                .then(|| d.doc.element(i.source.element()).map(|s| cadrs_core::rebuild::build(&s.part_features())))
                 .flatten();
             let mut v = json!({
                 "name": i.name(&cadrs_core::assembly::source_part_name(&d.doc, &i.source, build.as_deref())),
@@ -882,6 +882,7 @@ fn kind_label(kind: &ElementKind) -> &'static str {
         ElementKind::PcbStudio(_) => "PCB Studio",
         ElementKind::Render(_) => "Render Studio",
         ElementKind::CamStudio(_) => "CAM Studio",
+        ElementKind::VariableStudio(_) => "Variable Studio",
     }
 }
 
@@ -930,7 +931,7 @@ fn describe(world: &World) -> Result<Value, String> {
         e.features().to_vec(),
         e.part_props().to_vec(),
     );
-    after_build(world, features.clone(), move |b| {
+    after_build(world, e.features_to_build(), move |b| {
         out["part_studio"] = studio_state(&name, &features, &props, b);
         Ok(out)
     })
@@ -1337,7 +1338,7 @@ fn outcome(world: &World, element: ElementId, feature: FeatureId) -> Result<Valu
         e.features().to_vec(),
         e.part_props().to_vec(),
     );
-    after_build(world, features.clone(), move |b| {
+    after_build(world, e.features_to_build(), move |b| {
         let state = studio_state(&studio, &features, &props, b);
         let mut out = json!({ "feature": name, "parts": state["parts"] });
         if let Some(f) = state["features"]
@@ -1688,7 +1689,7 @@ fn set_part(world: &mut World, p: &tools::SetPart) -> Result<Value, String> {
         let d = doc(world)?;
         let element = part_studio(d, p.part_studio.as_deref())?;
         let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-        (element, e.features().to_vec(), e.part_props().to_vec())
+        (element, e.features_to_build(), e.part_props().to_vec())
     };
     let p = p.clone();
     after_build_mut(world, features, move |world, b| {
@@ -1729,7 +1730,7 @@ fn studio_features(
     let d = doc(world)?;
     let element = part_studio(d, studio)?;
     let e = d.doc.element(element).ok_or("the Part Studio is gone")?;
-    Ok(e.features().to_vec())
+    Ok(e.features_to_build())
 }
 
 fn list_faces(world: &mut World, studio: Option<&str>) -> Result<Value, String> {
@@ -1867,8 +1868,7 @@ fn export_step(world: &mut World, p: &tools::ExportStep) -> Result<Value, String
         .doc
         .element(element)
         .ok_or("the Part Studio is gone")?
-        .features()
-        .to_vec();
+        .features_to_build();
     let parts = cadrs_core::rebuild::build(&features).parts.clone();
     if parts.is_empty() {
         return Err("the Part Studio has no parts".into());

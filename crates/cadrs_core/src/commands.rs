@@ -79,6 +79,8 @@ pub enum NewElementKind {
     CamStudio,
     /// P3F.6: a Render Studio of this Part Studio or Assembly.
     RenderStudio(Option<ElementId>),
+    /// "Variable Studio 1", with an empty table ([`crate::variable_studio`]).
+    VariableStudio,
 }
 
 /// Adds a new tab. `id` is chosen by the caller so it can select the new tab afterwards.
@@ -101,6 +103,7 @@ impl Command for AddElement {
             NewElementKind::PcbStudio => "Create PCB Studio".into(),
             NewElementKind::CamStudio => "Create CAM Studio".into(),
             NewElementKind::RenderStudio(_) => "Create Render Studio".into(),
+            NewElementKind::VariableStudio => "Create Variable Studio".into(),
         }
     }
     fn scope(&self) -> Scope {
@@ -116,6 +119,7 @@ impl Command for AddElement {
             NewElementKind::PcbStudio => "PCB Studio",
             NewElementKind::CamStudio => "CAM Studio",
             NewElementKind::RenderStudio(_) => "Render Studio",
+            NewElementKind::VariableStudio => "Variable Studio",
         };
         let name = match &self.name {
             Some(n) => non_empty(n)?,
@@ -126,6 +130,7 @@ impl Command for AddElement {
             NewElementKind::Assembly => Element::assembly(name),
             NewElementKind::PcbStudio => Element::pcb_studio(name),
             NewElementKind::CamStudio => Element::cam_studio(name),
+            NewElementKind::VariableStudio => Element::variable_studio(name),
             NewElementKind::RenderStudio(source) => {
                 if let Some(s) = source
                     && !doc.element(s).is_some_and(|e| {
@@ -565,12 +570,13 @@ pub fn refresh_studio(doc: &mut Document, element: ElementId) {
     crate::assembly::context::refresh_targets(doc, element);
     let units = doc.units;
     // P3F.4: variables first, so the sketches regenerate with the dimensions they drive.
-    let suppressed = doc
+    let (suppressed, base) = doc
         .element(element)
-        .map(|e| e.suppressed().to_vec())
+        .map(|e| (e.suppressed().to_vec(), e.variable_base()))
         .unwrap_or_default();
     if let Ok(features) = part_studio_features(doc, element) {
-        crate::variables::refresh(features, &suppressed, &units);
+        // The Variable Studios' variables are defined above the whole list.
+        crate::variables::refresh(&base, features, &suppressed, &units);
         crate::parts::regenerate_with(features, &context);
     }
 }

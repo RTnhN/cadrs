@@ -169,7 +169,7 @@ impl Previews {
         let id = spec.element_id();
         if let std::collections::hash_map::Entry::Vacant(e) = self.0.entry(id) {
             let el = standard::generate(spec).ok()?;
-            let b = cadrs_core::rebuild::build(el.features());
+            let b = cadrs_core::rebuild::build(&el.part_features());
             e.insert((el, b, None));
         }
         self.0.get(&id).map(|(e, b, _)| (e.clone(), b.clone()))

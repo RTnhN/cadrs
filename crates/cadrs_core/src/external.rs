@@ -298,6 +298,14 @@ fn snap(
                 el.name
             )));
         }
+        // A Variable Studio is inserted as a frozen copy of its variables
+        // (`crate::variable_studio::snapshot`), not linked.
+        ElementKind::VariableStudio(_) => {
+            return Err(LinkError::NotLinkable(format!(
+                "The Variable Studio {}",
+                el.name
+            )));
+        }
         // A CAM Studio machines parts here; nothing derives or inserts it.
         ElementKind::CamStudio(_) => {
             return Err(LinkError::NotLinkable(format!(

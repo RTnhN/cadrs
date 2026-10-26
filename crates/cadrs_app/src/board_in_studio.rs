@@ -143,9 +143,10 @@ pub fn instance_board(
             (*pcb, *b)
         }
     };
-    let f = doc
-        .doc
-        .element(element)?
+    let cadrs_core::ElementKind::PcbStudio(p) = &doc.doc.element(element)?.kind else {
+        return None;
+    };
+    let f = p
         .part_features()
         .iter()
         .find(|f| f.id == cadrs_core::pcb::board_feature(b))?;
@@ -2503,7 +2504,7 @@ mod tests {
             },
         )
         .unwrap();
-        let build = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features());
+        let build = cadrs_core::rebuild::build(&doc.element(pe::STUDIO).unwrap().part_features());
         let mut w = World::new();
         let mut ad = ActiveDocument::new(doc);
         ad.set_active(pe::STUDIO);

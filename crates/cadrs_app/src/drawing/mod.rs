@@ -375,7 +375,7 @@ fn sync_drawing_chrome(
     for (name, mut node, mut vis) in &mut q_nodes {
         match name.as_str() {
             "feature-panel" => {
-                let d = if drawing {
+                let d = if drawing || *kind == ActiveKind::VariableStudio {
                     Display::None
                 } else {
                     Display::Flex

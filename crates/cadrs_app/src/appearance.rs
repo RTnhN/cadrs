@@ -763,13 +763,17 @@ pub(crate) fn side_panel_header(
 /// (P3F.4).
 fn sync_variables_panel(
     open: Res<SidePanel>,
+    kind: Res<crate::viewport::ActiveKind>,
     theme: Res<Theme>,
     q_area: Query<(Entity, &ChildOf), With<ViewportArea>>,
     q_children: Query<&Children>,
     q_panel: Query<Entity, With<VariablesPanel>>,
     mut commands: Commands,
 ) {
-    let want = *open == SidePanel::Variables;
+    // A Variable Studio's table fills its tab: the panel stays shut there (and comes back on
+    // the Part Studio or Assembly).
+    let want =
+        *open == SidePanel::Variables && *kind != crate::viewport::ActiveKind::VariableStudio;
     if want != q_panel.is_empty() {
         return;
     }

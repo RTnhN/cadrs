@@ -74,6 +74,7 @@ pub mod thread;
 pub mod thumbnail;
 pub mod time;
 pub mod transform;
+pub mod variable_studio;
 pub mod variables;
 pub mod vector_import;
 pub mod views;

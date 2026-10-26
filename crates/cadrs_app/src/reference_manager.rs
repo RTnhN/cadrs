@@ -409,7 +409,7 @@ fn use_label(doc: &cadrs_core::Document, u: &RefUse) -> String {
             };
             let build = doc
                 .element(i.source.element())
-                .map(|e| cadrs_core::rebuild::build(e.features()));
+                .map(|e| cadrs_core::rebuild::build(&e.part_features()));
             i.name(&cadrs_core::assembly::source_part_name(
                 doc,
                 &i.source,

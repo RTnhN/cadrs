@@ -276,7 +276,10 @@ fn a_suppressed_variable_defines_nothing_below() {
         },
     ];
     // #b is suppressed, so #c's variable isn't defined: #c isn't suppressed, and fails.
-    assert_eq!(variables::suppressed_by_variables(&features, &[]), vec![b]);
+    assert_eq!(
+        variables::suppressed_by_variables(&[], &features, &[]),
+        vec![b]
+    );
     let active: Vec<Feature> = features.iter().filter(|f| f.id != b).cloned().collect();
     let errors = variables::check(&active, &Default::default());
     assert!(
@@ -285,8 +288,8 @@ fn a_suppressed_variable_defines_nothing_below() {
     );
     // #a = 1: neither is suppressed, and #c evaluates to 2 on refresh.
     features[0].kind = number("a", "1");
-    assert!(variables::suppressed_by_variables(&features, &[]).is_empty());
-    variables::refresh(&mut features, &[], &Default::default());
+    assert!(variables::suppressed_by_variables(&[], &features, &[]).is_empty());
+    variables::refresh(&[], &mut features, &[], &Default::default());
     let FeatureKind::Variable(v) = &features[2].kind else {
         unreachable!()
     };

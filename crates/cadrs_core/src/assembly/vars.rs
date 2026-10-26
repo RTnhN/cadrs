@@ -23,9 +23,14 @@ fn slot_quantity(s: OffsetSlot) -> Quantity {
     }
 }
 
-/// The assembly's variables, top to bottom, each evaluated with those above it.
-pub fn defined(asm: &Assembly, units: &Units) -> Vec<(String, VarValue)> {
-    let mut env: Vec<(String, VarValue)> = Vec::new();
+/// The assembly's variables, top to bottom, each evaluated with those above it; `base` (the
+/// document's Variable Studios', [`crate::variable_studio`]) comes first.
+pub fn defined(
+    base: &[(String, VarValue)],
+    asm: &Assembly,
+    units: &Units,
+) -> Vec<(String, VarValue)> {
+    let mut env: Vec<(String, VarValue)> = base.to_vec();
     for f in asm.mates.iter().filter(|f| !f.suppressed) {
         if let MateKind::Variable(v) = &f.kind
             && v.problem().is_none()
@@ -43,8 +48,9 @@ pub fn defined(asm: &Assembly, units: &Units) -> Vec<(String, VarValue)> {
 }
 
 /// Re-evaluates the variables and the offsets typed as expressions naming them, writing the
-/// values (translation mm, rotation radians). Returns whether anything changed.
-pub fn refresh(asm: &mut Assembly, units: &Units) -> bool {
+/// values (translation mm, rotation radians), with `base` defined above the list. Returns
+/// whether anything changed.
+pub fn refresh(base: &[(String, VarValue)], asm: &mut Assembly, units: &Units) -> bool {
     if !asm
         .mates
         .iter()
@@ -53,7 +59,7 @@ pub fn refresh(asm: &mut Assembly, units: &Units) -> bool {
         return false;
     }
     let mut changed = false;
-    let mut env: Vec<(String, VarValue)> = Vec::new();
+    let mut env: Vec<(String, VarValue)> = base.to_vec();
     for f in asm.mates.iter_mut().filter(|f| !f.suppressed) {
         let exprs = f.exprs.clone();
         match &mut f.kind {
@@ -94,10 +100,10 @@ pub fn refresh(asm: &mut Assembly, units: &Units) -> bool {
 }
 
 /// The mate features whose expressions can't be evaluated where they are: a variable named
-/// above its definition, or not defined at all.
-pub fn check(asm: &Assembly, units: &Units) -> Vec<(MateId, String)> {
+/// above its definition, or not defined at all (`base` is defined above the list).
+pub fn check(base: &[(String, VarValue)], asm: &Assembly, units: &Units) -> Vec<(MateId, String)> {
     let mut out = Vec::new();
-    let mut env: Vec<(String, VarValue)> = Vec::new();
+    let mut env: Vec<(String, VarValue)> = base.to_vec();
     let live: Vec<&super::mate::MateFeature> = asm.mates.iter().filter(|f| !f.suppressed).collect();
     for (i, f) in live.iter().enumerate() {
         let later = |n: &str| {

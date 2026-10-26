@@ -266,7 +266,14 @@ fn apply(world: &mut World, with: Option<Reference>) {
     if let (Some(w), Some(i)) = (&with, features.iter().position(|f| f.id == s.feature))
         && features[i].fillet().is_some_and(|x| x.tangent_propagation)
     {
-        let before = cadrs_core::rebuild::build(&features[..i]);
+        // The Variable Studios' variables it names first, as every rebuild's list.
+        let mut upto = doc
+            .doc
+            .element(s.element)
+            .map(|e| e.studio_features())
+            .unwrap_or_default();
+        upto.extend_from_slice(&features[..i]);
+        let before = cadrs_core::rebuild::build(&upto);
         s.note = chain_check(
             s.old_edges,
             entity_edges(&before.parts, w),

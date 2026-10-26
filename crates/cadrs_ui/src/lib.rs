@@ -42,6 +42,7 @@ pub mod fonts;
 pub mod form;
 pub mod gallery;
 pub mod glyphs;
+pub mod grid_cell;
 pub mod icon;
 mod icon_raster;
 pub mod inline_edit;
@@ -108,7 +109,10 @@ pub use dialog_fields::{
     NumberField, NumberFieldCancel, NumberFieldCommit, NumberFieldEdit, NumberFieldState,
     OptionRow, Select, SelectChange, SelectState, Slider, SliderChange, SliderState, form_row,
 };
-pub use dim_edit::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditField};
+pub use dim_edit::{
+    DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditField, DimEditNewVariable,
+    DimEditVariable, DimEditVariables, complete_variable,
+};
 pub use doc_details::{
     LabelChip, details_caption, details_divider, details_header, details_value, side_tab,
 };
@@ -128,6 +132,7 @@ pub use file_picker::{
 };
 pub use float_bar::FloatBar;
 pub use floating_panel::{FloatingPanel, FloatingPanelBody, FloatingPanelClose, panel_caption};
+pub use grid_cell::{GridCell, GridCellCommit, GridCellEdit, GridCellState, focus_cell};
 pub use icon::{Icon, IconAtlas, icon};
 pub use inline_edit::{
     DoubleClick, DoubleClickable, InlineEdit, InlineEditCancel, InlineEditCommit, InlineEditLabel,
@@ -309,6 +314,7 @@ impl Plugin for CadrsUiPlugin {
                 color_editor::ColorEditorPlugin,
                 selectable_text::SelectableTextPlugin,
                 color_scheme::ColorSchemePlugin,
+                grid_cell::GridCellPlugin,
             ))
             .add_message::<ScriptCommand>();
     }

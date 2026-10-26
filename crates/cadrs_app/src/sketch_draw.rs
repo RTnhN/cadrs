@@ -572,6 +572,9 @@ pub struct LabelSpec {
     pub angle: f32,
     /// Push the label further out (along `push`) until it clears the sketch axes.
     pub avoid_axes: bool,
+    /// The variables icon (ƒx) before the text: a dimension driven by variables, as Onshape
+    /// marks one.
+    pub variable: bool,
 }
 
 /// About where a live label ends up (its box, from its estimated size and push).
@@ -593,6 +596,10 @@ pub struct SketchLabels(pub Vec<LabelSpec>);
 
 #[derive(Component)]
 struct SketchLabel(usize);
+
+/// The ƒx before a [`SketchLabel`] of a dimension driven by variables.
+#[derive(Component)]
+struct SketchLabelIcon;
 
 /// Everything drawn for the sketches of the active Part Studio.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1422,8 +1429,11 @@ fn draw_sketches(
             if let Some((center, half)) =
                 draw_dimension(sketch, &map, &d, text, style, &knock, &mut thin, &mut out)
             {
-                if editing && let Some(l) = out.last_mut() {
-                    l.text.clear();
+                if let Some(l) = out.last_mut() {
+                    if editing {
+                        l.text.clear();
+                    }
+                    l.variable = !editing && sketch.expression(k).is_some();
                 }
                 new_overlay.dims.push(crate::sketch_dimension::DimLabel {
                     id: k,
@@ -1657,6 +1667,7 @@ fn live_label(text: String, at: Vec2, push: Option<(Vec2, f32)>) -> LabelSpec {
         background: None,
         angle: 0.0,
         avoid_axes: true,
+        variable: false,
     }
 }
 
@@ -2723,6 +2734,7 @@ fn draw_dimension(
         background: Some(knock(lay.label)),
         angle,
         avoid_axes: false,
+        variable: false,
     });
     // The rotated box's bounds (for picking the value).
     let half = Vec2::new(width as f32 / 2.0 + 3.0, 10.0);
@@ -3256,6 +3268,8 @@ fn sync_labels(
         &mut BackgroundColor,
         &mut Name,
     )>,
+    q_children: Query<&Children>,
+    mut q_icon: Query<(&mut Node, &mut ImageNode), (With<SketchLabelIcon>, Without<SketchLabel>)>,
     mut commands: Commands,
 ) {
     // In the viewport area, or the flat view while a sketch on the flat is edited (P3I.6): a
@@ -3289,6 +3303,21 @@ fn sync_labels(
             continue;
         };
         have = have.max(l.0 + 1);
+        for c in q_children.get(e).into_iter().flatten() {
+            if let Ok((mut icon_node, mut image)) = q_icon.get_mut(*c) {
+                let display = if spec.variable && !spec.text.is_empty() {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+                if icon_node.display != display {
+                    icon_node.display = display;
+                }
+                if image.color != spec.color {
+                    image.color = spec.color;
+                }
+            }
+        }
         let want_name = label_name(spec);
         if name.as_str() != want_name {
             name.set(want_name);
@@ -3372,6 +3401,25 @@ fn sync_labels(
                 Pickable::IGNORE,
                 // Over the glyphs, under the sketch dialog and other overlays in the viewport.
                 ZIndex(-1),
+                children![(
+                    Name::new("dim-label-variable"),
+                    SketchLabelIcon,
+                    cadrs_ui::Icon::new("variables", spec.size),
+                    ImageNode {
+                        color: spec.color,
+                        ..default()
+                    },
+                    Node {
+                        display: Display::None,
+                        position_type: PositionType::Absolute,
+                        right: Val::Percent(100.0),
+                        margin: UiRect::right(Val::Px(3.0)),
+                        width: Val::Px(spec.size),
+                        height: Val::Px(spec.size),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                )],
             ))
             .id();
         commands.entity(area).add_child(label);
