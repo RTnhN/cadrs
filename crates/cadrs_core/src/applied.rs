@@ -380,12 +380,19 @@ impl FilletFeature {
         if self.asymmetric && !(self.second > 0.0 && self.second.is_finite()) {
             return Some("The second radius must be greater than zero");
         }
+        // A vertex's radius may be zero (the round closes to the corner there); the points
+        // along an edge need a round.
         let bad = |r: f64| r.is_nan() || r <= 0.0;
         if self.variable
-            && (self.vertices.iter().any(|v| bad(v.radius))
+            && (self
+                .vertices
+                .iter()
+                .any(|v| v.radius.is_nan() || v.radius < 0.0)
                 || self.edge_points.iter().any(|p| bad(p.radius)))
         {
-            return Some("Every radius of a variable fillet must be greater than zero");
+            return Some(
+                "A variable fillet's radii must be greater than zero (zero only at a vertex)",
+            );
         }
         if self.partial {
             if self.variable {

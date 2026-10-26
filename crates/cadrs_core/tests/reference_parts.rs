@@ -24,7 +24,8 @@ use cadrs_core::advanced::{
     LoftFeature, LoftProfile, PathRef, SplitFeature, SplitToolRef, SweepFeature,
 };
 use cadrs_core::applied::{
-    ChamferFeature, EdgeOrFace, FilletFeature, HoleFeature, HolePoint, ShellFeature,
+    ChamferFeature, EdgeOrFace, EdgePoint, FilletFeature, FilletMeasurement, HoleFeature,
+    HolePoint, ShellFeature, VertexRadius,
 };
 use cadrs_core::commands::{
     AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, SetExtrude, SetRevolve,
@@ -32,6 +33,7 @@ use cadrs_core::commands::{
 use cadrs_core::document::{
     AxisRef, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, Document, EdgeRef, EndCondition,
     EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef, RevolveFeature, RevolveType,
+    VertexRef,
 };
 use cadrs_core::draft::{DraftFeature, ExtrudeDraft};
 use cadrs_core::hole::{HoleEnd, HoleSpec, HoleStyle, Length};
@@ -756,6 +758,20 @@ impl Recipe {
         }
     }
 
+    /// The part vertex at a world point.
+    fn vertex(&self, parts: &[Part], p: V3) -> R<VertexRef> {
+        parts
+            .iter()
+            .flat_map(|part| part.solid.vertices.iter().map(move |v| (part, v)))
+            .find(|(_, v)| norm(sub(v.point, p)) < 1e-4)
+            .map(|(part, v)| VertexRef {
+                part: part.id,
+                vertex: v.name,
+                point: v.point,
+            })
+            .map_or_else(|| failed(format!("no vertex at {p:?}")), Ok)
+    }
+
     /// The part face nearest a world point.
     fn face(&self, parts: &[Part], p: V3) -> R<FaceRef> {
         let mut best: Option<(f64, &Part, usize)> = None;
@@ -899,21 +915,81 @@ impl Recipe {
                 return Ok(());
             }
             "fillet" => {
-                if !matches!(f["type"].as_str(), None | Some("constant_radius")) {
-                    return unsupported(format!("fillet `{}`", f["type"]));
-                }
                 let entities = self.edges_of(f, None)?;
                 let r = self.num(f.get("radius"))?;
-                self.add(
-                    "Fillet",
-                    FeatureKind::Fillet(FilletFeature {
-                        entities,
-                        size: r,
-                        size_expr: format!("{r} mm"),
-                        tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
-                        ..FilletFeature::default()
-                    }),
-                )?
+                let mut x = FilletFeature {
+                    entities: entities.clone(),
+                    size: r,
+                    size_expr: format!("{r} mm"),
+                    tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
+                    ..FilletFeature::default()
+                };
+                match f["type"].as_str().unwrap_or("constant_radius") {
+                    "constant_radius" => {}
+                    // The round's width across, kept along the edge.
+                    "chord_length" => x.measurement = FilletMeasurement::Width,
+                    // The radius along the edge from its `start`: straight from `radius` to
+                    // `radius2`, or a clamped B-spline of `radius` then `radii` on `knots`.
+                    kind @ ("variable_radius" | "spline_radius") => {
+                        let law: Box<dyn Fn(f64) -> f64> = if kind == "variable_radius" {
+                            let r2 = self.num(f.get("radius2"))?;
+                            Box::new(move |u| r + (r2 - r) * u)
+                        } else {
+                            let mut cps = vec![r];
+                            for v in f["radii"].as_array().into_iter().flatten() {
+                                cps.push(self.num(Some(v))?);
+                            }
+                            let knots: Vec<f64> = f["knots"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(Value::as_f64)
+                                .collect();
+                            if knots.len() != cps.len() + 4 {
+                                return unsupported("a radius spline other than a cubic one");
+                            }
+                            Box::new(move |u| bspline(&cps, &knots, 3, u))
+                        };
+                        let [EdgeOrFace::Edge(e)] = entities.as_slice() else {
+                            return unsupported("a variable fillet of several edges");
+                        };
+                        let parts = cadrs_core::rebuild::build(&self.features_now())
+                            .parts
+                            .clone();
+                        let part = parts.iter().find(|p| p.id == e.part).unwrap();
+                        let edge = part.solid.edges.iter().find(|x| x.name == e.edge).unwrap();
+                        let (a, b) = (edge.points[0], *edge.points.last().unwrap());
+                        // The edge's start as cadrs has it, at the recipe's start or not.
+                        let start = v3(&f["start"]).unwrap_or(a);
+                        let forward = norm(sub(a, start)) <= norm(sub(b, start));
+                        let u = |t: f64| if forward { t } else { 1.0 - t };
+                        x.variable = true;
+                        x.smooth_transition = false;
+                        for (t, at) in [(0.0, a), (1.0, b)] {
+                            let radius = law(u(t));
+                            x.vertices.push(VertexRadius {
+                                vertex: self.vertex(&parts, at)?,
+                                radius,
+                                expr: format!("{radius} mm"),
+                            });
+                        }
+                        if kind == "spline_radius" {
+                            const N: usize = 48;
+                            for k in 1..N {
+                                let t = k as f64 / N as f64;
+                                let radius = law(u(t));
+                                x.edge_points.push(EdgePoint {
+                                    edge: *e,
+                                    location: t,
+                                    radius,
+                                    expr: format!("{radius} mm"),
+                                });
+                            }
+                        }
+                    }
+                    other => return unsupported(format!("fillet `{other}`")),
+                }
+                self.add("Fillet", FeatureKind::Fillet(x))?
             }
             "chamfer" => {
                 if f["type"].as_str() != Some("equal_distance") {
@@ -2099,4 +2175,24 @@ fn reference_parts() {
         lost.is_empty(),
         "reference parts no longer passing: {lost:?}"
     );
+}
+
+/// A clamped B-spline of degree `p` with control values `cps` on `knots`, at u (de Boor).
+fn bspline(cps: &[f64], knots: &[f64], p: usize, u: f64) -> f64 {
+    let n = cps.len();
+    let u = u.clamp(knots[p], knots[n]);
+    // The span: knots[k] <= u < knots[k + 1], the last one at the end.
+    let k = (p..n)
+        .rfind(|&i| knots[i] <= u && (u < knots[i + 1] || i == n - 1))
+        .unwrap_or(p);
+    let mut d: Vec<f64> = (0..=p).map(|j| cps[j + k - p]).collect();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = j + k - p;
+            let den = knots[i + p + 1 - r] - knots[i];
+            let a = if den > 0.0 { (u - knots[i]) / den } else { 0.0 };
+            d[j] = (1.0 - a) * d[j - 1] + a * d[j];
+        }
+    }
+    d[p]
 }

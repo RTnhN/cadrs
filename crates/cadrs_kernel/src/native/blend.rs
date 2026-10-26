@@ -3214,9 +3214,16 @@ pub fn fillet_variable(
                 "unknown edge or empty law".into(),
             ));
         }
-        if law.radii.iter().any(|(_, r)| !(*r > 0.0)) {
+        // A radius of zero closes the round to the corner: at an end of the edge only.
+        let inner = |t: f64| t > tol::TINY && t < 1.0 - tol::TINY;
+        if law
+            .radii
+            .iter()
+            .any(|(t, r)| !(*r >= 0.0) || (*r == 0.0 && inner(*t)))
+            || law.radii.iter().all(|(_, r)| *r == 0.0)
+        {
             return Err(KernelError::InvalidParameter(
-                "A fillet radius must be positive".into(),
+                "A fillet radius must be positive (zero only at an end of its edge)".into(),
             ));
         }
         let ed = b.edges[e].clone();
@@ -3260,10 +3267,16 @@ pub fn fillet_variable(
         };
         let rmax = pts.iter().map(|p| p.1).fold(0.0, f64::max);
         let ext = rmax * 4.0 + 1.0;
-        // Sections: the law's points, and one past each end with the end radius.
-        let mut stations: Vec<(f64, f64)> = vec![(-ext, pts[0].1)];
+        // Sections: the law's points, and one past each end with the end radius (none past an
+        // end of radius zero: the round closes to the corner there, a point section).
+        let mut stations: Vec<(f64, f64)> = Vec::new();
+        if pts[0].1 > 0.0 {
+            stations.push((-ext, pts[0].1));
+        }
         stations.extend(pts.iter().map(|(f, r)| (f * len, *r)));
-        stations.push((len + ext, pts.last().unwrap().1));
+        if pts.last().unwrap().1 > 0.0 {
+            stations.push((len + ext, pts.last().unwrap().1));
+        }
         let mut sections = Vec::new();
         for (s, r) in &stations {
             let o = p_start + t * *s;
@@ -3272,6 +3285,10 @@ pub fn fillet_variable(
                 x_dir: nalgebra::Unit::new_normalize(x),
                 normal: nalgebra::Unit::new_normalize(t),
             };
+            if *r == 0.0 {
+                sections.push((Vec::new(), plane));
+                continue;
+            }
             let (lp, _, _) = section_loop(
                 &corner,
                 SectionKind::Circle { r: *r },

@@ -58,3 +58,7 @@
 64-sketch-tangent-arc-chain
 65-sketch-gear-tooth
 66-sketch-linkage
+77-fillet-variable-linear
+78-fillet-variable-to-zero
+79-fillet-chord-length
+81-fillet-spline-radius
