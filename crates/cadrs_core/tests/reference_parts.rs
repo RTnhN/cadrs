@@ -28,8 +28,8 @@ use cadrs_core::applied::{
     HolePoint, ShellFeature, VertexRadius,
 };
 use cadrs_core::commands::{
-    AddExtrude, AddFeature, AddRevolve, AddSketch, DeleteFeature, EditSketch, SetExtrude,
-    SetRevolve,
+    AddExtrude, AddFeature, AddRevolve, AddSketch, DeleteFeature, EditSketch, ReplaceFeature,
+    SetExtrude, SetRevolve,
 };
 use cadrs_core::document::{
     AxisRef, BodyType, BooleanFeature, BooleanKind, BooleanOp, DeletePartFeature, DirectionRef,
@@ -45,8 +45,14 @@ use cadrs_core::pattern::{MirrorFeature, MirrorPlane, PatternFeature, PatternKin
 use cadrs_core::plane::{PlaneEntity, PlaneFeature, PlaneType};
 use cadrs_core::rebuild::Rebuilder;
 use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
+use cadrs_core::sheetmetal::{
+    CurveRef as SmCurveRef, SheetMetalExprs, SheetMetalModelFeature, SheetMetalOp,
+};
+use cadrs_core::sheetmetal_features::{FlangeFeature, HemFeature, SheetMetalFeature};
 use cadrs_core::surfacing::{FillEdge, FillFeature, ThickenFeature};
 use cadrs_core::{ElementId, Feature, FeatureId, History, Part, PartId};
+use cadrs_sheetmetal::model::HemAlignment;
+use cadrs_sheetmetal::sharp_edit::{FlangeAlignment, HemKind};
 use cadrs_sketch::region::regions;
 use cadrs_sketch::{
     ConstraintSpec, CurveId, CurveKind, CurveRef, CurveSpec, Dimension, DimensionKind, Orient,
@@ -163,6 +169,42 @@ struct Recipe {
     notes: Vec<String>,
     /// Sketches of a fitted spline through points on a helix, made a Helix feature instead.
     helices: HashMap<String, FeatureId>,
+    /// The sheet metal model and its rule as now edited.
+    sheet: Option<(FeatureId, Rule)>,
+}
+
+/// A sheet metal rule (SolidCraft's, as its recipes name and edit them).
+#[derive(Clone, Copy)]
+struct Rule {
+    thickness: f64,
+    /// The inner bend radius; `None`: the thickness.
+    bend_radius: Option<f64>,
+    k_factor: f64,
+}
+
+impl Rule {
+    /// "Steel (mm)": 2.5 thick, the bend radius the thickness, K 0.44 (reference part 74's
+    /// bend allowance (π/2)(R + K t) = 5.654866776), walls at a corner the thickness apart
+    /// (69's tray).
+    fn named(name: &str) -> R<Rule> {
+        match name {
+            "Steel (mm)" => Ok(Rule {
+                thickness: 2.5,
+                bend_radius: None,
+                k_factor: 0.44,
+            }),
+            other => unsupported(format!("sheet metal rule `{other}`")),
+        }
+    }
+
+    fn params(&self) -> cadrs_sheetmetal::Params {
+        let mut p = SheetMetalModelFeature::default_params();
+        p.thickness = self.thickness;
+        p.bend_radius = self.bend_radius.unwrap_or(self.thickness);
+        p.k_factor = self.k_factor;
+        p.minimal_gap = self.thickness;
+        p
+    }
 }
 
 impl Recipe {
@@ -181,6 +223,7 @@ impl Recipe {
             params: HashMap::new(),
             notes: Vec::new(),
             helices: HashMap::new(),
+            sheet: None,
         }
     }
 
@@ -1310,6 +1353,159 @@ impl Recipe {
                     "Delete part",
                     FeatureKind::DeletePart(DeletePartFeature { parts }),
                 )?
+            }
+            "sm_flange" => match f["type"].as_str().unwrap_or("") {
+                // The sheet metal model: a sketch region thickened, or open curves extruded.
+                kind @ ("base" | "contour") => {
+                    if self.sheet.is_some() {
+                        return unsupported("a second sheet metal model");
+                    }
+                    let rule = Rule::named(f["rule"].as_str().unwrap_or(""))?;
+                    let params = rule.params();
+                    let mut m = SheetMetalModelFeature {
+                        params,
+                        exprs: SheetMetalExprs::of(&params),
+                        ..SheetMetalModelFeature::default()
+                    };
+                    if kind == "base" {
+                        let profiles = self.profiles(f)?;
+                        m.operation = SheetMetalOp::Thicken;
+                        m.regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+                    } else {
+                        let sname = f["profile_sketch"].as_str().unwrap_or("");
+                        let Some(info) = self.sketches.get(sname) else {
+                            return unsupported(format!("contour of unknown sketch `{sname}`"));
+                        };
+                        let sketch = info.id;
+                        m.operation = SheetMetalOp::Extrude;
+                        m.curves = f["profile_curves"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .map(|c| {
+                                Ok(SmCurveRef {
+                                    sketch,
+                                    curve: curve_ref(info, c)?,
+                                })
+                            })
+                            .collect::<R<Vec<_>>>()?;
+                        let d = self.num(f.get("distance"))?;
+                        m.depth = d;
+                        m.depth_expr = format!("{d} mm");
+                        // The width runs along the recipe sketch's normal.
+                        m.flip_extrude = self.against(sketch);
+                    }
+                    let before = self.ids();
+                    let id = self.add("Sheet metal model", FeatureKind::SheetMetalModel(m))?;
+                    self.sheet = Some((id, rule));
+                    self.name_bodies(f, id, &before)?;
+                    id
+                }
+                "edge" => {
+                    let edges = self.edges_of(f, None)?;
+                    let h = self.num(f.get("height"))?;
+                    let a = self.num(f.get("angle"))?;
+                    if f["height_datum"]
+                        .as_str()
+                        .is_some_and(|d| !d.starts_with("Outer"))
+                        || f["bend_position"]
+                            .as_str()
+                            .is_some_and(|b| !b.starts_with("Inside"))
+                    {
+                        return unsupported("a flange other than outer-face height, bend inside");
+                    }
+                    self.add(
+                        "Flange",
+                        FeatureKind::SheetMetal(SheetMetalFeature::Flange(FlangeFeature {
+                            edges,
+                            // The flange's outside face on the edge; its height from the outer
+                            // virtual sharp.
+                            alignment: FlangeAlignment::Outer,
+                            distance: h,
+                            distance_expr: format!("{h} mm"),
+                            angle: a,
+                            angle_expr: format!("{a} deg"),
+                            flip: f["flip"].as_bool().unwrap_or(false),
+                            ..FlangeFeature::default()
+                        })),
+                    )?
+                }
+                other => return unsupported(format!("sm_flange `{other}`")),
+            },
+            "sm_hem" => {
+                if f["type"].as_str() != Some("flat") {
+                    return unsupported(format!("hem `{}`", f["type"]));
+                }
+                let edges = self.edges_of(&serde_json::json!({ "edges": [f["edge"]] }), None)?;
+                let l = self.num(f.get("length"))?;
+                self.add(
+                    "Hem",
+                    FeatureKind::SheetMetal(SheetMetalFeature::Hem(HemFeature {
+                        edges,
+                        kind: HemKind::Straight,
+                        // SolidCraft's flat hem has a gap of 0.01 (its rule's hem gap): an inner
+                        // radius of that.
+                        flattened: false,
+                        radius: 0.01,
+                        radius_expr: "0.01 mm".into(),
+                        total: l,
+                        total_expr: format!("{l} mm"),
+                        // Its bend starts at the edge ("StartEdge").
+                        alignment: if f["bend_position"].as_str() == Some("StartEdge") {
+                            HemAlignment::InPlace
+                        } else {
+                            HemAlignment::Outer
+                        },
+                        // Unflipped, the recipe folds the hem inward, over the part (cadrs'
+                        // flip arrow).
+                        flip: !f["flipped"].as_bool().unwrap_or(false),
+                        ..HemFeature::default()
+                    })),
+                )?
+            }
+            "sheet_metal_rule_edit" => {
+                let Some((id, mut rule)) = self.sheet else {
+                    return unsupported("a rule edit with no sheet metal model");
+                };
+                let mm = |v: &str| v.trim().trim_end_matches("mm").trim().parse::<f64>().ok();
+                let mut set = |k: &str, v: &str| -> R<()> {
+                    let x = mm(v).map_or_else(|| unsupported(format!("rule value `{v}`")), Ok)?;
+                    match k {
+                        "thickness" => rule.thickness = x,
+                        "bendRadius" => rule.bend_radius = Some(x),
+                        "kFactor" => rule.k_factor = x,
+                        other => return unsupported(format!("rule setting `{other}`")),
+                    }
+                    Ok(())
+                };
+                if let Some(m) = f["set"].as_object() {
+                    for (k, v) in m {
+                        set(k, v.as_str().unwrap_or(""))?;
+                    }
+                }
+                // Edits one after another: the last state stands.
+                for step in f["sequence"].as_array().into_iter().flatten() {
+                    let step = step.as_str().unwrap_or("");
+                    let (k, v) = step.split_once(' ').unwrap_or((step, ""));
+                    set(k, v)?;
+                }
+                let mut feature = self
+                    .features_now()
+                    .into_iter()
+                    .find(|x| x.id == id)
+                    .unwrap();
+                if let FeatureKind::SheetMetalModel(m) = &mut feature.kind {
+                    m.params = rule.params();
+                    m.exprs = SheetMetalExprs::of(&m.params);
+                }
+                self.exec(&ReplaceFeature {
+                    element: self.el,
+                    feature,
+                    label: "Edit rule".into(),
+                })?;
+                self.sheet = Some((id, rule));
+                id
             }
             "path_pattern" => {
                 if f["pattern_of"].as_str().unwrap_or("features") != "features" {
