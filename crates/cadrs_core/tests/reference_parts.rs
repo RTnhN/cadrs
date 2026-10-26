@@ -1,0 +1,2080 @@
+//! Reference parts (issue #101): parts with expected values worked out independently of cadrs
+//! (closed-form geometry, or an independent kernel), rebuilt through cadrs' feature list and
+//! compared. See `tests/reference_parts/README.md`.
+//!
+//! The cases are SolidCraft's (`tests/reference_parts/solidcraft/<case>/`: `recipe.json` and
+//! `expected.json`, MIT). [`Recipe`] turns a recipe into cadrs features through the document's
+//! commands (the same ones the app and its MCP tools run); what the recipe format means
+//! follows SolidCraft's reader (`apps/solidcraft-cli/src/recipe.rs`), and the comparison its
+//! `oracle.rs`. A case using something not translated yet is reported as such, not failed.
+//! (With a command registry, #102, this becomes a recipe → registry mapping, as SolidCraft's is.)
+//!
+//! `passing.txt` lists the cases that must pass. `CADRS_BLESS=1` records the cases passing now
+//! and writes `docs/reference-parts.md`.
+#![cfg(feature = "brep")]
+#![allow(clippy::field_reassign_with_default)]
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use serde_json::Value;
+
+use cadrs_core::advanced::{
+    LoftFeature, LoftProfile, PathRef, SplitFeature, SplitToolRef, SweepFeature,
+};
+use cadrs_core::applied::{
+    ChamferFeature, EdgeOrFace, FilletFeature, HoleFeature, HolePoint, ShellFeature,
+};
+use cadrs_core::commands::{
+    AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, SetExtrude, SetRevolve,
+};
+use cadrs_core::document::{
+    AxisRef, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, Document, EdgeRef, EndCondition,
+    EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef, RevolveFeature, RevolveType,
+};
+use cadrs_core::draft::{DraftFeature, ExtrudeDraft};
+use cadrs_core::hole::{HoleEnd, HoleSpec, HoleStyle, Length};
+use cadrs_core::import::{ImportAs, ImportFormat, ImportIds, imported_document};
+use cadrs_core::mate::{ConnectorOrigin, ConnectorRef};
+use cadrs_core::parts::PartKind;
+use cadrs_core::pattern::{MirrorFeature, MirrorPlane, PatternFeature, PatternKind, PatternType};
+use cadrs_core::plane::{PlaneEntity, PlaneFeature, PlaneType};
+use cadrs_core::rebuild::Rebuilder;
+use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
+use cadrs_core::{ElementId, Feature, FeatureId, History, Part, PartId};
+use cadrs_sketch::region::regions;
+use cadrs_sketch::{
+    ConstraintSpec, CurveId, CurveKind, CurveRef, CurveSpec, Dimension, DimensionKind, Orient,
+    PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchOp, Vec2,
+};
+
+/// Volume and area: relative tolerance unless the case gives one (SolidCraft's default).
+const REL_TOL: f64 = 1e-3;
+/// Centre of mass and bounding box: this fraction of the bounding box's diagonal.
+const ABS_FRAC: f64 = 1e-3;
+
+type V3 = [f64; 3];
+
+fn dot(a: V3, b: V3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn add(a: V3, b: V3) -> V3 {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+fn sub(a: V3, b: V3) -> V3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn scale(a: V3, k: f64) -> V3 {
+    [a[0] * k, a[1] * k, a[2] * k]
+}
+fn cross(a: V3, b: V3) -> V3 {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+fn norm(a: V3) -> f64 {
+    dot(a, a).sqrt()
+}
+fn unit(a: V3) -> V3 {
+    scale(a, 1.0 / norm(a).max(1e-300))
+}
+
+fn v3(v: &Value) -> Option<V3> {
+    let a = v.as_array()?;
+    Some([
+        a.first()?.as_f64()?,
+        a.get(1)?.as_f64()?,
+        a.get(2)?.as_f64()?,
+    ])
+}
+fn v2(v: &Value) -> Option<[f64; 2]> {
+    let a = v.as_array()?;
+    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?])
+}
+
+/// Why a case wasn't built: not translated yet, or cadrs failed on it.
+enum Stop {
+    Unsupported(String),
+    Failed(String),
+}
+
+type R<T> = Result<T, Stop>;
+
+fn unsupported<T>(what: impl Into<String>) -> R<T> {
+    Err(Stop::Unsupported(what.into()))
+}
+fn failed<T>(what: impl Into<String>) -> R<T> {
+    Err(Stop::Failed(what.into()))
+}
+
+/// A plane frame: origin, sketch axes and normal.
+#[derive(Clone, Copy, Debug)]
+struct Frame {
+    o: V3,
+    x: V3,
+    y: V3,
+    n: V3,
+}
+
+/// The default planes: Top (x, y), Front (x, z; normal −y), Right (y, z).
+const STD: [(PlaneRef, V3, V3); 3] = [
+    (PlaneRef::Top, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    (PlaneRef::Front, [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    (PlaneRef::Right, [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+];
+
+/// A recipe sketch as built: its feature, the recipe's frame and the cadrs plane's, and each
+/// recipe entity's cadrs curve or point.
+struct SketchInfo {
+    id: FeatureId,
+    recipe: Frame,
+    cadrs: Frame,
+    ents: HashMap<String, Ent>,
+}
+
+/// A recipe sketch entity in cadrs: its curve (or point), and whether drawing it
+/// counter-clockwise swapped an arc's start and end.
+#[derive(Clone, Copy)]
+struct Ent {
+    curve: Option<CurveId>,
+    point: Option<PointId>,
+    swapped: bool,
+}
+
+struct Recipe {
+    d: Document,
+    h: History,
+    el: ElementId,
+    sketches: HashMap<String, SketchInfo>,
+    features: HashMap<String, FeatureId>,
+    bodies: HashMap<String, PartId>,
+    /// Construction planes: name → (cadrs plane, frame).
+    planes: HashMap<String, (PlaneRef, Frame)>,
+    /// Offset planes made for sketches and sections, by (default plane, offset).
+    offsets: Vec<(usize, f64, PlaneRef)>,
+    params: HashMap<String, f64>,
+    notes: Vec<String>,
+}
+
+impl Recipe {
+    fn new() -> Self {
+        let d = Document::new("Reference part");
+        let el = d.elements[0].id;
+        Self {
+            d,
+            h: History::default(),
+            el,
+            sketches: HashMap::new(),
+            features: HashMap::new(),
+            bodies: HashMap::new(),
+            planes: HashMap::new(),
+            offsets: Vec::new(),
+            params: HashMap::new(),
+            notes: Vec::new(),
+        }
+    }
+
+    fn features_now(&self) -> Vec<Feature> {
+        self.d.element(self.el).unwrap().features().to_vec()
+    }
+
+    fn exec(&mut self, c: &dyn cadrs_core::Command) -> R<()> {
+        self.h
+            .execute(&mut self.d, c)
+            .map_err(|e| Stop::Failed(format!("command: {e}")))
+    }
+
+    fn add(&mut self, base: &str, kind: FeatureKind) -> R<FeatureId> {
+        let feature = FeatureId::new();
+        self.exec(&AddFeature {
+            element: self.el,
+            feature,
+            base_name: base.into(),
+            kind,
+        })?;
+        Ok(feature)
+    }
+
+    /// The parts now, failing if the last feature didn't build.
+    fn parts(&self, after: FeatureId) -> R<Vec<Part>> {
+        let b = cadrs_core::rebuild::build(&self.features_now());
+        if let Some(e) = b.error(after) {
+            return failed(e.to_string());
+        }
+        Ok(b.parts.clone())
+    }
+
+    fn num(&self, v: Option<&Value>) -> R<f64> {
+        match v {
+            Some(Value::Number(n)) => Ok(n.as_f64().unwrap_or(f64::NAN)),
+            Some(Value::String(s)) => {
+                eval(s, &self.params).map_or_else(|| unsupported(format!("expression `{s}`")), Ok)
+            }
+            _ => unsupported("a missing number"),
+        }
+    }
+
+    /// The cadrs plane for a frame: a default plane, or an offset Plane feature parallel to one.
+    fn cadrs_plane(&mut self, o: V3, n: V3) -> R<(PlaneRef, Frame)> {
+        let n = unit(n);
+        let Some((k, (pr, x, y))) = STD
+            .iter()
+            .enumerate()
+            .find(|(_, (_, x, y))| dot(cross(*x, *y), n).abs() > 1.0 - 1e-9)
+        else {
+            return unsupported("a plane not parallel to a default plane");
+        };
+        let nc = cross(*x, *y);
+        let off = dot(o, nc);
+        let frame = Frame {
+            o: scale(nc, off),
+            x: *x,
+            y: *y,
+            n: nc,
+        };
+        if off.abs() < 1e-9 {
+            return Ok((*pr, frame));
+        }
+        if let Some((.., p)) = self
+            .offsets
+            .iter()
+            .find(|(kk, oo, _)| *kk == k && (oo - off).abs() < 1e-9)
+        {
+            return Ok((*p, frame));
+        }
+        let id = self.add(
+            "Plane",
+            FeatureKind::Plane(PlaneFeature {
+                kind: PlaneType::Offset,
+                entities: vec![PlaneEntity::Plane(*pr)],
+                offset: off,
+                offset_expr: format!("{off} mm"),
+                ..PlaneFeature::default()
+            }),
+        )?;
+        let p = cadrs_core::parts::plane_feature_ref(&self.features_now(), id)
+            .ok_or_else(|| Stop::Failed("the offset plane didn't build".into()))?;
+        self.offsets.push((k, off, p));
+        Ok((p, frame))
+    }
+
+    /// A recipe plane (`{ref, origin, x_dir, y_dir, normal}`) as its frame.
+    fn recipe_frame(&self, pl: &Value) -> R<Frame> {
+        let r = pl.get("ref").and_then(Value::as_str).unwrap_or("");
+        let std = |x: V3, y: V3| Frame {
+            o: [0.0; 3],
+            x,
+            y,
+            n: cross(x, y),
+        };
+        let (Some(x), Some(y)) = (pl.get("x_dir").and_then(v3), pl.get("y_dir").and_then(v3))
+        else {
+            // SolidCraft's default frames (`recipe.rs`).
+            return match r.to_ascii_uppercase().as_str() {
+                "XY" => Ok(std([1.0, 0.0, 0.0], [0.0, 1.0, 0.0])),
+                "XZ" => Ok(std([1.0, 0.0, 0.0], [0.0, 0.0, -1.0])),
+                "YZ" => Ok(std([0.0, 1.0, 0.0], [0.0, 0.0, 1.0])),
+                _ => unsupported(format!("plane `{r}` without axes")),
+            };
+        };
+        let o = pl.get("origin").and_then(v3).unwrap_or([0.0; 3]);
+        Ok(Frame {
+            o,
+            x,
+            y,
+            n: cross(x, y),
+        })
+    }
+
+    fn sketch(&mut self, f: &Value) -> R<()> {
+        let name = f["name"].as_str().unwrap_or("").to_string();
+        let rf = self.recipe_frame(&f["plane"])?;
+        let (pr, cf) = self.cadrs_plane(rf.o, rf.n)?;
+        let id = FeatureId::new();
+        self.exec(&AddSketch {
+            element: self.el,
+            feature: id,
+            plane: Some(pr),
+        })?;
+        // Recipe sketch coordinates → cadrs sketch coordinates, through world space.
+        let map = |p: [f64; 2]| -> Vec2 {
+            let w = add(add(rf.o, scale(rf.x, p[0])), scale(rf.y, p[1]));
+            let d = sub(w, cf.o);
+            Vec2::new(dot(d, cf.x), dot(d, cf.y))
+        };
+        let pt = |v: &Value| -> R<[f64; 2]> {
+            v.get("at")
+                .and_then(v2)
+                .or_else(|| v2(v))
+                .map_or_else(|| unsupported("a sketch point without `at`"), Ok)
+        };
+        let mut ents: HashMap<String, Ent> = HashMap::new();
+        for e in f["entities"].as_array().into_iter().flatten() {
+            let eid = e["id"].as_str().unwrap_or("").to_string();
+            let construction = e["construction"].as_bool().unwrap_or(false);
+            let (op, swapped) = match e["type"].as_str().unwrap_or("") {
+                "line" => (
+                    SketchOp::AddPolyline {
+                        points: vec![map(pt(&e["start"])?), map(pt(&e["end"])?)],
+                        closed: false,
+                        construction,
+                        label: "Add line",
+                    },
+                    false,
+                ),
+                "circle" => (
+                    SketchOp::AddCircle {
+                        center: map(pt(&e["center"])?),
+                        radius: self.num(e.get("radius"))?,
+                        construction,
+                    },
+                    false,
+                ),
+                "arc_three_point" | "arc_center_start_sweep" => {
+                    // Three recipe points along the arc: start, middle, end.
+                    let (s, m, e2) = if e["type"] == "arc_three_point" {
+                        (
+                            pt(&e["start"])?,
+                            pt(e.get("mid").or(e.get("through")).unwrap_or(&Value::Null))?,
+                            pt(&e["end"])?,
+                        )
+                    } else {
+                        let c = pt(&e["center"])?;
+                        let s = pt(&e["start"])?;
+                        let sweep = self
+                            .num(e.get("sweep_deg").or(e.get("sweep")))?
+                            .to_radians();
+                        let rot = |t: f64| {
+                            let (dx, dy) = (s[0] - c[0], s[1] - c[1]);
+                            [
+                                c[0] + dx * t.cos() - dy * t.sin(),
+                                c[1] + dx * t.sin() + dy * t.cos(),
+                            ]
+                        };
+                        (s, rot(sweep / 2.0), rot(sweep))
+                    };
+                    let (s, m, e2) = (map(s), map(m), map(e2));
+                    let Some(c) = circumcentre(s, m, e2) else {
+                        return failed(format!(
+                            "{name}/{eid}: an arc through three collinear points"
+                        ));
+                    };
+                    // AddArc runs counter-clockwise: from the end whose way round passes the
+                    // middle (the recipe's start and end then swap places).
+                    let ang = |p: Vec2| (p.y - c.y).atan2(p.x - c.x);
+                    let ccw = |a: f64, b: f64| (b - a).rem_euclid(std::f64::consts::TAU);
+                    let swapped = ccw(ang(s), ang(m)) >= ccw(ang(s), ang(e2));
+                    let (from, to) = if swapped { (e2, s) } else { (s, e2) };
+                    (
+                        SketchOp::AddArc {
+                            center: c,
+                            start: from,
+                            end: to,
+                            construction,
+                        },
+                        swapped,
+                    )
+                }
+                "point" => (SketchOp::AddPoint { pos: map(pt(e)?) }, false),
+                other => return unsupported(format!("sketch entity `{other}`")),
+            };
+            let before = self.geometry(id);
+            let is_point = matches!(op, SketchOp::AddPoint { .. });
+            self.exec(&EditSketch {
+                element: self.el,
+                feature: id,
+                op,
+            })?;
+            let g = self.geometry(id);
+            let ent = if is_point {
+                let p = g.points.keys().find(|k| !before.points.contains_key(*k));
+                Ent {
+                    curve: None,
+                    point: p,
+                    swapped,
+                }
+            } else {
+                let c = g.curves.keys().find(|k| !before.curves.contains_key(*k));
+                if c.is_none() {
+                    return failed(format!("{name}/{eid}: drawn over another curve"));
+                }
+                Ent {
+                    curve: c,
+                    point: None,
+                    swapped,
+                }
+            };
+            ents.insert(eid, ent);
+        }
+        // Constraints: all at once, on the geometry as drawn; then the dimensions.
+        let info = SketchInfo {
+            id,
+            recipe: rf,
+            cadrs: cf,
+            ents,
+        };
+        // A recipe "horizontal" is along the recipe's x axis: cadrs' u, or its v when turned.
+        let turned = dot(rf.x, cf.x).abs() < 0.5;
+        let origin = map([0.0, 0.0]);
+        if (origin.x.abs() + origin.y.abs()) > 1e-9
+            && (f["constraints"].to_string().contains("origin")
+                || f["dimensions"].to_string().contains("origin"))
+        {
+            return unsupported("a sketch origin away from the cadrs plane's");
+        }
+        let g = self.geometry(id);
+        let mut specs = Vec::new();
+        for c in f["constraints"].as_array().into_iter().flatten() {
+            specs.push(constraint_spec(&info, &g, c, turned)?);
+        }
+        if !specs.is_empty() {
+            self.exec(&EditSketch {
+                element: self.el,
+                feature: id,
+                op: SketchOp::AddConstraints(specs),
+            })?;
+        }
+        for d in f["dimensions"].as_array().into_iter().flatten() {
+            let g = self.geometry(id);
+            let value = self.num(d.get("value"))?;
+            let kind = dimension_kind(&info, &g, d, turned, value)?;
+            self.exec(&EditSketch {
+                element: self.el,
+                feature: id,
+                op: SketchOp::SetDimension {
+                    dimension: Dimension::new(kind, value, 10.0),
+                    moves: vec![],
+                    radii: vec![],
+                },
+            })?;
+        }
+        self.sketches.insert(name.clone(), info);
+        self.features.insert(name, id);
+        Ok(())
+    }
+
+    fn geometry(&self, id: FeatureId) -> Sketch {
+        self.d
+            .element(self.el)
+            .unwrap()
+            .feature(id)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry
+            .clone()
+    }
+
+    /// A profile (`{sketch, loops: [{outer, curves}]}`) as the cadrs regions it covers: each
+    /// region whose inside lies within an odd number of the profile's loops.
+    fn regions_of(&self, p: &Value) -> R<(FeatureId, Vec<RegionRef>)> {
+        let sname = p["sketch"].as_str().unwrap_or("");
+        let Some(s) = self.sketches.get(sname) else {
+            return unsupported(format!("profile of unknown sketch `{sname}`"));
+        };
+        let g = self.geometry(s.id);
+        let rs = regions(&g);
+        // The arrangement's faces the loops bound (as the format means a profile): a region
+        // whose outer boundary runs along one outer loop's curves and whose holes along the
+        // inner loops'. Failing that, the regions inside an odd number of the loops' outlines.
+        let curves_of = |l: &Value| -> R<Vec<CurveId>> {
+            l["curves"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|id| curve_ref(s, id))
+                .collect()
+        };
+        let mut outers = Vec::new();
+        let mut inners = Vec::new();
+        for l in p["loops"].as_array().into_iter().flatten() {
+            if l["outer"].as_bool().unwrap_or(true) {
+                outers.push(curves_of(l)?);
+            } else {
+                inners.extend(curves_of(l)?);
+            }
+        }
+        let by_curves: Vec<RegionRef> = rs
+            .iter()
+            .filter(|r| {
+                outers
+                    .iter()
+                    .any(|o| r.outer_curves.iter().all(|c| o.contains(c)))
+                    && r.hole_curves
+                        .iter()
+                        .all(|h| h.iter().all(|c| inners.contains(c)))
+            })
+            .map(|r| RegionRef::new(s.id, r))
+            .collect();
+        if !by_curves.is_empty() {
+            return Ok((s.id, by_curves));
+        }
+        let mut loops = Vec::new();
+        for l in p["loops"].as_array().into_iter().flatten() {
+            let mut ids: Vec<&str> = l["curves"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            ids.dedup();
+            let mut pieces = Vec::new();
+            for id in ids {
+                match s.ents.get(id).and_then(|e| e.curve) {
+                    Some(c) => pieces.push(polyline(&g, c)),
+                    None => return unsupported(format!("loop curve `{id}`")),
+                }
+            }
+            loops.push(chain(pieces));
+        }
+        if loops.is_empty() {
+            return unsupported("a profile without loops");
+        }
+        let picked: Vec<RegionRef> = rs
+            .iter()
+            .filter(|r| {
+                let q = inside_point(r);
+                loops.iter().filter(|l| point_in_polygon(q, l)).count() % 2 == 1
+            })
+            .map(|r| RegionRef::new(s.id, r))
+            .collect();
+        if picked.is_empty() {
+            return failed(format!("no region of `{sname}` inside the profile"));
+        }
+        Ok((s.id, picked))
+    }
+
+    fn profiles(&self, f: &Value) -> R<Vec<(FeatureId, Vec<RegionRef>)>> {
+        let list: Vec<Value> = match (f.get("profiles"), f.get("profile")) {
+            (Some(Value::Array(a)), _) => a.clone(),
+            (None, Some(p)) => vec![p.clone()],
+            _ => return unsupported("a feature without profiles"),
+        };
+        list.iter().map(|p| self.regions_of(p)).collect()
+    }
+
+    fn op_of(f: &Value) -> R<BooleanOp> {
+        match f["operation"].as_str().unwrap_or("new") {
+            "new" | "new_body" => Ok(BooleanOp::New),
+            "join" => Ok(BooleanOp::Add),
+            "cut" => Ok(BooleanOp::Remove),
+            "intersect" => Ok(BooleanOp::Intersect),
+            o => unsupported(format!("operation `{o}`")),
+        }
+    }
+
+    /// Whether the recipe's "positive" (its sketch plane's normal) is against cadrs' normal.
+    fn against(&self, sketch: FeatureId) -> bool {
+        self.sketches
+            .values()
+            .find(|s| s.id == sketch)
+            .is_some_and(|s| dot(s.recipe.n, s.cadrs.n) < 0.0)
+    }
+
+    /// Names the parts a feature made or kept: `result_bodies` in order.
+    fn name_bodies(&mut self, f: &Value, id: FeatureId, before: &[PartId]) -> R<()> {
+        let parts = self.parts(id)?;
+        let names: Vec<String> = f["result_bodies"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect();
+        let mut fresh: Vec<PartId> = parts
+            .iter()
+            .filter(|p| !before.contains(&p.id))
+            .map(|p| p.id)
+            .collect();
+        for n in names {
+            if self
+                .bodies
+                .get(&n)
+                .is_some_and(|p| parts.iter().any(|x| x.id == *p))
+            {
+                continue;
+            }
+            if !fresh.is_empty() {
+                self.bodies.insert(n, fresh.remove(0));
+            }
+        }
+        Ok(())
+    }
+
+    fn ids(&self) -> Vec<PartId> {
+        let b = cadrs_core::rebuild::build(&self.features_now());
+        b.parts.iter().map(|p| p.id).collect()
+    }
+
+    fn extrude(&mut self, f: &Value) -> R<FeatureId> {
+        if f.get("thin").is_some_and(|t| !t.is_null()) {
+            return unsupported("thin extrude");
+        }
+        let profiles = self.profiles(f)?;
+        let sketch = profiles[0].0;
+        let regions: Vec<RegionRef> = profiles.into_iter().flat_map(|(_, r)| r).collect();
+        let mut e = ExtrudeFeature {
+            regions,
+            op: Self::op_of(f)?,
+            ..ExtrudeFeature::default()
+        };
+        let x = &f["extent"];
+        let negative = x["direction"].as_str() == Some("negative");
+        let against = self.against(sketch);
+        match x["type"].as_str().unwrap_or("distance") {
+            "distance" => {
+                e.depth = self.num(x.get("distance").or(f.get("distance")))?;
+                e.flip = negative != against;
+            }
+            "through_all" => {
+                e.end = EndType::ThroughAll;
+                e.flip = negative != against;
+            }
+            "symmetric" => {
+                let d = self.num(x.get("distance"))?;
+                let full = x["is_full_length"].as_bool().unwrap_or(false);
+                // cadrs' symmetric depth is the total.
+                e.depth = if full { d } else { 2.0 * d };
+                e.symmetric = true;
+            }
+            "two_sides" => {
+                e.depth = self.num(x.get("side1"))?;
+                let d2 = self.num(x.get("side2_opposite").or(x.get("side2")))?;
+                e.second = Some(EndCondition {
+                    end: EndType::Blind,
+                    depth: d2,
+                    depth_expr: format!("{d2} mm"),
+                    up_to: None,
+                    offset: None,
+                });
+                e.flip = against;
+            }
+            t => return unsupported(format!("extent `{t}`")),
+        }
+        e.depth_expr = format!("{} mm", e.depth);
+        if let Some(t) = x.get("taper_deg") {
+            let t = self.num(Some(t))?;
+            // A positive taper grows outward (SolidCraft); cadrs' draft leans in unless flipped.
+            e.draft = Some(ExtrudeDraft {
+                angle: t.abs(),
+                expr: format!("{} deg", t.abs()),
+                flip: t > 0.0,
+            });
+        }
+        let before = self.ids();
+        let id = FeatureId::new();
+        self.exec(&AddExtrude {
+            element: self.el,
+            feature: id,
+            extrude: ExtrudeFeature::default(),
+        })?;
+        self.exec(&SetExtrude {
+            element: self.el,
+            feature: id,
+            extrude: e,
+            label: "Extrude".into(),
+        })?;
+        self.name_bodies(f, id, &before)?;
+        Ok(id)
+    }
+
+    fn revolve(&mut self, f: &Value) -> R<FeatureId> {
+        let a = &f["axis"];
+        let (o, dir) = (
+            a.get("origin").and_then(v3).unwrap_or([0.0; 3]),
+            a.get("dir").and_then(v3),
+        );
+        if dir.is_none_or(|d| norm(sub(unit(d), [0.0, 0.0, 1.0])) > 1e-9) || norm(o) > 1e-9 {
+            return unsupported("a revolve axis other than the world Z axis");
+        }
+        let profiles = self.profiles(f)?;
+        let regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+        let angle = self.num(f.get("angle"))?;
+        let r = RevolveFeature {
+            regions,
+            op: Self::op_of(f)?,
+            axis: Some(AxisRef::Connector(ConnectorRef::Implicit(
+                ConnectorOrigin::Origin,
+            ))),
+            kind: if (angle - 360.0).abs() < 1e-9 {
+                RevolveType::Full
+            } else {
+                RevolveType::Blind
+            },
+            angle,
+            angle_expr: format!("{angle} deg"),
+            ..RevolveFeature::default()
+        };
+        let before = self.ids();
+        let id = FeatureId::new();
+        self.exec(&AddRevolve {
+            element: self.el,
+            feature: id,
+            revolve: RevolveFeature::default(),
+        })?;
+        self.exec(&SetRevolve {
+            element: self.el,
+            feature: id,
+            revolve: r,
+            label: "Revolve".into(),
+        })?;
+        self.name_bodies(f, id, &before)?;
+        Ok(id)
+    }
+
+    /// The part edge nearest a world point.
+    fn edge(&self, parts: &[Part], p: V3) -> R<EdgeRef> {
+        let best = parts
+            .iter()
+            .flat_map(|part| part.solid.edges.iter().map(move |e| (part, e)))
+            .map(|(part, e)| (e.distance(p), part, e))
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        match best {
+            Some((d, part, e)) if d < 1e-2 => Ok(EdgeRef {
+                part: part.id,
+                edge: e.name,
+                seed: p,
+            }),
+            _ => failed(format!("no edge at {p:?}")),
+        }
+    }
+
+    /// The part face nearest a world point.
+    fn face(&self, parts: &[Part], p: V3) -> R<FaceRef> {
+        let mut best: Option<(f64, &Part, usize)> = None;
+        for part in parts {
+            let s = &part.solid;
+            for (i, f) in s.faces.iter().enumerate() {
+                let d = (f.first_triangle..f.first_triangle + f.triangle_count)
+                    .map(|t| {
+                        let [a, b, c] =
+                            [0, 1, 2].map(|k| s.positions[s.indices[3 * t + k] as usize]);
+                        point_triangle(p, a, b, c)
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                if best.is_none_or(|b| d < b.0) {
+                    best = Some((d, part, i));
+                }
+            }
+        }
+        match best {
+            Some((d, part, i)) if d < 0.1 => Ok(FaceRef {
+                part: part.id,
+                face: part.solid.faces[i].name,
+                seed: p,
+            }),
+            _ => failed(format!("no face at {p:?}")),
+        }
+    }
+
+    fn edges_of(&self, f: &Value, after: Option<FeatureId>) -> R<Vec<EdgeOrFace>> {
+        let parts = match after {
+            Some(a) => self.parts(a)?,
+            None => cadrs_core::rebuild::build(&self.features_now())
+                .parts
+                .clone(),
+        };
+        f["edges"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|e| {
+                let p = e
+                    .get("point")
+                    .or(e.get("mid"))
+                    .and_then(v3)
+                    .unwrap_or([f64::NAN; 3]);
+                self.edge(&parts, p).map(EdgeOrFace::Edge)
+            })
+            .collect()
+    }
+
+    fn faces_of(&self, list: &Value) -> R<Vec<FaceRef>> {
+        let parts = cadrs_core::rebuild::build(&self.features_now())
+            .parts
+            .clone();
+        list.as_array()
+            .into_iter()
+            .flatten()
+            .map(|x| {
+                let p = x.get("point").and_then(v3).unwrap_or([f64::NAN; 3]);
+                self.face(&parts, p)
+            })
+            .collect()
+    }
+
+    /// Features named by a recipe (`"Hole1"`, `"Hole1 (1)"`).
+    fn feature_list(&self, v: &Value) -> R<Vec<FeatureId>> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(|s| {
+                let t = s.trim();
+                let base = match t.rfind(" (") {
+                    Some(i) if t.ends_with(')') => &t[..i],
+                    _ => t,
+                };
+                self.features
+                    .get(base)
+                    .copied()
+                    .map_or_else(|| unsupported(format!("feature `{s}`")), Ok)
+            })
+            .collect()
+    }
+
+    fn body(&self, v: &Value) -> R<PartId> {
+        let n = v.as_str().unwrap_or("");
+        self.bodies
+            .get(n)
+            .copied()
+            .map_or_else(|| unsupported(format!("body `{n}`")), Ok)
+    }
+
+    /// A direction along a world axis, as a default plane's normal.
+    fn axis_direction(d: V3) -> R<(DirectionRef, bool)> {
+        let d = unit(d);
+        for (pr, x, y) in STD {
+            let n = cross(x, y);
+            let c = dot(n, d);
+            if c.abs() > 1.0 - 1e-9 {
+                return Ok((DirectionRef::PlaneNormal(pr), c < 0.0));
+            }
+        }
+        unsupported("a pattern direction off the world axes")
+    }
+
+    /// A recipe plane given by reference (`XY`, a construction plane's name) or frame.
+    fn plane_ref(&mut self, v: &Value) -> R<PlaneRef> {
+        if let Some(s) = v.as_str().or(v.get("ref").and_then(Value::as_str)) {
+            if let Some((p, _)) = self.planes.get(s) {
+                return Ok(*p);
+            }
+            match s.to_ascii_uppercase().as_str() {
+                "XY" => return Ok(PlaneRef::Top),
+                "XZ" => return Ok(PlaneRef::Front),
+                "YZ" => return Ok(PlaneRef::Right),
+                _ => {}
+            }
+        }
+        match (v.get("origin").and_then(v3), v.get("normal").and_then(v3)) {
+            (Some(o), Some(n)) => Ok(self.cadrs_plane(o, n)?.0),
+            _ => unsupported(format!("plane {v}")),
+        }
+    }
+
+    fn feature(&mut self, f: &Value) -> R<()> {
+        let name = f["name"].as_str().unwrap_or("").to_string();
+        let op = f["op"].as_str().unwrap_or("");
+        let id = match op {
+            "sketch" => return self.sketch(f),
+            "extrude" => self.extrude(f)?,
+            "revolve" => self.revolve(f)?,
+            "construction_plane" => {
+                if f["method"].as_str() != Some("offset") {
+                    return unsupported(format!("construction plane `{}`", f["method"]));
+                }
+                let base = self.recipe_frame(&serde_json::json!({"ref": f["base"]}))?;
+                let off = self.num(f.get("offset"))?;
+                let o = add(base.o, scale(unit(base.n), off));
+                let plane = self.cadrs_plane(o, base.n)?;
+                self.planes.insert(name, plane);
+                return Ok(());
+            }
+            "fillet" => {
+                if !matches!(f["type"].as_str(), None | Some("constant_radius")) {
+                    return unsupported(format!("fillet `{}`", f["type"]));
+                }
+                let entities = self.edges_of(f, None)?;
+                let r = self.num(f.get("radius"))?;
+                self.add(
+                    "Fillet",
+                    FeatureKind::Fillet(FilletFeature {
+                        entities,
+                        size: r,
+                        size_expr: format!("{r} mm"),
+                        tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
+                        ..FilletFeature::default()
+                    }),
+                )?
+            }
+            "chamfer" => {
+                if f["type"].as_str() != Some("equal_distance") {
+                    return unsupported(format!("chamfer `{}`", f["type"]));
+                }
+                let entities = self.edges_of(f, None)?;
+                let d = self.num(f.get("distance"))?;
+                self.add(
+                    "Chamfer",
+                    FeatureKind::Chamfer(ChamferFeature {
+                        entities,
+                        distance: d,
+                        distance_expr: format!("{d} mm"),
+                        tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
+                        ..ChamferFeature::default()
+                    }),
+                )?
+            }
+            "shell" => {
+                if f["outside_thickness"].as_f64().unwrap_or(0.0) != 0.0 {
+                    return unsupported("an outside shell thickness");
+                }
+                let faces = self.faces_of(&f["faces_removed"])?;
+                let t = self.num(f.get("inside_thickness"))?;
+                self.add(
+                    "Shell",
+                    FeatureKind::Shell(ShellFeature {
+                        faces,
+                        thickness: t,
+                        thickness_expr: format!("{t} mm"),
+                        ..ShellFeature::default()
+                    }),
+                )?
+            }
+            "combine" => {
+                let kind = match f["operation"].as_str().unwrap_or("") {
+                    "join" => BooleanKind::Union,
+                    "cut" => BooleanKind::Subtract,
+                    "intersect" => BooleanKind::Intersect,
+                    o => return unsupported(format!("combine `{o}`")),
+                };
+                let target = self.body(
+                    f.get("target_body")
+                        .or(f.get("target"))
+                        .unwrap_or(&Value::Null),
+                )?;
+                let tools: Vec<PartId> = f
+                    .get("tool_bodies")
+                    .or(f.get("tools"))
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|t| self.body(t))
+                    .collect::<R<_>>()?;
+                // Union and Intersect take all their parts as tools in cadrs.
+                let (targets, tools) = match kind {
+                    BooleanKind::Union | BooleanKind::Intersect => {
+                        (vec![], [vec![target], tools].concat())
+                    }
+                    _ => (vec![target], tools),
+                };
+                self.add(
+                    "Boolean",
+                    FeatureKind::Boolean(BooleanFeature {
+                        op: kind,
+                        tools,
+                        targets,
+                        keep_tools: f["keep_tools"].as_bool().unwrap_or(false),
+                        offset: None,
+                    }),
+                )?
+            }
+            "rectangular_pattern" | "circular_pattern" => {
+                if f["pattern_of"].as_str().unwrap_or("features") != "features" {
+                    return unsupported(format!("{op} of {}", f["pattern_of"]));
+                }
+                let feats = self.feature_list(&f["features"])?;
+                let mut p;
+                if op == "rectangular_pattern" {
+                    p = PatternFeature::new(PatternKind::Linear);
+                    let d1 = &f["direction1"];
+                    let (dir, flip) = Self::axis_direction(
+                        d1["axis"]
+                            .as_array()
+                            .and_then(|_| v3(&d1["axis"]))
+                            .unwrap_or([f64::NAN; 3]),
+                    )?;
+                    p.first.direction = Some(dir);
+                    p.first.flip = flip;
+                    p.first.count = d1["count"].as_u64().unwrap_or(1) as u32;
+                    p.first.distance = self.num(d1.get("spacing"))?;
+                    let d2 = &f["direction2"];
+                    if !d2.is_null() {
+                        let (dir, flip) =
+                            Self::axis_direction(v3(&d2["axis"]).unwrap_or([f64::NAN; 3]))?;
+                        p.second_on = true;
+                        p.second.direction = Some(dir);
+                        p.second.flip = flip;
+                        p.second.count = d2["count"].as_u64().unwrap_or(1) as u32;
+                        p.second.distance = self.num(d2.get("spacing"))?;
+                    }
+                } else {
+                    let a = &f["axis"];
+                    if a.get("dir")
+                        .and_then(v3)
+                        .is_none_or(|d| norm(sub(unit(d), [0.0, 0.0, 1.0])) > 1e-9)
+                        || a.get("origin").and_then(v3).is_some_and(|o| norm(o) > 1e-9)
+                    {
+                        return unsupported("a circular pattern axis other than the world Z axis");
+                    }
+                    p = PatternFeature::new(PatternKind::Circular);
+                    p.axis = Some(AxisRef::Connector(ConnectorRef::Implicit(
+                        ConnectorOrigin::Origin,
+                    )));
+                    p.first.count = f["count"].as_u64().unwrap_or(1) as u32;
+                    let total = self.num(f.get("total_angle")).unwrap_or(360.0);
+                    p.angle = total;
+                    p.angle_expr = format!("{total} deg");
+                    p.equal_spacing = true;
+                }
+                p.pattern_type = PatternType::Feature;
+                p.features = feats;
+                self.add("Pattern", FeatureKind::Pattern(p))?
+            }
+            "mirror" => {
+                let plane = MirrorPlane::Plane(self.plane_ref(&f["plane"])?);
+                let mut m = MirrorFeature {
+                    plane: Some(plane),
+                    ..MirrorFeature::default()
+                };
+                if f["mirror_of"].as_str() == Some("bodies") {
+                    m.mirror_type = PatternType::Part;
+                    m.parts = f["bodies"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|b| self.body(b))
+                        .collect::<R<_>>()?;
+                    m.op = if f["combine"].as_bool().unwrap_or(false) {
+                        BooleanOp::Add
+                    } else {
+                        BooleanOp::New
+                    };
+                } else {
+                    m.mirror_type = PatternType::Feature;
+                    m.features = self.feature_list(&f["features"])?;
+                }
+                self.add("Mirror", FeatureKind::Mirror(m))?
+            }
+            "loft" => {
+                if f["rails"].as_array().is_some_and(|r| !r.is_empty()) {
+                    return unsupported("loft rails");
+                }
+                let mut profiles = Vec::new();
+                for s in f["sections"].as_array().into_iter().flatten() {
+                    if let Some(p) = s.get("point").and_then(Value::as_str) {
+                        // A sketch point (first or last section).
+                        let sname = s["sketch"].as_str().unwrap_or("");
+                        let Some(info) = self.sketches.get(sname) else {
+                            return unsupported(format!("loft point in `{sname}`"));
+                        };
+                        let Some(point) = info.ents.get(p).and_then(|e| e.point) else {
+                            return unsupported(format!("loft point `{p}`"));
+                        };
+                        profiles.push(LoftProfile::SketchPoint {
+                            sketch: info.id,
+                            point,
+                        });
+                        continue;
+                    }
+                    let (sketch, regions) = self.regions_of(s)?;
+                    profiles.push(LoftProfile::Regions { sketch, regions });
+                }
+                let before = self.ids();
+                let id = self.add(
+                    "Loft",
+                    FeatureKind::Loft(LoftFeature {
+                        profiles,
+                        op: Self::op_of(f)?,
+                        ..LoftFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            "sweep" => {
+                let path = &f["path"];
+                let sname = path["sketch"].as_str().unwrap_or("");
+                let Some(ps) = self.sketches.get(sname) else {
+                    return unsupported(format!("sweep path `{sname}`"));
+                };
+                let wanted: Vec<&str> = path["curves"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                if wanted.len() != ps.ents.values().filter(|e| e.curve.is_some()).count() {
+                    return unsupported("a sweep along some of a sketch's curves");
+                }
+                let path_id = ps.id;
+                let profiles = self.profiles(f)?;
+                let regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+                let before = self.ids();
+                let id = self.add(
+                    "Sweep",
+                    FeatureKind::Sweep(SweepFeature {
+                        regions,
+                        path: vec![PathRef::Sketch(path_id)],
+                        op: Self::op_of(f)?,
+                        ..SweepFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            "hole" => self.hole(f)?,
+            "draft" => {
+                let faces = self.faces_of(&f["faces"])?;
+                let np = &f["neutral_plane"];
+                let parts = cadrs_core::rebuild::build(&self.features_now())
+                    .parts
+                    .clone();
+                let neutral = match np.get("point").and_then(v3) {
+                    Some(p) => MirrorPlane::Face(self.face(&parts, p)?),
+                    None => return unsupported("a draft's neutral plane"),
+                };
+                let a = self.num(f.get("angle"))?;
+                self.add(
+                    "Draft",
+                    FeatureKind::Draft(DraftFeature {
+                        neutral: Some(neutral),
+                        faces,
+                        angle: a,
+                        angle_expr: format!("{a} deg"),
+                        flip: f["flipped"].as_bool().unwrap_or(false),
+                        ..DraftFeature::default()
+                    }),
+                )?
+            }
+            "split_body" => {
+                let body = self.body(&f["body"])?;
+                let tool = SplitToolRef::Plane(self.plane_ref(&f["tool"])?);
+                let before = self.ids();
+                let id = self.add(
+                    "Split",
+                    FeatureKind::Split(SplitFeature {
+                        parts: vec![body],
+                        tool: Some(tool),
+                        ..SplitFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            other => return unsupported(format!("`{other}`")),
+        };
+        // Report a feature that failed here, not at the end.
+        self.parts(id)?;
+        if !name.is_empty() {
+            self.features.insert(name, id);
+        }
+        Ok(())
+    }
+
+    /// A hole at a world position on a planar face, drilled into the material: a sketch point on
+    /// the face's plane and a Hole feature.
+    fn hole(&mut self, f: &Value) -> R<FeatureId> {
+        // At a sketch's points ("sketch HolePoints points p1..p6", as SolidCraft reads it).
+        if let Some(src) = f["positions_from"].as_str() {
+            let w: Vec<&str> = src.split_whitespace().collect();
+            let after = |k: &str| w.iter().position(|x| *x == k).and_then(|i| w.get(i + 1));
+            let (Some(sk), Some(range)) = (after("sketch"), after("points")) else {
+                return unsupported(format!("hole positions `{src}`"));
+            };
+            let ids: Vec<String> = match range.split_once("..") {
+                Some((a, b)) => {
+                    let pre: String = a.chars().take_while(|c| !c.is_ascii_digit()).collect();
+                    let lo = a[pre.len()..].parse::<u32>().unwrap_or(1);
+                    let hi = b
+                        .trim_start_matches(pre.as_str())
+                        .parse::<u32>()
+                        .unwrap_or(0);
+                    (lo..=hi).map(|k| format!("{pre}{k}")).collect()
+                }
+                None => range.split(',').map(str::to_string).collect(),
+            };
+            let Some(info) = self.sketches.get(*sk) else {
+                return unsupported(format!("hole sketch `{sk}`"));
+            };
+            // cadrs drills against its sketch plane's normal; the recipe into the material.
+            if f["direction"].as_str().is_some_and(|d| d.contains("-Z")) != (info.cadrs.n[2] > 0.5)
+            {
+                return unsupported("a hole drilled along its sketch plane's normal");
+            }
+            let points: Vec<HolePoint> = ids
+                .iter()
+                .map(|id| {
+                    info.ents
+                        .get(id)
+                        .and_then(|e| e.point)
+                        .map(|point| HolePoint {
+                            sketch: info.id,
+                            point,
+                        })
+                        .map_or_else(|| unsupported(format!("hole point `{id}`")), Ok)
+                })
+                .collect::<R<_>>()?;
+            let spec = self.hole_spec(f)?;
+            return self.add(
+                "Hole",
+                FeatureKind::Hole(HoleFeature {
+                    points,
+                    spec,
+                    ..HoleFeature::default()
+                }),
+            );
+        }
+        let face = &f["face"];
+        if face["type"].as_str().unwrap_or("plane") != "plane" {
+            return unsupported("a hole on a curved face");
+        }
+        let (Some(pos), Some(n)) = (
+            f.get("position").and_then(v3),
+            face.get("plane_normal_outward").and_then(v3),
+        ) else {
+            return unsupported("a hole without a position and face normal");
+        };
+        let (pr, cf) = self.cadrs_plane(pos, n)?;
+        // cadrs drills against its sketch plane's normal: the face's outward normal must be it.
+        if dot(cf.n, unit(n)) < 0.0 {
+            return unsupported("a hole drilled along a default plane's normal");
+        }
+        let s = FeatureId::new();
+        self.exec(&AddSketch {
+            element: self.el,
+            feature: s,
+            plane: Some(pr),
+        })?;
+        let d = sub(pos, cf.o);
+        let at = Vec2::new(dot(d, cf.x), dot(d, cf.y));
+        self.exec(&EditSketch {
+            element: self.el,
+            feature: s,
+            op: SketchOp::AddPoint { pos: at },
+        })?;
+        let g = self.geometry(s);
+        let point = g
+            .points
+            .iter()
+            .min_by(|a, b| {
+                let da = (a.1.pos.x - at.x).powi(2) + (a.1.pos.y - at.y).powi(2);
+                let db = (b.1.pos.x - at.x).powi(2) + (b.1.pos.y - at.y).powi(2);
+                da.total_cmp(&db)
+            })
+            .map(|(id, _)| id)
+            .unwrap();
+        let spec = self.hole_spec(f)?;
+        self.add(
+            "Hole",
+            FeatureKind::Hole(HoleFeature {
+                points: vec![HolePoint { sketch: s, point }],
+                spec,
+                ..HoleFeature::default()
+            }),
+        )
+    }
+
+    fn hole_spec(&self, f: &Value) -> R<HoleSpec> {
+        let mut spec = HoleSpec::default();
+        spec.diameter = Length::mm(self.num(f.get("diameter"))?);
+        match f["hole_type"].as_str().unwrap_or("simple") {
+            "simple" => spec.style = HoleStyle::Simple,
+            "counterbore" => {
+                spec.style = HoleStyle::Counterbore;
+                spec.cbore_diameter = Length::mm(self.num(f.get("counterbore_diameter"))?);
+                spec.cbore_depth = Length::mm(self.num(f.get("counterbore_depth"))?);
+            }
+            "countersink" => {
+                spec.style = HoleStyle::Countersink;
+                spec.csink_diameter = Length::mm(self.num(f.get("countersink_diameter"))?);
+                spec.csink_angle = Length::deg(self.num(f.get("countersink_angle"))?);
+            }
+            t => return unsupported(format!("hole `{t}`")),
+        }
+        if f["extent"].as_str() == Some("through_all") {
+            spec.end = HoleEnd::ThroughAll;
+        } else {
+            spec.end = HoleEnd::Blind;
+            spec.depth = Length::mm(self.num(f.get("depth"))?);
+            if let Some(t) = f.get("tip_angle") {
+                spec.tip_angle = Length::deg(self.num(Some(t))?);
+            }
+        }
+        Ok(spec)
+    }
+}
+
+/// A recipe expression: numbers, parameters, + − × ÷ and brackets, with an optional unit.
+fn eval(s: &str, params: &HashMap<String, f64>) -> Option<f64> {
+    let t = s.trim();
+    let t = t
+        .strip_suffix("mm")
+        .or_else(|| t.strip_suffix("deg"))
+        .unwrap_or(t)
+        .trim();
+    let toks: Vec<String> = {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        for ch in t.chars() {
+            if "+-*/()".contains(ch) {
+                if !cur.trim().is_empty() {
+                    out.push(cur.trim().to_string());
+                }
+                cur.clear();
+                out.push(ch.to_string());
+            } else if ch.is_whitespace() {
+                if !cur.trim().is_empty() {
+                    out.push(cur.trim().to_string());
+                }
+                cur.clear();
+            } else {
+                cur.push(ch);
+            }
+        }
+        if !cur.trim().is_empty() {
+            out.push(cur.trim().to_string());
+        }
+        out
+    };
+    fn expr(t: &[String], i: &mut usize, p: &HashMap<String, f64>) -> Option<f64> {
+        let mut v = term(t, i, p)?;
+        while *i < t.len() && (t[*i] == "+" || t[*i] == "-") {
+            let op = t[*i].clone();
+            *i += 1;
+            let r = term(t, i, p)?;
+            v = if op == "+" { v + r } else { v - r };
+        }
+        Some(v)
+    }
+    fn term(t: &[String], i: &mut usize, p: &HashMap<String, f64>) -> Option<f64> {
+        let mut v = atom(t, i, p)?;
+        while *i < t.len() && (t[*i] == "*" || t[*i] == "/") {
+            let op = t[*i].clone();
+            *i += 1;
+            let r = atom(t, i, p)?;
+            v = if op == "*" { v * r } else { v / r };
+        }
+        Some(v)
+    }
+    fn atom(t: &[String], i: &mut usize, p: &HashMap<String, f64>) -> Option<f64> {
+        let tok = t.get(*i)?.clone();
+        *i += 1;
+        match tok.as_str() {
+            "(" => {
+                let v = expr(t, i, p)?;
+                (t.get(*i)? == ")").then(|| *i += 1)?;
+                Some(v)
+            }
+            "-" => Some(-atom(t, i, p)?),
+            s => s
+                .trim_end_matches("mm")
+                .parse::<f64>()
+                .ok()
+                .or_else(|| p.get(s).copied()),
+        }
+    }
+    let mut i = 0;
+    let v = expr(&toks, &mut i, params)?;
+    (i == toks.len()).then_some(v)
+}
+
+/// A curve as a polyline in its sketch's coordinates (arcs counter-clockwise).
+fn polyline(g: &Sketch, c: CurveId) -> Vec<Vec2> {
+    let p = |id: PointId| g.points[id].pos;
+    match g.curves[c].kind {
+        CurveKind::Line { a, b } => vec![p(a), p(b)],
+        CurveKind::Circle { center, radius } => {
+            let c = p(center);
+            (0..=96)
+                .map(|i| {
+                    let t = i as f64 / 96.0 * std::f64::consts::TAU;
+                    Vec2::new(c.x + radius * t.cos(), c.y + radius * t.sin())
+                })
+                .collect()
+        }
+        CurveKind::Arc { center, start, end } => {
+            let (c, s, e) = (p(center), p(start), p(end));
+            let r = ((s.x - c.x).powi(2) + (s.y - c.y).powi(2)).sqrt();
+            let a0 = (s.y - c.y).atan2(s.x - c.x);
+            let sw = ((e.y - c.y).atan2(e.x - c.x) - a0).rem_euclid(std::f64::consts::TAU);
+            (0..=64)
+                .map(|i| {
+                    let t = a0 + sw * i as f64 / 64.0;
+                    Vec2::new(c.x + r * t.cos(), c.y + r * t.sin())
+                })
+                .collect()
+        }
+        _ => vec![],
+    }
+}
+
+/// A recipe point reference (`origin`, `l1.start`, `c1.center`, a point entity) as a cadrs point.
+fn point_ref(info: &SketchInfo, g: &Sketch, r: &str) -> R<PointRef> {
+    if r == "origin" {
+        return Ok(PointRef::Origin);
+    }
+    let (ent, part) = r.split_once('.').unwrap_or((r, ""));
+    let Some(e) = info.ents.get(ent) else {
+        return unsupported(format!("point `{r}`"));
+    };
+    if let Some(p) = e.point {
+        return Ok(PointRef::Point(p));
+    }
+    let c = e.curve.unwrap();
+    let id = match (g.curves[c].kind, part) {
+        (CurveKind::Line { a, .. }, "start") => a,
+        (CurveKind::Line { b, .. }, "end") => b,
+        (CurveKind::Arc { start, end, .. }, "start") => {
+            if e.swapped {
+                end
+            } else {
+                start
+            }
+        }
+        (CurveKind::Arc { start, end, .. }, "end") => {
+            if e.swapped {
+                start
+            } else {
+                end
+            }
+        }
+        (CurveKind::Arc { center, .. } | CurveKind::Circle { center, .. }, "center") => center,
+        _ => return unsupported(format!("point `{r}`")),
+    };
+    Ok(PointRef::Point(id))
+}
+
+fn curve_ref(info: &SketchInfo, r: &str) -> R<CurveId> {
+    info.ents
+        .get(r)
+        .and_then(|e| e.curve)
+        .map_or_else(|| unsupported(format!("curve `{r}`")), Ok)
+}
+
+fn is_point_ref(info: &SketchInfo, r: &str) -> bool {
+    r == "origin" || r.contains('.') || info.ents.get(r).is_some_and(|e| e.point.is_some())
+}
+
+/// A recipe constraint (`{type, refs}`, as SolidCraft's `constraint_cmd` reads it) as a cadrs one.
+fn constraint_spec(info: &SketchInfo, g: &Sketch, c: &Value, turned: bool) -> R<ConstraintSpec> {
+    let refs: Vec<&str> = c["refs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let at = |i: usize| refs.get(i).copied().unwrap_or("");
+    let pt = |r: &str| -> R<PointSpec> {
+        Ok(match point_ref(info, g, r)? {
+            PointRef::Origin => PointSpec::Origin,
+            PointRef::Point(p) => PointSpec::Point(p),
+        })
+    };
+    let cv = |r: &str| -> R<CurveSpec> { Ok(CurveSpec::Id(curve_ref(info, r)?)) };
+    let ty = c["type"].as_str().unwrap_or("").to_ascii_lowercase();
+    // Horizontal in the recipe's frame is vertical in cadrs' when the sketch is turned.
+    let hv = |horizontal: bool, o: Orient<PointSpec, CurveSpec>| {
+        if horizontal != turned {
+            ConstraintSpec::Horizontal(o)
+        } else {
+            ConstraintSpec::Vertical(o)
+        }
+    };
+    Ok(match ty.as_str() {
+        "horizontal" | "vertical" if refs.len() >= 2 => {
+            hv(ty == "horizontal", Orient::Points(pt(at(0))?, pt(at(1))?))
+        }
+        "horizontal" | "vertical" => hv(ty == "horizontal", Orient::Line(cv(at(0))?)),
+        "horizontal_points" | "vertical_points" => hv(
+            ty == "horizontal_points",
+            Orient::Points(pt(at(0))?, pt(at(1))?),
+        ),
+        "coincident" | "point_on_curve" => {
+            match (is_point_ref(info, at(0)), is_point_ref(info, at(1))) {
+                (true, true) => ConstraintSpec::Coincident(pt(at(0))?, pt(at(1))?),
+                (true, false) => ConstraintSpec::PointOnCurve(pt(at(0))?, cv(at(1))?),
+                (false, true) => ConstraintSpec::PointOnCurve(pt(at(1))?, cv(at(0))?),
+                _ => return unsupported("a coincident of two curves"),
+            }
+        }
+        "midpoint" => {
+            if is_point_ref(info, at(0)) {
+                ConstraintSpec::Midpoint(pt(at(0))?, cv(at(1))?)
+            } else {
+                ConstraintSpec::Midpoint(pt(at(1))?, cv(at(0))?)
+            }
+        }
+        "symmetric" | "symmetry" => {
+            if is_point_ref(info, at(0)) {
+                ConstraintSpec::SymmetricPoints(pt(at(0))?, pt(at(1))?, cv(at(2))?)
+            } else {
+                ConstraintSpec::SymmetricCurves(cv(at(0))?, cv(at(1))?, cv(at(2))?)
+            }
+        }
+        "fix" => {
+            if is_point_ref(info, at(0)) {
+                ConstraintSpec::FixPoint(pt(at(0))?)
+            } else {
+                ConstraintSpec::FixCurve(cv(at(0))?)
+            }
+        }
+        "tangent" => ConstraintSpec::Tangent(cv(at(0))?, cv(at(1))?),
+        "equal" => ConstraintSpec::Equal(cv(at(0))?, cv(at(1))?),
+        "parallel" => ConstraintSpec::Parallel(cv(at(0))?, cv(at(1))?),
+        "perpendicular" => ConstraintSpec::Perpendicular(cv(at(0))?, cv(at(1))?),
+        "concentric" => ConstraintSpec::Concentric(cv(at(0))?, cv(at(1))?),
+        "collinear" => return unsupported("a collinear constraint"),
+        other => return unsupported(format!("constraint `{other}`")),
+    })
+}
+
+/// A recipe dimension as a cadrs one, on the geometry as it is now.
+fn dimension_kind(
+    info: &SketchInfo,
+    g: &Sketch,
+    d: &Value,
+    turned: bool,
+    value: f64,
+) -> R<DimensionKind> {
+    let refs: Vec<&str> = d["refs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let at = |i: usize| refs.get(i).copied().unwrap_or("");
+    let id = |r: &str| -> R<PointId> {
+        match point_ref(info, g, r)? {
+            PointRef::Point(p) => Ok(p),
+            PointRef::Origin => unsupported("the origin here"),
+        }
+    };
+    Ok(match d["type"].as_str().unwrap_or("") {
+        "radius" => DimensionKind::Radius {
+            curve: curve_ref(info, at(0))?,
+        },
+        "diameter" => DimensionKind::Diameter {
+            curve: curve_ref(info, at(0))?,
+        },
+        "offset" => {
+            let (line, p) = if is_point_ref(info, at(0)) {
+                (at(1), at(0))
+            } else {
+                (at(0), at(1))
+            };
+            DimensionKind::PointLine {
+                p: point_ref(info, g, p)?,
+                line: CurveRef::Curve(curve_ref(info, line)?),
+            }
+        }
+        "distance" => {
+            let o = d["orientation"].as_str().unwrap_or("aligned");
+            let horizontal = match o {
+                "horizontal" => Some(!turned),
+                "vertical" => Some(turned),
+                _ => None,
+            };
+            // From the origin: to the sketch axes (horizontal: the y axis), or straight.
+            let (a, b) = (at(0), at(1));
+            if a == "origin" || b == "origin" {
+                let p = point_ref(info, g, if a == "origin" { b } else { a })?;
+                return Ok(match horizontal {
+                    Some(true) => DimensionKind::PointLine {
+                        p,
+                        line: CurveRef::YAxis,
+                    },
+                    Some(false) => DimensionKind::PointLine {
+                        p,
+                        line: CurveRef::XAxis,
+                    },
+                    None => match p {
+                        PointRef::Point(p) => DimensionKind::OriginAligned { p },
+                        PointRef::Origin => {
+                            return unsupported("a distance from the origin to itself");
+                        }
+                    },
+                });
+            }
+            let (a, b) = (id(a)?, id(b)?);
+            match horizontal {
+                Some(true) => DimensionKind::Horizontal { a, b },
+                Some(false) => DimensionKind::Vertical { a, b },
+                None => DimensionKind::Aligned { a, b },
+            }
+        }
+        "angle" => {
+            // The flips whose angle, as drawn, is nearest the value.
+            let (ca, cb) = (curve_ref(info, at(0))?, curve_ref(info, at(1))?);
+            let dir = |c: CurveId| -> R<Vec2> {
+                match g.curves[c].kind {
+                    CurveKind::Line { a, b } => {
+                        let (p, q) = (g.points[a].pos, g.points[b].pos);
+                        Ok(Vec2::new(q.x - p.x, q.y - p.y))
+                    }
+                    _ => unsupported("an angle to a curve that isn't a line"),
+                }
+            };
+            let (u, v) = (dir(ca)?, dir(cb)?);
+            let angle = |fa: bool, fb: bool| {
+                let (u, v) = (
+                    if fa { Vec2::new(-u.x, -u.y) } else { u },
+                    if fb { Vec2::new(-v.x, -v.y) } else { v },
+                );
+                let c = (u.x * v.x + u.y * v.y) / (u.x.hypot(u.y) * v.x.hypot(v.y));
+                c.clamp(-1.0, 1.0).acos().to_degrees()
+            };
+            let (fa, fb) = [(false, false), (true, false), (false, true), (true, true)]
+                .into_iter()
+                .min_by(|x, y| {
+                    (angle(x.0, x.1) - value)
+                        .abs()
+                        .total_cmp(&(angle(y.0, y.1) - value).abs())
+                })
+                .unwrap();
+            DimensionKind::Angle {
+                a: CurveRef::Curve(ca),
+                b: CurveRef::Curve(cb),
+                flip_a: fa,
+                flip_b: fb,
+            }
+        }
+        t => return unsupported(format!("dimension `{t}`")),
+    })
+}
+
+fn circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
+    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let (a2, b2, c2) = (
+        a.x * a.x + a.y * a.y,
+        b.x * b.x + b.y * b.y,
+        c.x * c.x + c.y * c.y,
+    );
+    Some(Vec2::new(
+        (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+        (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d,
+    ))
+}
+
+/// Polylines joined end to end into one loop (each turned round where needed).
+fn chain(mut pieces: Vec<Vec<Vec2>>) -> Vec<Vec2> {
+    let close = |a: Vec2, b: Vec2| (a.x - b.x).abs() + (a.y - b.y).abs() < 1e-6;
+    let mut out = pieces.remove(0);
+    while !pieces.is_empty() {
+        let end = *out.last().unwrap();
+        let next = pieces
+            .iter()
+            .position(|p| close(p[0], end) || close(*p.last().unwrap(), end));
+        let i = next.unwrap_or(0);
+        let mut p = pieces.remove(i);
+        if !close(p[0], end) && close(*p.last().unwrap(), end) {
+            p.reverse();
+        }
+        out.extend(p);
+    }
+    out
+}
+
+fn point_in_polygon(p: Vec2, poly: &[Vec2]) -> bool {
+    let mut inside = false;
+    let n = poly.len();
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// A point well inside a region: the middle of its largest triangle.
+fn inside_point(r: &cadrs_sketch::region::Region) -> Vec2 {
+    let (v, idx) = r.triangulate();
+    idx.chunks(3)
+        .map(|t| {
+            let [a, b, c] = [v[t[0] as usize], v[t[1] as usize], v[t[2] as usize]];
+            let area = ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs();
+            (
+                area,
+                Vec2::new((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0),
+            )
+        })
+        .max_by(|x, y| x.0.total_cmp(&y.0))
+        .map(|x| x.1)
+        .unwrap_or(r.outer[0])
+}
+
+/// The distance from a point to a triangle.
+fn point_triangle(p: V3, a: V3, b: V3, c: V3) -> f64 {
+    let n = cross(sub(b, a), sub(c, a));
+    let nn = dot(n, n);
+    if nn < 1e-24 {
+        return f64::INFINITY;
+    }
+    let inside = [(a, b), (b, c), (c, a)]
+        .iter()
+        .all(|(u, v)| dot(cross(sub(*v, *u), sub(p, *u)), n) >= 0.0);
+    if inside {
+        return (dot(sub(p, a), n) / nn.sqrt()).abs();
+    }
+    let seg = |u: V3, v: V3| {
+        let d = sub(v, u);
+        let t = (dot(sub(p, u), d) / dot(d, d).max(1e-300)).clamp(0.0, 1.0);
+        norm(sub(p, add(u, scale(d, t))))
+    };
+    seg(a, b).min(seg(b, c)).min(seg(c, a))
+}
+
+/// What the part measures: totals over its solid bodies.
+struct Measured {
+    bodies: usize,
+    volume: f64,
+    area: f64,
+    com: V3,
+    bbox: (V3, V3),
+    faces: usize,
+}
+
+fn measure(parts: &[Part]) -> Measured {
+    let solids: Vec<&Part> = parts.iter().filter(|p| p.kind == PartKind::Solid).collect();
+    let (mut volume, mut area, mut faces) = (0.0, 0.0, 0);
+    let mut moment = [0.0; 3];
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for p in &solids {
+        let m = p.mass.expect("mass properties");
+        volume += m.volume;
+        area += m.surface_area;
+        faces += p.solid.faces.len();
+        let c = [m.center_of_mass.x, m.center_of_mass.y, m.center_of_mass.z];
+        for k in 0..3 {
+            moment[k] += m.volume * c[k];
+        }
+        for q in &p.solid.positions {
+            for k in 0..3 {
+                lo[k] = lo[k].min(q[k]);
+                hi[k] = hi[k].max(q[k]);
+            }
+        }
+    }
+    Measured {
+        bodies: solids.len(),
+        volume,
+        area,
+        com: moment.map(|x| x / volume),
+        bbox: (lo, hi),
+        faces,
+    }
+}
+
+/// One comparison: what, the worst error (relative for totals, mm for positions) and whether
+/// it passes.
+struct Check {
+    what: &'static str,
+    error: f64,
+    ok: bool,
+}
+
+struct Outcome {
+    case: String,
+    source: String,
+    /// `Some(pass)` when built and compared; `None` when not translated (the reason in `note`).
+    pass: Option<bool>,
+    checks: Vec<Check>,
+    note: String,
+}
+
+fn run_case(dir: &Path) -> Outcome {
+    let case = dir.file_name().unwrap().to_string_lossy().to_string();
+    let read = |f: &str| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap()
+    };
+    let (recipe, want) = (read("recipe.json"), read("expected.json"));
+    let source = want["source"].as_str().unwrap_or("").to_string();
+    let mut outcome = Outcome {
+        case,
+        source,
+        pass: None,
+        checks: Vec::new(),
+        note: String::new(),
+    };
+    let mut r = Recipe::new();
+    for p in recipe["parameters"].as_array().into_iter().flatten() {
+        if let (Some(n), Some(v)) = (
+            p["name"].as_str(),
+            p.get("value")
+                .or(p.get("expression"))
+                .and_then(|v| r.num(Some(v)).ok()),
+        ) {
+            r.params.insert(n.to_string(), v);
+        }
+    }
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> R<()> {
+        for f in recipe["features"].as_array().into_iter().flatten() {
+            r.feature(f)?;
+        }
+        Ok(())
+    }));
+    match built {
+        Ok(Ok(())) => {}
+        Ok(Err(Stop::Unsupported(why))) => {
+            outcome.note = format!("not translated yet: {why}");
+            return outcome;
+        }
+        Ok(Err(Stop::Failed(why))) => {
+            outcome.pass = Some(false);
+            outcome.note = format!("failed: {why}");
+            return outcome;
+        }
+        Err(_) => {
+            outcome.pass = Some(false);
+            outcome.note = "failed: panicked".into();
+            return outcome;
+        }
+    }
+    let features = Arc::new(r.features_now());
+    let mut rb = Rebuilder::new();
+    let build = rb.rebuild(&features);
+    if let Some((_, e)) = build.errors.first() {
+        outcome.pass = Some(false);
+        outcome.note = format!("failed: {e}");
+        return outcome;
+    }
+    let got = measure(&build.parts);
+    let only: Option<Vec<String>> = want["compare"].as_array().map(|a| {
+        a.iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect()
+    });
+    let wanted = |k: &str| {
+        want.get(k).is_some_and(|v| !v.is_null())
+            && only.as_ref().is_none_or(|o| o.iter().any(|x| x == k))
+    };
+    let rel = want["tolerance"]["rel"].as_f64().unwrap_or(REL_TOL);
+    let want_bbox = v3(&want["bbox"]["min"]).zip(v3(&want["bbox"]["max"]));
+    let diag = |b: (V3, V3)| norm(sub(b.1, b.0));
+    let abs = want["tolerance"]["abs_mm"].as_f64().unwrap_or_else(|| {
+        ABS_FRAC
+            * want_bbox
+                .map(diag)
+                .unwrap_or_else(|| diag(got.bbox))
+                .max(1.0)
+    });
+    let mut checks = Vec::new();
+    if wanted("body_count") {
+        let ok = want["body_count"].as_u64() == Some(got.bodies as u64);
+        checks.push(Check {
+            what: "bodies",
+            error: (got.bodies as f64 - want["body_count"].as_f64().unwrap_or(0.0)).abs(),
+            ok,
+        });
+    }
+    for (key, what, g) in [
+        ("volume_mm3", "volume", got.volume),
+        ("area_mm2", "area", got.area),
+    ] {
+        if wanted(key) {
+            let w = want[key].as_f64().unwrap_or(f64::NAN);
+            let e = (g - w).abs() / w.abs().max(1.0);
+            checks.push(Check {
+                what,
+                error: e,
+                ok: e <= rel,
+            });
+        }
+    }
+    let far = |g: V3, w: V3| (0..3).map(|k| (g[k] - w[k]).abs()).fold(0.0, f64::max);
+    if wanted("center_of_mass") {
+        let e = far(
+            got.com,
+            v3(&want["center_of_mass"]).unwrap_or([f64::NAN; 3]),
+        );
+        checks.push(Check {
+            what: "centre of mass",
+            error: e,
+            ok: e <= abs,
+        });
+    }
+    if wanted("bbox")
+        && let Some((lo, hi)) = want_bbox
+    {
+        let e = far(got.bbox.0, lo).max(far(got.bbox.1, hi));
+        checks.push(Check {
+            what: "bounding box",
+            error: e,
+            ok: e <= abs,
+        });
+    }
+    if wanted("faces") {
+        let w = want["faces"].as_u64().unwrap_or(0) as usize;
+        checks.push(Check {
+            what: "faces",
+            error: (got.faces as f64 - w as f64).abs(),
+            ok: got.faces == w,
+        });
+    }
+    // STEP: written and read back with the same volume and area.
+    let (ok, e) = step_round_trip(&features, &mut rb, &got);
+    checks.push(Check {
+        what: "STEP round trip",
+        error: e,
+        ok,
+    });
+    outcome.pass = Some(checks.iter().all(|c| c.ok));
+    if outcome.pass == Some(false) {
+        println!(
+            "  {}: bodies {} volume {:.4} area {:.4} com {:.4?} bbox {:.4?} faces {}",
+            outcome.case, got.bodies, got.volume, got.area, got.com, got.bbox, got.faces
+        );
+    }
+    let bad: Vec<String> = checks
+        .iter()
+        .filter(|c| !c.ok)
+        .map(|c| format!("{} off by {:.3e}", c.what, c.error))
+        .collect();
+    let mut notes = r.notes.clone();
+    notes.extend(bad);
+    outcome.note = notes.join("; ");
+    outcome.checks = checks;
+    outcome
+}
+
+/// The part exported as STEP and imported again: the worst relative change of volume or area.
+fn step_round_trip(
+    features: &Arc<Vec<Feature>>,
+    rb: &mut Rebuilder,
+    got: &Measured,
+) -> (bool, f64) {
+    let build = rb.rebuild(features);
+    let items: Vec<ExportItem> = build
+        .parts
+        .iter()
+        .filter(|p| p.kind == PartKind::Solid)
+        .map(|p| ExportItem {
+            features: features.clone(),
+            part: p.id,
+            name: p.name.clone(),
+            pose: None,
+            source: (ElementId::from_u128(1), p.id),
+            source_name: p.name.clone(),
+        })
+        .collect();
+    let Ok(files) = rb.export_files(&ExportRequest::new(ModelFormat::Step, "part", items)) else {
+        return (false, f64::INFINITY);
+    };
+    let text = String::from_utf8_lossy(&files[0].bytes).into_owned();
+    let Ok(plan) = rb.plan_import(ImportFormat::Step, text.as_bytes()) else {
+        return (false, f64::INFINITY);
+    };
+    let doc = imported_document(
+        &plan,
+        "part.step",
+        text,
+        ImportAs::PartStudio,
+        ImportIds::fresh(),
+    );
+    let back = Rebuilder::new().rebuild(doc.elements[0].features());
+    if !back.errors.is_empty() {
+        return (false, f64::INFINITY);
+    }
+    let m = measure(&back.parts);
+    let e = ((m.volume - got.volume).abs() / got.volume.abs().max(1.0))
+        .max((m.area - got.area).abs() / got.area.abs().max(1.0));
+    (e <= REL_TOL, e)
+}
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/reference_parts")
+}
+
+fn table(outcomes: &[Outcome]) -> String {
+    let passed = outcomes.iter().filter(|o| o.pass == Some(true)).count();
+    let failed = outcomes.iter().filter(|o| o.pass == Some(false)).count();
+    let skipped = outcomes.iter().filter(|o| o.pass.is_none()).count();
+    let mut s = String::new();
+    s.push_str("# Reference parts\n\n");
+    s.push_str(
+        "Generated by `CADRS_BLESS=1 cargo test -r -p cadrs_core --test reference_parts` (issue \
+         #101). Each case is a part described by a recipe, with expected values worked out \
+         independently of cadrs: closed-form geometry (**analytic**) or an independent kernel \
+         (**freecad**). The cases are [SolidCraft's](https://github.com/tangency-labs/solidcraft) \
+         reference parts (MIT; see `crates/cadrs_core/tests/reference_parts/README.md`), \
+         rebuilt through cadrs' feature list and compared as SolidCraft compares them: body \
+         count, volume and area within a relative 1e-3, centre of mass and bounding box within \
+         1e-3 of the part's diagonal, face count where the geometry fixes it, and a STEP export \
+         read back with the same volume and area. The error columns give how close cadrs comes.\n\n",
+    );
+    s.push_str(&format!(
+        "**{passed} / {} cases pass**, {failed} fail, {skipped} not translated yet.\n\n",
+        outcomes.len()
+    ));
+    s.push_str("| Case | Source | Result | Volume error | Area error | Notes |\n|---|---|---|---|---|---|\n");
+    for o in outcomes {
+        let result = match o.pass {
+            Some(true) => "pass",
+            Some(false) => "**fail**",
+            None => "not translated",
+        };
+        let err = |w: &str| {
+            o.checks
+                .iter()
+                .find(|c| c.what == w)
+                .map_or(String::new(), |c| format!("{:.1e}", c.error))
+        };
+        s.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} |\n",
+            o.case,
+            o.source,
+            result,
+            err("volume"),
+            err("area"),
+            o.note.replace('|', "\\|")
+        ));
+    }
+    s
+}
+
+#[test]
+fn reference_parts() {
+    let dir = root().join("solidcraft");
+    let mut cases: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join("recipe.json").is_file())
+        .collect();
+    cases.sort();
+    if let Ok(only) = std::env::var("CADRS_REFERENCE_CASE") {
+        cases.retain(|c| {
+            c.file_name()
+                .is_some_and(|n| n.to_string_lossy().contains(&only))
+        });
+    }
+    let outcomes: Vec<Outcome> = cases.iter().map(|c| run_case(c)).collect();
+    for o in &outcomes {
+        let result = match o.pass {
+            Some(true) => "PASS",
+            Some(false) => "FAIL",
+            None => "SKIP",
+        };
+        println!("{result} {} {}", o.case, o.note);
+    }
+    let passing_file = root().join("passing.txt");
+    let now: Vec<&str> = outcomes
+        .iter()
+        .filter(|o| o.pass == Some(true))
+        .map(|o| o.case.as_str())
+        .collect();
+    if std::env::var("CADRS_BLESS").is_ok() {
+        std::fs::write(&passing_file, now.join("\n") + "\n").unwrap();
+        let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("reference-parts.md"), table(&outcomes)).unwrap();
+        return;
+    }
+    let must = std::fs::read_to_string(&passing_file).unwrap_or_default();
+    let lost: Vec<&str> = must
+        .lines()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .filter(|c| cases.iter().any(|p| p.ends_with(c)) && !now.contains(c))
+        .collect();
+    assert!(
+        lost.is_empty(),
+        "reference parts no longer passing: {lost:?}"
+    );
+}
