@@ -102,6 +102,11 @@ pub enum GuestState {
     Away { since: f64 },
 }
 
+/// True while the open document is shared live (with others or waiting for them).
+pub fn together(world: &World) -> bool {
+    world.contains_resource::<Live>()
+}
+
 impl Live {
     pub fn is_owner(&self) -> bool {
         matches!(self.role, Role::Owner(_))

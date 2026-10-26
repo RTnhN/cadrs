@@ -65,8 +65,16 @@ fn store(world: &World) -> Option<cadrs_core::Store> {
 
 /// Opens workspace `ws`: the document becomes its state, with its own undo and redo; the log
 /// and the document file are written (the file holds the open workspace, TD3.7). Nothing while
-/// a dialog or a sketch is open, or the document is read-only.
+/// a dialog or a sketch is open, the document is read-only or shared live.
 pub fn switch_workspace(world: &mut World, ws: WorkspaceId) {
+    // Editing together (`crate::collab`) follows one workspace, Main.
+    if crate::collab::live::together(world) {
+        crate::linked::toast(
+            world,
+            "Switching workspaces isn't available while editing together",
+        );
+        return;
+    }
     if editing(world)
         || world
             .get_resource::<ActiveDocument>()
