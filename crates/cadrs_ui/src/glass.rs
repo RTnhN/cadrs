@@ -137,9 +137,11 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
     // more light on a pale surface.
     let alpha = match (kind, dark) {
         (GlassKind::Panel, false) => 0.72,
-        (GlassKind::Panel, true) => 0.66,
+        // Dark glass over the grid wallpaper: nearly solid, so the crosses don't show through
+        // the rows.
+        (GlassKind::Panel, true) => 0.86,
         (GlassKind::Bar, false) => 0.5,
-        (GlassKind::Bar, true) => 0.58,
+        (GlassKind::Bar, true) => 0.8,
         (GlassKind::Control, false) => 0.7,
         (GlassKind::Control, true) => 0.55,
         (GlassKind::Input, _) => 0.6,
@@ -297,7 +299,7 @@ pub const CONTROL_HEIGHT: f32 = 32.0;
 /// Their corner radius.
 pub const CONTROL_RADIUS: f32 = 5.0;
 /// The height of a top bar's controls.
-pub const BAR_CONTROL_HEIGHT: f32 = 30.0;
+pub const BAR_CONTROL_HEIGHT: f32 = 32.0;
 /// Their corner radius.
 pub const BAR_CONTROL_RADIUS: f32 = 5.0;
 
@@ -477,8 +479,8 @@ fn wallpaper_layers(dark: bool) -> Vec<Gradient> {
         (
             rgba(0x1d, 0x1c, 0x1a, 1.0),
             rgba(0x23, 0x22, 0x1e, 1.0),
-            rgba(0x1c, 0x6e, 0x70, 0.22),
-            rgba(0x8a, 0x6a, 0x30, 0.16),
+            rgba(0x1c, 0x6e, 0x70, 0.07),
+            rgba(0xc9, 0x9c, 0x49, 0.07),
         )
     } else {
         (

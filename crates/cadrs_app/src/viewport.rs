@@ -2257,10 +2257,12 @@ fn fit_grid(
 ) {
     let v = &view.view;
     let step = 10f32.powf((v.scale * 24.0).max(1e-6).log10().ceil());
+    // The shader fades linearly from the eye: about 70 % at the focus, gone a few view sizes
+    // beyond it.
     let fade = if v.perspective {
         v.eye_distance() * 4.0
     } else {
-        crate::camera::camera_distance(v.scale) + v.scale * 3000.0
+        crate::camera::camera_distance(v.scale) / 0.3
     };
     let dark = cadrs_ui::dark_in_force();
     if *last == Some((step, fade, dark)) {
@@ -2290,6 +2292,8 @@ fn fit_grid(
         g.z_axis_color = y;
         g.scale = 1.0 / step;
         g.fadeout_distance = fade;
+        // Seen edge-on, far away, the lines would crowd into a hatch: they fade first.
+        g.dot_fadeout_strength = 0.5;
     }
 }
 

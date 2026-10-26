@@ -605,7 +605,8 @@ fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
             n.flex_grow = 1.0;
         });
         a.spawn(Node {
-            flex_grow: 0.2,
+            flex_grow: 1.0,
+            min_width: Val::Px(8.0),
             ..default()
         });
         a.spawn((
@@ -1043,8 +1044,11 @@ fn rebuild_main(
             return;
         }
 
-        // The list.
-        m.spawn(TableHeader::new("col", cols.clone()).height(30.0).build(&t));
+        // The list. The header leaves the scrollbar's room, as the rows do, so the columns line
+        // up.
+        m.spawn(TableHeader::new("col", cols.clone()).height(30.0).build(&t))
+            .entry::<Node>()
+            .and_modify(|mut n| n.padding.right = Val::Px(14.0));
         m.spawn(Node {
             flex_grow: 1.0,
             min_height: Val::Px(0.0),

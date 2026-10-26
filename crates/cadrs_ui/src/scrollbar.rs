@@ -147,7 +147,7 @@ pub fn vertical_scrollbar(theme: &Theme, name: &str, target: Entity) -> impl Bun
                         border_radius: BorderRadius::all(Val::Px(3.0)),
                         border: UiRect::ZERO,
                     },
-                    BackgroundColor(Color::srgb_u8(0x9e, 0x9e, 0x9e)),
+                    BackgroundColor(theme.scrollbar_thumb),
                 )],
             ),
             stepper(target, 1.0, "caret-down-filled", arrow),

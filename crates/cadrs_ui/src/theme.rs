@@ -159,6 +159,8 @@ pub struct Theme {
     pub feature_icon: Color,
     pub tree_guide: Color,
     pub rollback_bar: Color,
+    /// A scrollbar's thumb.
+    pub scrollbar_thumb: Color,
 
     // Viewport
     pub plane_fill: Color,
@@ -229,7 +231,7 @@ impl Theme {
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.18),
             // Not quite white, so the dark theme pairs them with their own colors (the alpha
             // is kept).
-            glass_panel: hex("#fbfefe").with_alpha(0.8),
+            glass_panel: hex("#fbfefe").with_alpha(0.88),
             glass_rim: hex("#fbffff").with_alpha(0.9),
             glass_shadow: Color::srgba(0.02, 0.12, 0.16, 0.16),
 
@@ -314,6 +316,7 @@ impl Theme {
             feature_icon: hex("#8e8e8e"),
             tree_guide: hex("#dbdbdb"),
             rollback_bar: hex("#bababa"),
+            scrollbar_thumb: hex("#b4c3c5"),
 
             plane_fill: hex("#e6f1f2"),
             plane_edge: hex("#8fb3b8"),
@@ -456,6 +459,7 @@ impl Theme {
             feature_icon: hex("#a29d8e"),
             tree_guide: hex("#3f3c35"),
             rollback_bar: hex("#6f6b60"),
+            scrollbar_thumb: hex("#5a564d"),
 
             plane_fill: hex("#2f2d27"),
             plane_edge: hex("#8a8066"),
@@ -530,6 +534,7 @@ impl Theme {
             (Fill, self.tab_underline),
             (Fill, self.tree_guide),
             (Fill, self.rollback_bar),
+            (Fill, self.scrollbar_thumb),
             (Fill, self.separator),
             (Fill, self.panel_border),
             (Fill, self.toolbar_separator),
