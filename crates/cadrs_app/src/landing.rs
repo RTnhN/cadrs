@@ -256,6 +256,8 @@ enum LandingDialog {
     DeleteLabel(LabelId),
     /// P3E.1: "Open a copy" of the bundled sample `SAMPLES[i]`.
     SampleCopy(usize),
+    /// Join shared document (`crate::collab`): a link to paste.
+    Join,
 }
 
 const SECTION_NAMES: [&str; 3] = [
@@ -603,13 +605,13 @@ fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
                 .selection_indicator()
                 .weight(FontWeight::MEDIUM)
         };
-        // (Shared with me, Teams and Public are left out: documents are on this computer, with
-        // no accounts to share with yet. Issue #13.)
+        // (Teams and Public are left out: there is no server to keep them. Issue #13.)
         let before = [
             Filter::Explore,
             Filter::OwnedByMe,
             Filter::RecentlyOpened,
             Filter::CreatedByMe,
+            Filter::SharedWithMe,
         ];
         let filter_item = |s: &mut ChildSpawnerCommands, f: Filter| {
             s.spawn((
@@ -1858,6 +1860,8 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
                 ]),
         )
         .item(MenuItem::new("new-label", "Label…").icon("tag-new"))
+        .separator()
+        .item(MenuItem::new("join-shared", "Join shared document…").icon("share"))
         .build(t)
 }
 
@@ -1880,12 +1884,13 @@ fn on_create_menu_action(ev: On<MenuAction>, mut commands: Commands, theme: Res<
             });
         }
         "new-label" => details::open_new_label_dialog(&mut commands, &theme, None),
+        "join-shared" => open_join_dialog(&mut commands, &theme),
         _ => {}
     }
 }
 
 /// Opens a stored document: records the open time and switches to the document screen.
-fn open_document(world: &mut World, id: DocumentId) {
+pub(crate) fn open_document(world: &mut World, id: DocumentId) {
     let store = world.resource::<DocumentStore>().0.clone();
     let now = world.resource::<AppClock>().now();
     let mut file = match store.load(id) {
@@ -1899,7 +1904,14 @@ fn open_document(world: &mut World, id: DocumentId) {
     if let Err(e) = store.save(&file.document, &file.meta) {
         warn!("cannot record the open time: {e}");
     }
-    world.insert_resource(ActiveDocument::stored(file.document, file.meta));
+    let read_only = file
+        .meta
+        .shared
+        .as_ref()
+        .map(crate::collab::read_only_reason);
+    let mut active = ActiveDocument::stored(file.document, file.meta);
+    active.read_only = read_only;
+    world.insert_resource(active);
     world
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Document);
@@ -1942,6 +1954,15 @@ fn on_row_context_menu(
     };
     // P3E.1: a right-click selects the row too (the Details panel follows if open).
     let id = row.0;
+    let shared_info = lib.lib.get(id).and_then(|e| e.meta.shared.clone());
+    let shared = shared_info.is_some();
+    let may_copy = shared_info.is_none_or(|s| s.access().rights.copy);
+    // Transfer ownership (`crate::collab`): one's own document shared with someone.
+    let transferable = lib
+        .lib
+        .get(id)
+        .and_then(|e| e.meta.sharing.as_ref())
+        .is_some_and(|s| !s.members.is_empty());
     commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), false));
     let menu = if state.filter == Filter::Trash {
         Menu::new("doc-context-menu")
@@ -1953,7 +1974,11 @@ fn on_row_context_menu(
             .item(MenuItem::new("ctx-open", "Open").icon("open-external"))
             .item(MenuItem::new("ctx-rename", "Rename…").icon("edit"))
             .separator()
-            .item(MenuItem::new("ctx-copy", "Copy…").icon("copy"))
+            .item(
+                MenuItem::new("ctx-copy", "Copy…")
+                    .icon("copy")
+                    .disabled(!may_copy),
+            )
             .item({
                 // P3G.1 (ER1.2, ER X8): a folder of the library (the Other documents browser's
                 // locations), or back to the top level.
@@ -2010,8 +2035,18 @@ fn on_row_context_menu(
                     .submenu(entries)
             })
             .item(MenuItem::new("ctx-properties", "Details…").icon("list-details"))
+            .item(
+                MenuItem::new("ctx-transfer", "Transfer ownership…")
+                    .icon("share")
+                    .disabled(!transferable),
+            )
             .separator()
-            .item(MenuItem::new("ctx-trash", "Move to trash").icon("delete"))
+            .item(if shared {
+                // Shared with me (`crate::collab`): the owner hears of it; the copy goes.
+                MenuItem::new("ctx-unshare", "Unshare with me").icon("delete")
+            } else {
+                MenuItem::new("ctx-trash", "Move to trash").icon("delete")
+            })
             .min_width(190.0)
     };
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
@@ -2040,6 +2075,20 @@ fn on_context_action(
         "ctx-rename" => open_rename_dialog(&mut commands, &theme, &entry),
         "ctx-copy" => open_copy_dialog(&mut commands, &theme, &entry),
         "ctx-trash" => open_trash_dialog(&mut commands, &theme, &entry),
+        "ctx-transfer" => commands
+            .queue(move |world: &mut World| crate::collab::share_dialog::open_transfer(world, id)),
+        "ctx-unshare" => {
+            let store = store.0.clone();
+            let name = entry.name.clone();
+            commands.queue(move |world: &mut World| {
+                crate::collab::sharing::leave(world, id);
+                let now = world.resource::<AppClock>().now();
+                world
+                    .resource_mut::<DocLibrary>()
+                    .execute(&store, &TrashEntry { id, now });
+                undo_toast(world, format!("Unshared \u{201c}{name}\u{201d} with you"));
+            });
+        }
         "ctx-delete-forever" => open_purge_dialog(&mut commands, &theme, &entry),
         "ctx-properties" => {
             commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), true))
@@ -2172,6 +2221,14 @@ fn confirm_dialog(world: &mut World) {
                 .execute(&store, &PurgeEntry { id });
             undo_toast(world, format!("Deleted \u{201c}{name}\u{201d} permanently"));
         }
+        LandingDialog::Join => {
+            let link = field_value(world, "join-link-field");
+            if link.trim().is_empty() {
+                return;
+            }
+            close_dialogs(world);
+            crate::collab::start_join(world, &link);
+        }
         LandingDialog::NewDocument => {
             let name = field_value(world, "new-document-name-field");
             close_dialogs(world);
@@ -2257,6 +2314,7 @@ fn on_text_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
     if matches!(
         name.as_str(),
         "new-document-name-field"
+            | "join-link-field"
             | "rename-name-field"
             | "new-folder-name-field"
             | "copy-name-field"
@@ -2321,6 +2379,44 @@ fn open_new_document_dialog(commands: &mut Commands, theme: &Theme) {
             })
             .build(&t),
         LandingDialog::NewDocument,
+        DespawnOnExit(AppState::Landing),
+    ));
+}
+
+/// Join shared document: a link someone shared, pasted.
+fn open_join_dialog(commands: &mut Commands, theme: &Theme) {
+    let (tb, tf) = (theme.clone(), theme.clone());
+    commands.spawn((
+        Dialog::new("join-dialog")
+            .title("Join shared document")
+            .width(548.0)
+            .body(move |b| {
+                let t = &tb;
+                field_label(b, t, "Link");
+                b.spawn(
+                    TextInput::new("join-link")
+                        .placeholder("Paste the link someone shared with you")
+                        .autofocus()
+                        .build(t),
+                );
+            })
+            .footer(move |f| {
+                let t = &tf;
+                f.spawn((
+                    Button::new("join-confirm").label("Join").primary().build(t),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(confirm_dialog);
+                    }),
+                ));
+                f.spawn((
+                    Button::new("join-cancel").label("Cancel").build(t),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(close_dialogs);
+                    }),
+                ));
+            })
+            .build(theme),
+        LandingDialog::Join,
         DespawnOnExit(AppState::Landing),
     ));
 }

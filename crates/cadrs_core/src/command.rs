@@ -93,6 +93,15 @@ impl Snapshot {
         })
     }
 
+    /// Carries someone else's edit into the copy (see [`History::rebase`]).
+    fn rebase(&mut self, change: &crate::collab::sync::Change) {
+        match self {
+            Snapshot::Document(d) | Snapshot::Whole(d) => change.apply_to(d),
+            Snapshot::Element { element, .. } => change.apply_to_element(element),
+            Snapshot::ElementName { .. } => {}
+        }
+    }
+
     /// The element whose contents this snapshot holds.
     fn element_id(&self) -> Option<ElementId> {
         match self {
@@ -224,6 +233,16 @@ impl History {
         self.redo.clear();
         self.bump();
         Ok(())
+    }
+
+    /// Carries an edit someone else made (editing together, [`crate::collab::sync`]) into
+    /// every undo and redo step's copies, so that undoing one's own edit afterwards takes back
+    /// only that: their features, tabs and changes stay.
+    pub fn rebase(&mut self, change: &crate::collab::sync::Change) {
+        for e in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            e.before.rebase(change);
+            e.after.rebase(change);
+        }
     }
 
     /// Undoes the last command. Returns its label, or `None` if there is nothing to undo.

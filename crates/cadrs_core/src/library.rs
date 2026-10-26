@@ -56,6 +56,12 @@ pub struct DocumentMeta {
     /// `None` for Main.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// How the owner shares it ([`crate::collab`]); `None` until it is first shared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharing: Option<crate::collab::Sharing>,
+    /// Set on a document someone else shared with this user: whose it is and how to rejoin it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared: Option<crate::collab::SharedInfo>,
 }
 
 impl DocumentMeta {
@@ -81,6 +87,8 @@ impl DocumentMeta {
             description: String::new(),
             pcb_component: None,
             workspace: None,
+            sharing: None,
+            shared: None,
         }
     }
 }
@@ -269,7 +277,8 @@ impl Filter {
         let m = &entry.meta;
         let live = m.trashed.is_none();
         match self {
-            Filter::Explore | Filter::SharedWithMe | Filter::Public => false,
+            Filter::Explore | Filter::Public => false,
+            Filter::SharedWithMe => live && m.shared.is_some(),
             Filter::OwnedByMe => live && m.owned_by == user,
             Filter::RecentlyOpened => live && m.last_opened.is_some(),
             Filter::CreatedByMe => live && m.created_by == user,
