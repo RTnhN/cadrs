@@ -7,8 +7,8 @@ use bevy::prelude::*;
 use bevy_iroh::{Iroh, Relays};
 use cadrs_core::Document;
 use cadrs_core::collab::sync::Change;
-use cadrs_core::collab::{Permission, Snapshot};
-use cadrs_net::{Ask, NetPlugin, OwnerRequests, ShareLink, Verdict, Welcome, transfer};
+use cadrs_core::collab::{Access, Permission, Snapshot};
+use cadrs_net::{Ask, NetPlugin, Requests, ShareLink, Verdict, Welcome, transfer};
 
 const PATIENCE: Duration = Duration::from_secs(30);
 const TOPIC: [u8; 32] = [42; 32];
@@ -30,7 +30,7 @@ fn peer(name: &str) -> App {
 #[derive(Resource)]
 struct Shared(Document);
 
-fn serve(mut requests: ResMut<OwnerRequests>, shared: Res<Shared>) {
+fn serve(mut requests: ResMut<Requests>, shared: Res<Shared>) {
     for r in requests.drain() {
         if r.document != shared.0.id || r.topic != TOPIC {
             r.refuse("Link sharing is off");
@@ -40,7 +40,7 @@ fn serve(mut requests: ResMut<OwnerRequests>, shared: Res<Shared>) {
             Ask::Join => {
                 let doc = shared.0.clone();
                 r.welcome(Ok(Welcome {
-                    permission: Permission::Edit,
+                    access: Access::owner(),
                     owner_name: "Owner".into(),
                     epoch: 9,
                     snapshot: Snapshot {
@@ -48,6 +48,7 @@ fn serve(mut requests: ResMut<OwnerRequests>, shared: Res<Shared>) {
                         document: doc,
                         blobs: Vec::new(),
                     },
+                    comments: Default::default(),
                 }))
             }
             // Numbered as 4 when it renames the document, refused otherwise.
@@ -57,7 +58,7 @@ fn serve(mut requests: ResMut<OwnerRequests>, shared: Res<Shared>) {
                 change,
                 ..
             } if change.delta.head.is_some() => r.verdict(Verdict::Accepted(4)),
-            Ask::Propose { .. } => r.verdict(Verdict::Refused("No".into())),
+            _ => r.verdict(Verdict::Refused("No".into())),
         }
     }
 }
@@ -100,7 +101,7 @@ fn a_document_and_edits_travel_by_its_link_and_a_wrong_topic_is_refused() {
     };
 
     let welcome = fetch(&mut owner, &mut joiner, link.clone()).unwrap();
-    assert_eq!(welcome.permission, Permission::Edit);
+    assert_eq!(welcome.access.permission, Permission::Edit);
     assert_eq!(welcome.snapshot.seq, 3);
     assert_eq!(welcome.snapshot.document, doc);
 

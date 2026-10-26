@@ -1954,6 +1954,15 @@ fn on_row_context_menu(
     };
     // P3E.1: a right-click selects the row too (the Details panel follows if open).
     let id = row.0;
+    let shared_info = lib.lib.get(id).and_then(|e| e.meta.shared.clone());
+    let shared = shared_info.is_some();
+    let may_copy = shared_info.is_none_or(|s| s.access().rights.copy);
+    // Transfer ownership (`crate::collab`): one's own document shared with someone.
+    let transferable = lib
+        .lib
+        .get(id)
+        .and_then(|e| e.meta.sharing.as_ref())
+        .is_some_and(|s| !s.members.is_empty());
     commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), false));
     let menu = if state.filter == Filter::Trash {
         Menu::new("doc-context-menu")
@@ -1965,7 +1974,11 @@ fn on_row_context_menu(
             .item(MenuItem::new("ctx-open", "Open").icon("open-external"))
             .item(MenuItem::new("ctx-rename", "Rename…").icon("edit"))
             .separator()
-            .item(MenuItem::new("ctx-copy", "Copy…").icon("copy"))
+            .item(
+                MenuItem::new("ctx-copy", "Copy…")
+                    .icon("copy")
+                    .disabled(!may_copy),
+            )
             .item({
                 // P3G.1 (ER1.2, ER X8): a folder of the library (the Other documents browser's
                 // locations), or back to the top level.
@@ -2022,8 +2035,18 @@ fn on_row_context_menu(
                     .submenu(entries)
             })
             .item(MenuItem::new("ctx-properties", "Details…").icon("list-details"))
+            .item(
+                MenuItem::new("ctx-transfer", "Transfer ownership…")
+                    .icon("share")
+                    .disabled(!transferable),
+            )
             .separator()
-            .item(MenuItem::new("ctx-trash", "Move to trash").icon("delete"))
+            .item(if shared {
+                // Shared with me (`crate::collab`): the owner hears of it; the copy goes.
+                MenuItem::new("ctx-unshare", "Unshare with me").icon("delete")
+            } else {
+                MenuItem::new("ctx-trash", "Move to trash").icon("delete")
+            })
             .min_width(190.0)
     };
     let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
@@ -2052,6 +2075,20 @@ fn on_context_action(
         "ctx-rename" => open_rename_dialog(&mut commands, &theme, &entry),
         "ctx-copy" => open_copy_dialog(&mut commands, &theme, &entry),
         "ctx-trash" => open_trash_dialog(&mut commands, &theme, &entry),
+        "ctx-transfer" => commands
+            .queue(move |world: &mut World| crate::collab::share_dialog::open_transfer(world, id)),
+        "ctx-unshare" => {
+            let store = store.0.clone();
+            let name = entry.name.clone();
+            commands.queue(move |world: &mut World| {
+                crate::collab::sharing::leave(world, id);
+                let now = world.resource::<AppClock>().now();
+                world
+                    .resource_mut::<DocLibrary>()
+                    .execute(&store, &TrashEntry { id, now });
+                undo_toast(world, format!("Unshared \u{201c}{name}\u{201d} with you"));
+            });
+        }
         "ctx-delete-forever" => open_purge_dialog(&mut commands, &theme, &entry),
         "ctx-properties" => {
             commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), true))

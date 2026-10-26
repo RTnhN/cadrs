@@ -11,6 +11,7 @@
 //!   the kernel process's messages), deflated.
 //! - [`sync`]: editing a document together, the owner putting everyone's edits in one order.
 
+pub mod comments;
 pub mod sync;
 
 use std::io::{Read, Write};
@@ -33,6 +34,8 @@ pub enum Permission {
 }
 
 impl Permission {
+    pub const ALL: [Permission; 2] = [Permission::Edit, Permission::View];
+
     pub fn label(self) -> &'static str {
         match self {
             Permission::Edit => "Can edit",
@@ -45,6 +48,66 @@ impl Permission {
     }
 }
 
+/// The share dialog's checkboxes: what else someone may do with the document. With no
+/// peer-to-peer server, Copy, Export and Link document are kept by the recipient's cadrs, not
+/// enforced by the owner's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Rights {
+    /// Make a copy of the document.
+    pub copy: bool,
+    /// Export it.
+    pub export: bool,
+    /// Share it with others (through the owner).
+    pub share: bool,
+    /// Comment in it.
+    pub comment: bool,
+    /// Link to it from another document.
+    pub link: bool,
+}
+
+impl Rights {
+    /// What a permission gives unless the checkboxes say otherwise (Onshape: Can edit is
+    /// edit, copy, link, export, share and comment; Can view is view, copy, link, export and
+    /// comment).
+    pub fn of(permission: Permission) -> Self {
+        Self {
+            copy: true,
+            export: true,
+            share: permission == Permission::Edit,
+            comment: true,
+            link: true,
+        }
+    }
+
+    /// Only viewing (a link without exporting).
+    pub fn none() -> Self {
+        Self {
+            copy: false,
+            export: false,
+            share: false,
+            comment: false,
+            link: false,
+        }
+    }
+}
+
+/// Someone's access to a document: their permission and the checkboxes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Access {
+    pub permission: Permission,
+    pub rights: Rights,
+}
+
+impl Access {
+    /// The owner's: everything.
+    pub fn owner() -> Self {
+        Self {
+            permission: Permission::Edit,
+            rights: Rights::of(Permission::Edit),
+        }
+    }
+}
+
 /// Someone a document is shared with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member {
@@ -53,6 +116,23 @@ pub struct Member {
     /// Their display name when they were last seen.
     pub name: String,
     pub permission: Permission,
+    /// The checkboxes; `None` is the permission's own ([`Rights::of`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rights: Option<Rights>,
+    /// The room their link names, once it reached them: the owner sends the link again
+    /// until it is the current one (the room changes when someone is removed or link sharing
+    /// is turned off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered: Option<[u8; 32]>,
+}
+
+impl Member {
+    pub fn access(&self) -> Access {
+        Access {
+            permission: self.permission,
+            rights: self.rights.unwrap_or(Rights::of(self.permission)),
+        }
+    }
 }
 
 /// How the owner shares a document (kept in its metadata, on the owner's side only).
@@ -67,6 +147,9 @@ pub struct Sharing {
     /// Link sharing: anyone with the link gets this permission; `None` when it is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<Permission>,
+    /// **Allow exporting from the link**.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub link_export: bool,
 }
 
 impl Sharing {
@@ -76,17 +159,40 @@ impl Sharing {
             topic,
             members: Vec::new(),
             link: None,
+            link_export: false,
         }
     }
 
-    /// What `peer` may do, if anything: a member's own permission, or the link's for anyone
-    /// who knows the room. The owner is not a member and is never asked about.
-    pub fn permission(&self, peer: &str) -> Option<Permission> {
+    /// What `peer` may do, if anything: a member's own access, or the link's for anyone who
+    /// knows the room. The owner is not a member and is never asked about.
+    pub fn access(&self, peer: &str) -> Option<Access> {
         self.members
             .iter()
             .find(|m| m.id == peer)
-            .map(|m| m.permission)
-            .or(self.link)
+            .map(Member::access)
+            .or_else(|| self.link_access())
+    }
+
+    /// What the link gives.
+    pub fn link_access(&self) -> Option<Access> {
+        self.link.map(|permission| Access {
+            permission,
+            rights: Rights {
+                export: self.link_export,
+                share: false,
+                ..Rights::of(permission)
+            },
+        })
+    }
+
+    pub fn permission(&self, peer: &str) -> Option<Permission> {
+        self.access(peer).map(|a| a.permission)
+    }
+
+    /// Moves to a fresh room: every link made so far stops working (someone removed, link
+    /// sharing turned off). The members get the new link from the owner.
+    pub fn rotate(&mut self, topic: [u8; 32]) {
+        self.topic = topic;
     }
 }
 
@@ -100,6 +206,71 @@ pub struct SharedInfo {
     /// The link to rejoin it by.
     pub link: String,
     pub permission: Permission,
+    /// The checkboxes the owner gave (older copies: the permission's own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rights: Option<Rights>,
+}
+
+impl SharedInfo {
+    pub fn access(&self) -> Access {
+        Access {
+            permission: self.permission,
+            rights: self.rights.unwrap_or(Rights::of(self.permission)),
+        }
+    }
+}
+
+/// Someone this user has shared with or been shared by, to pick in the share dialog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Contact {
+    /// Their cadrs ID.
+    pub id: String,
+    pub name: String,
+}
+
+/// The contacts, kept in `contacts.ron` next to the documents.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Contacts(pub Vec<Contact>);
+
+impl Contacts {
+    pub const FILE: &'static str = "contacts.ron";
+
+    pub fn load(root: &std::path::Path) -> Self {
+        std::fs::read_to_string(root.join(Self::FILE))
+            .ok()
+            .and_then(|t| ron::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, root: &std::path::Path) -> std::io::Result<()> {
+        let text =
+            ron::ser::to_string_pretty(self, Default::default()).map_err(std::io::Error::other)?;
+        std::fs::create_dir_all(root)?;
+        let path = root.join(Self::FILE);
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, path)
+    }
+
+    /// Adds or renames `id`; true if anything changed. The most recent comes first.
+    pub fn note(&mut self, id: &str, name: &str) -> bool {
+        if self.0.first().is_some_and(|c| c.id == id && c.name == name) {
+            return false;
+        }
+        self.0.retain(|c| c.id != id);
+        self.0.insert(
+            0,
+            Contact {
+                id: id.to_string(),
+                name: name.to_string(),
+            },
+        );
+        true
+    }
+
+    pub fn name(&self, id: &str) -> Option<&str> {
+        self.0.iter().find(|c| c.id == id).map(|c| c.name.as_str())
+    }
 }
 
 /// An imported file a document uses ([`crate::blobs`]).
@@ -254,13 +425,34 @@ mod tests {
         assert_eq!(s.permission("bob"), None);
         s.link = Some(Permission::View);
         assert_eq!(s.permission("bob"), Some(Permission::View));
+        // A link exports only when allowed, and never reshares.
+        let link = s.access("bob").unwrap().rights;
+        assert!(!link.export && !link.share && link.copy);
         s.members.push(Member {
             id: "bob".into(),
             name: "Bob".into(),
             permission: Permission::Edit,
+            rights: None,
+            delivered: None,
         });
         assert_eq!(s.permission("bob"), Some(Permission::Edit));
+        assert!(s.access("bob").unwrap().rights.share);
         assert_eq!(s.permission("eve"), Some(Permission::View));
+    }
+
+    #[test]
+    fn contacts_keep_the_latest_first_and_round_trip() {
+        let dir = std::env::temp_dir().join(format!("cadrs-contacts-{}", uuid::Uuid::new_v4()));
+        let mut c = Contacts::default();
+        assert!(c.note("a", "Ann"));
+        assert!(c.note("b", "Bo"));
+        assert!(!c.note("b", "Bo"));
+        assert!(c.note("a", "Ann B."));
+        assert_eq!(c.0[0].name, "Ann B.");
+        assert_eq!(c.0.len(), 2);
+        c.save(&dir).unwrap();
+        assert_eq!(Contacts::load(&dir), c);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

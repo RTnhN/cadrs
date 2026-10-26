@@ -10,6 +10,7 @@ pub struct Avatar {
     name: String,
     user: String,
     size: f32,
+    color: Option<Color>,
 }
 
 impl Avatar {
@@ -19,11 +20,18 @@ impl Avatar {
             name: name.into(),
             user: user.into(),
             size: 24.0,
+            color: None,
         }
     }
 
     pub fn size(mut self, s: f32) -> Self {
         self.size = s;
+        self
+    }
+
+    /// Its colour, rather than one picked from the user's name (a collaborator's colour).
+    pub fn color(mut self, c: Color) -> Self {
+        self.color = Some(c);
         self
     }
 
@@ -45,7 +53,9 @@ impl Avatar {
             .user
             .bytes()
             .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-        let bg = Color::Srgba(Srgba::hex(COLORS[hash as usize % COLORS.len()]).unwrap());
+        let bg = self.color.unwrap_or_else(|| {
+            Color::Srgba(Srgba::hex(COLORS[hash as usize % COLORS.len()]).unwrap())
+        });
         (
             Name::new(self.name),
             Node {

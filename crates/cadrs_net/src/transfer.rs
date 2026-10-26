@@ -1,14 +1,20 @@
-//! Asking a shared document's owner for something: one QUIC stream, dialled to the owner's
-//! key, on an ALPN of our own (bevy_iroh's direct messages stop at a megabyte; a document, or
-//! an edit that pastes one in, need not).
+//! Asking a peer about a shared document: one QUIC stream, dialled to the peer's key, on an
+//! ALPN of our own (bevy_iroh's direct messages stop at a megabyte; a document, or an edit
+//! that pastes one in, need not).
 //!
-//! - **Join**: the document as it is now ([`Welcome`]: the permission granted, the edit it is
-//!   at, the document).
+//! Of the owner:
+//! - **Join**: the document as it is now ([`Welcome`]: the access granted, the edit it is at,
+//!   the document).
 //! - **Propose**: an edit to number ([`Verdict`]). One at a time per peer, so they arrive in
 //!   the order they were made; the numbered edit itself reaches everyone over the room.
+//! - **AddMember**: share the document with someone else (for a member who may share).
+//! - **Leave**: "Unshare with me".
+//!
+//! Of anyone: **Invite**, the owner telling someone the document is shared with them (and its
+//! link, again whenever the room changes).
 //!
 //! Every request names the document and the room's topic, which only a holder of the link
-//! knows. The owner's app decides ([`OwnerRequests`]).
+//! knows. The app decides ([`Requests`]).
 
 use std::time::Duration;
 
@@ -21,9 +27,10 @@ use bevy_iroh::{
         protocol::{AcceptError, ProtocolHandler},
     },
 };
-use cadrs_core::DocumentId;
+use cadrs_core::collab::comments::{CommentOp, Comments};
 use cadrs_core::collab::sync::Change;
-use cadrs_core::collab::{self, Permission, Snapshot};
+use cadrs_core::collab::{self, Access, Sharing, Snapshot};
+use cadrs_core::{DocumentId, ElementId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::{mpsc, oneshot};
 
@@ -54,17 +61,70 @@ enum WireAsk {
         /// The packed [`Change`].
         change: Vec<u8>,
     },
+    Invite(Invite),
+    AddMember {
+        id: String,
+        name: String,
+        access: Access,
+    },
+    Leave,
+    /// The packed [`CommentOp`] (postcard can't carry its optional fields).
+    Comment(Vec<u8>),
+    CreateVersion {
+        epoch: u64,
+        name: String,
+        description: String,
+    },
+    Lock {
+        element: ElementId,
+        take: bool,
+    },
+    Unlock {
+        element: ElementId,
+    },
+    /// The packed [`Snapshot`].
+    Handover(Vec<u8>),
+    /// The packed [`Ownership`].
+    TakeOwnership(Vec<u8>),
+    Status,
+}
+
+/// A document given to a new owner (Transfer ownership): as it is, with who it is shared with
+/// and its comments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Ownership {
+    pub snapshot: Snapshot,
+    pub sharing: Sharing,
+    pub comments: Comments,
+    /// The owner it came from.
+    pub from_name: String,
+}
+
+/// The owner telling someone a document is shared with them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Invite {
+    /// The link, which names the room as it is now.
+    pub link: String,
+    pub owner_name: String,
+    pub access: Access,
+    /// The share dialog's message; empty for a link sent again.
+    pub message: String,
+    /// True for a link sent again (the room changed): no news for the recipient.
+    pub update: bool,
 }
 
 /// What the owner sends someone they let in.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Welcome {
-    pub permission: Permission,
+    pub access: Access,
     pub owner_name: String,
     /// The owner's session: edits are numbered afresh each time the owner opens the document.
     pub epoch: u64,
     /// The document after edit `snapshot.seq`.
     pub snapshot: Snapshot,
+    /// Its comments.
+    #[serde(default)]
+    pub comments: Comments,
 }
 
 /// The owner's answer to a proposed edit.
@@ -81,7 +141,7 @@ pub enum Verdict {
     Closed,
 }
 
-/// What a peer asks the owner.
+/// What a peer asks.
 #[derive(Debug)]
 pub enum Ask {
     Join,
@@ -91,12 +151,43 @@ pub enum Ask {
         base: u64,
         change: Change,
     },
+    Invite(Invite),
+    AddMember {
+        id: String,
+        name: String,
+        access: Access,
+    },
+    Leave,
+    /// A change to the comments (for someone who may comment).
+    Comment(CommentOp),
+    /// Make a version of the document as it is (for someone who may edit).
+    CreateVersion {
+        epoch: u64,
+        name: String,
+        description: String,
+    },
+    /// Open a tab for oneself only (`take`: from whoever has it).
+    Lock {
+        element: ElementId,
+        take: bool,
+    },
+    /// Let the others edit it again.
+    Unlock {
+        element: ElementId,
+    },
+    /// From whoever kept the edits in order while the owner was away: the document as it is
+    /// now, for the owner to take on.
+    Handover(Snapshot),
+    /// To a member, from the owner: the document is theirs now.
+    TakeOwnership(Box<Ownership>),
+    /// Whether the owner has the document open (answered `Accepted(1)`, or `Accepted(0)`).
+    Status,
 }
 
 /// A peer's request. The app checks the topic and the peer against the document's sharing and
-/// [`answer`](Self::answer)s; one dropped unanswered is a refusal.
+/// answers; one dropped unanswered is a refusal.
 #[derive(Debug)]
-pub struct OwnerRequest {
+pub struct Request {
     pub from: EndpointId,
     pub document: DocumentId,
     pub topic: [u8; 32],
@@ -104,13 +195,13 @@ pub struct OwnerRequest {
     reply: oneshot::Sender<Result<Vec<u8>, String>>,
 }
 
-impl OwnerRequest {
+impl Request {
     /// Answers a Join with the document, or the reason it is refused (shown to the peer).
     pub fn welcome(self, welcome: Result<Welcome, String>) {
         let _ = self.reply.send(welcome.and_then(|w| collab::pack(&w)));
     }
 
-    /// Answers a Propose.
+    /// Answers a Propose, an Invite, an AddMember or a Leave.
     pub fn verdict(self, verdict: Verdict) {
         let _ = self.reply.send(collab::pack(&verdict));
     }
@@ -123,10 +214,10 @@ impl OwnerRequest {
 
 /// The requests that arrived and are not answered yet.
 #[derive(Resource)]
-pub struct OwnerRequests(mpsc::UnboundedReceiver<OwnerRequest>);
+pub struct Requests(mpsc::UnboundedReceiver<Request>);
 
-impl OwnerRequests {
-    pub fn drain(&mut self) -> Vec<OwnerRequest> {
+impl Requests {
+    pub fn drain(&mut self) -> Vec<Request> {
         let mut out = Vec::new();
         while let Ok(r) = self.0.try_recv() {
             out.push(r);
@@ -135,15 +226,15 @@ impl OwnerRequests {
     }
 }
 
-/// The accept side, and the [`OwnerRequests`] it feeds.
-pub(crate) fn handler() -> (Handler, OwnerRequests) {
+/// The accept side, and the [`Requests`] it feeds.
+pub(crate) fn handler() -> (Handler, Requests) {
     let (tx, rx) = mpsc::unbounded_channel();
-    (Handler { tx }, OwnerRequests(rx))
+    (Handler { tx }, Requests(rx))
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Handler {
-    tx: mpsc::UnboundedSender<OwnerRequest>,
+    tx: mpsc::UnboundedSender<Request>,
 }
 
 impl Handler {
@@ -162,10 +253,28 @@ impl Handler {
                 base,
                 change: collab::unpack(&change)?,
             },
+            WireAsk::Invite(i) => Ask::Invite(i),
+            WireAsk::AddMember { id, name, access } => Ask::AddMember { id, name, access },
+            WireAsk::Leave => Ask::Leave,
+            WireAsk::Comment(op) => Ask::Comment(collab::unpack(&op)?),
+            WireAsk::CreateVersion {
+                epoch,
+                name,
+                description,
+            } => Ask::CreateVersion {
+                epoch,
+                name,
+                description,
+            },
+            WireAsk::Lock { element, take } => Ask::Lock { element, take },
+            WireAsk::Unlock { element } => Ask::Unlock { element },
+            WireAsk::Handover(s) => Ask::Handover(collab::unpack(&s)?),
+            WireAsk::TakeOwnership(o) => Ask::TakeOwnership(Box::new(collab::unpack(&o)?)),
+            WireAsk::Status => Ask::Status,
         };
         let (reply, answer) = oneshot::channel();
         self.tx
-            .send(OwnerRequest {
+            .send(Request {
                 from,
                 document: wire.document,
                 topic: wire.topic,
@@ -276,4 +385,145 @@ pub fn start_propose(
     });
     let (endpoint, owner) = (iroh.endpoint(), link.owner.clone());
     iroh.spawn(async move { ask(endpoint, owner, wire?).await })
+}
+
+/// Tells `to` that a document is shared with them (or its new link).
+pub fn start_invite(
+    iroh: &Iroh,
+    to: EndpointId,
+    link: &ShareLink,
+    invite: Invite,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Invite(invite),
+    };
+    iroh.spawn(ask(iroh.endpoint(), EndpointAddr::new(to), wire))
+}
+
+/// Asks the link's owner to share the document with someone (a member who may share).
+pub fn start_add_member(
+    iroh: &Iroh,
+    link: &ShareLink,
+    id: String,
+    name: String,
+    access: Access,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::AddMember { id, name, access },
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Tells the link's owner this user no longer wants the document ("Unshare with me").
+pub fn start_leave(iroh: &Iroh, link: &ShareLink) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Leave,
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Sends a change to the comments to the link's owner.
+pub fn start_comment(
+    iroh: &Iroh,
+    link: &ShareLink,
+    op: CommentOp,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = collab::pack(&op).map(|op| Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Comment(op),
+    });
+    let (endpoint, owner) = (iroh.endpoint(), link.owner.clone());
+    iroh.spawn(async move { ask(endpoint, owner, wire?).await })
+}
+
+/// Asks the link's owner to make a version of the document as it is now.
+pub fn start_create_version(
+    iroh: &Iroh,
+    link: &ShareLink,
+    epoch: u64,
+    name: String,
+    description: String,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::CreateVersion {
+            epoch,
+            name,
+            description,
+        },
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Asks the link's owner to open a tab for this user only (`take`: from whoever has it), or
+/// (`lock` false) to let the others edit it again.
+pub fn start_lock(
+    iroh: &Iroh,
+    link: &ShareLink,
+    element: ElementId,
+    lock: bool,
+    take: bool,
+) -> IrohTask<Result<Verdict, String>> {
+    let request = if lock {
+        WireAsk::Lock { element, take }
+    } else {
+        WireAsk::Unlock { element }
+    };
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: request,
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Gives the real owner (back from away) the document as it is now: from whoever kept the
+/// edits in order meanwhile.
+pub fn start_handover(
+    iroh: &Iroh,
+    link: &ShareLink,
+    snapshot: &Snapshot,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = collab::pack(snapshot).map(|s| Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Handover(s),
+    });
+    let (endpoint, owner) = (iroh.endpoint(), link.owner.clone());
+    iroh.spawn(async move { ask(endpoint, owner, wire?).await })
+}
+
+/// Makes `to` the document's owner (Transfer ownership).
+pub fn start_transfer(
+    iroh: &Iroh,
+    to: EndpointId,
+    link: &ShareLink,
+    ownership: &Ownership,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = collab::pack(ownership).map(|o| Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::TakeOwnership(o),
+    });
+    let endpoint = iroh.endpoint();
+    iroh.spawn(async move { ask(endpoint, EndpointAddr::new(to), wire?).await })
+}
+
+/// Asks the link's owner whether they have the document open (a few bytes, where fetching it
+/// would be the whole document).
+pub fn start_status(iroh: &Iroh, link: &ShareLink) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Status,
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
 }

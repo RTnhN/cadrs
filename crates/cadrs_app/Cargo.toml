@@ -52,3 +52,5 @@ default = ["kicad", "easyeda"]
 kicad = ["dep:cadrs_kicad"]
 # The online part search (JLCPCB/LCSC, EasyEDA parts) in the library browser.
 easyeda = ["dep:cadrs_easyeda"]
+# Voice while editing together (`collab::voice`; cadrs_net's `voice`).
+voice = ["cadrs_net/voice"]
