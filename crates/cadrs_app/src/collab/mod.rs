@@ -27,6 +27,8 @@ pub mod presence;
 pub mod share_dialog;
 pub mod sharing;
 pub mod versions;
+#[cfg(feature = "voice")]
+pub mod voice;
 
 pub struct CollabPlugin;
 
@@ -41,6 +43,8 @@ impl Plugin for CollabPlugin {
         sharing::plugin(app);
         share_dialog::plugin(app);
         versions::plugin(app);
+        #[cfg(feature = "voice")]
+        voice::plugin(app);
     }
 }
 
@@ -143,6 +147,20 @@ pub fn script(world: &mut World, command: &str, args: &str) {
             }
         }
         ("unshare", [member]) => sharing::unshare(world, id, member),
+        // Transfer ownership to the member whose cadrs ID starts with this.
+        ("transfer", [prefix]) => {
+            let to = sharing::read(world, id).and_then(|(_, m)| {
+                m.sharing?
+                    .members
+                    .into_iter()
+                    .find(|x| x.id.starts_with(prefix))
+                    .map(|x| x.id)
+            });
+            match to {
+                Some(to) => sharing::transfer(world, id, &to),
+                None => Err(format!("no member's cadrs ID starts with {prefix}")),
+            }
+        }
         ("share-link", ["off"]) => sharing::set_link(world, id, None, false),
         ("share-link", [p]) => sharing::set_link(world, id, Some(permission(Some(p))), true),
         _ => Err(format!("{command} {args}: not understood")),
