@@ -70,6 +70,11 @@ enum WireAsk {
     Leave,
     /// The packed [`CommentOp`] (postcard can't carry its optional fields).
     Comment(Vec<u8>),
+    CreateVersion {
+        epoch: u64,
+        name: String,
+        description: String,
+    },
 }
 
 /// The owner telling someone a document is shared with them.
@@ -132,6 +137,12 @@ pub enum Ask {
     Leave,
     /// A change to the comments (for someone who may comment).
     Comment(CommentOp),
+    /// Make a version of the document as it is (for someone who may edit).
+    CreateVersion {
+        epoch: u64,
+        name: String,
+        description: String,
+    },
 }
 
 /// A peer's request. The app checks the topic and the peer against the document's sharing and
@@ -207,6 +218,15 @@ impl Handler {
             WireAsk::AddMember { id, name, access } => Ask::AddMember { id, name, access },
             WireAsk::Leave => Ask::Leave,
             WireAsk::Comment(op) => Ask::Comment(collab::unpack(&op)?),
+            WireAsk::CreateVersion {
+                epoch,
+                name,
+                description,
+            } => Ask::CreateVersion {
+                epoch,
+                name,
+                description,
+            },
         };
         let (reply, answer) = oneshot::channel();
         self.tx
@@ -377,4 +397,24 @@ pub fn start_comment(
     });
     let (endpoint, owner) = (iroh.endpoint(), link.owner.clone());
     iroh.spawn(async move { ask(endpoint, owner, wire?).await })
+}
+
+/// Asks the link's owner to make a version of the document as it is now.
+pub fn start_create_version(
+    iroh: &Iroh,
+    link: &ShareLink,
+    epoch: u64,
+    name: String,
+    description: String,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::CreateVersion {
+            epoch,
+            name,
+            description,
+        },
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
 }

@@ -25,6 +25,7 @@ pub mod live;
 pub mod presence;
 pub mod share_dialog;
 pub mod sharing;
+pub mod versions;
 
 pub struct CollabPlugin;
 
@@ -37,6 +38,7 @@ impl Plugin for CollabPlugin {
         presence::plugin(app);
         sharing::plugin(app);
         share_dialog::plugin(app);
+        versions::plugin(app);
     }
 }
 

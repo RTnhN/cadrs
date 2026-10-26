@@ -88,6 +88,18 @@ pub struct Owner {
     confirmed: Document,
 }
 
+impl Owner {
+    /// The number of the last edit.
+    pub fn seq(&self) -> u64 {
+        self.seq.seq()
+    }
+
+    /// The document after it.
+    pub fn confirmed(&self) -> &Document {
+        &self.confirmed
+    }
+}
+
 pub struct Guest {
     pub link: ShareLink,
     pub owner_name: String,
@@ -114,6 +126,11 @@ pub enum GuestState {
     Away { since: f64 },
     /// The owner stopped sharing it with this user: the last copy, read-only, for good.
     Removed,
+}
+
+/// True while the open document is someone else's, shared live.
+pub fn is_guest(world: &World) -> bool {
+    world.get_resource::<Live>().is_some_and(|l| !l.is_owner())
 }
 
 /// True while the open document is shared live (with others or waiting for them).
@@ -209,7 +226,7 @@ fn me(world: &World) -> Option<(String, String)> {
 }
 
 /// A peer's name as their cadrs says it, or a short form of their key.
-fn peer_name(world: &mut World, id: EndpointId) -> String {
+pub(super) fn peer_name(world: &mut World, id: EndpointId) -> String {
     let mut q = world.query::<&Peer>();
     q.iter(world)
         .find(|p| p.id == id)
@@ -271,6 +288,14 @@ fn wanted(world: &World) -> Option<(DocumentId, String, Want)> {
     }
     let d = world.get_resource::<ActiveDocument>()?;
     let meta = d.meta.as_ref()?;
+    // Main is the shared workspace (`super::versions`): a branch is one's own.
+    let on_branch = world
+        .get_resource::<crate::history_panel::DocLog>()
+        .and_then(|l| l.log.as_ref())
+        .is_some_and(|l| l.document == d.doc.id && !l.current_workspace().is_main());
+    if on_branch {
+        return None;
+    }
     let want = match (&meta.shared, &meta.sharing) {
         (Some(s), _) => Want::Guest {
             link: s.link.parse().ok()?,
@@ -320,6 +345,13 @@ fn start_stop(world: &mut World) {
         }
     }
     let Some((document, name, want)) = want else {
+        // Someone else's document on a branch of one's own: it is edited here.
+        if let Some(mut d) = world.get_resource_mut::<ActiveDocument>()
+            && d.meta.as_ref().is_some_and(|m| m.shared.is_some())
+            && d.read_only.is_some()
+        {
+            d.read_only = None;
+        }
         return;
     };
     let live = match want {
@@ -427,7 +459,7 @@ fn own_edits(
 
 /// Numbers whatever the owner's document has that the last numbered edit doesn't. Also before
 /// a peer's edit is taken, so it lands on top of the owner's.
-fn number_own(world: &mut World) {
+pub(super) fn number_own(world: &mut World) {
     if !world.contains_resource::<Live>() || !world.contains_resource::<ActiveDocument>() {
         return;
     }
@@ -476,6 +508,7 @@ fn serve(world: &mut World) {
             Ask::Join => join(world, r),
             Ask::Propose { .. } => propose(world, r),
             Ask::Comment(_) => super::comments::answer(world, r),
+            Ask::CreateVersion { .. } => super::versions::answer(world, r),
             _ => super::sharing::answer(world, r),
         }
     }
