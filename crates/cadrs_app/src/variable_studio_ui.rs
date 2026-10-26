@@ -8,7 +8,9 @@
 //!   **Description**; Name, Value and Description are edited in place
 //!   (`variable-studio-row-<n>-name`, `-value`, `-description`, `cadrs_ui::GridCell`). Enter or
 //!   Tab commits a cell, Esc puts it back; each commit is one undo step, and every Part Studio
-//!   and Assembly naming the variable follows (Assemblies re-solved in the same step).
+//!   and Assembly naming the variable follows (Assemblies re-solved off the UI thread, their
+//!   placements joining the same step; a second edit of the definitions while that solve runs
+//!   waits for it, so each edit undoes with its own placements).
 //! - **Adding a variable**: type a name in the last row (`variable-studio-new-name`, "Add
 //!   variable"; a name takes letters, digits and `_`); the new row is a Length of 0 in the
 //!   workspace unit and the caret moves to its Value. The Type cell (`-type`) is a menu:
@@ -35,13 +37,17 @@
 //! What Onshape's Variable Studio has and this doesn't (CSV From import, non-numeric Any,
 //! configurations, Release) is listed in [`cadrs_core::variable_studio`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::FontWeight;
 use bevy::ui_widgets::Activate;
 use cadrs_core::ElementId;
+use cadrs_core::assembly::mate::MateFeature;
+use cadrs_core::assembly::{Assembly, InstanceId, Pose};
+use cadrs_core::rebuild::Build;
 use cadrs_core::variable_studio::{self as vs, InsertedTable, SetVariableStudio, VariableStudio};
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
@@ -72,6 +78,7 @@ impl Plugin for VariableStudioUiPlugin {
                     read_insert_search,
                     sync_insert_dialog,
                     sync_insert_list,
+                    finish_studio_solve,
                 )
                     .chain()
                     .run_if(in_state(AppState::Document)),
@@ -79,6 +86,7 @@ impl Plugin for VariableStudioUiPlugin {
             .add_systems(OnExit(AppState::Document), |world: &mut World| {
                 *world.resource_mut::<VsUi>() = VsUi::default();
                 world.remove_resource::<InsertSession>();
+                world.remove_resource::<StudioSolve>();
             })
             .add_observer(on_cell_commit)
             .add_observer(on_button)
@@ -1034,52 +1042,35 @@ fn active_studio(world: &World) -> Option<(ElementId, VariableStudio)> {
 }
 
 /// Replaces the active Variable Studio's contents: one undo step. Assemblies whose mate offsets
-/// name a changed variable are solved again afterwards, against the parts as the change left
-/// them, and their placements join the same undo step.
+/// name a changed variable are solved again afterwards, off the UI thread ([`StudioSolve`]),
+/// and their placements join the same undo step.
 fn set_studio(world: &mut World, element: ElementId, studio: VariableStudio, label: &str) -> bool {
     let Some(doc) = world.get_resource::<ActiveDocument>() else {
         return false;
     };
     let cmd = SetVariableStudio::new(&doc.doc, element, studio, label);
-    let mates_before: Vec<(ElementId, Vec<cadrs_core::assembly::mate::MateFeature>)> = doc
+    // An edit that may move mates while the last edit's solve runs: that one finishes first, so
+    // each step keeps its own placements. (Only then: a description, or a studio no tab uses,
+    // goes on at once, and the solve still running places its result after it.)
+    let current = doc.doc.element(element).and_then(vs::studio_of);
+    if cmd.reaches_others && current.is_some_and(|s| !same_definitions(s, &cmd.studio)) {
+        finish_studio_solve_now(world);
+    }
+    let doc = world.resource::<ActiveDocument>();
+    let mates_before: Vec<(ElementId, Vec<MateFeature>)> = doc
         .doc
         .elements
         .iter()
         .filter_map(|e| Some((e.id, e.assembly_model()?.mates.clone())))
         .collect();
-    let mark = doc.history.undo_len();
+    let revision = doc.history.revision();
     let mut doc = world.resource_mut::<ActiveDocument>();
     if let Err(e) = doc.execute(&cmd) {
         linked::error_toast(world, e.to_string());
         return false;
     }
-    let poses = assembly_poses(world, &mates_before);
-    if !poses.is_empty() {
-        let mut doc = world.resource_mut::<ActiveDocument>();
-        let place = SetVariableStudio {
-            poses,
-            ..SetVariableStudio::new(&doc.doc, element, cmd.studio.clone(), label)
-        };
-        if doc.execute(&place).is_ok() {
-            doc.squash_since(mark, label);
-        }
-    }
-    true
-}
-
-/// The placements of every Assembly whose mates changed from `before` (their offsets followed
-/// the studio), solved with the document as it is now.
-fn assembly_poses(
-    world: &mut World,
-    before: &[(ElementId, Vec<cadrs_core::assembly::mate::MateFeature>)],
-) -> Vec<(
-    ElementId,
-    Vec<(cadrs_core::assembly::InstanceId, cadrs_core::assembly::Pose)>,
-)> {
-    let Some(doc) = world.get_resource::<ActiveDocument>() else {
-        return Vec::new();
-    };
-    let changed: Vec<ElementId> = before
+    let doc = world.resource::<ActiveDocument>();
+    let assemblies: Vec<ElementId> = mates_before
         .iter()
         .filter(|(id, mates)| {
             doc.doc
@@ -1089,24 +1080,294 @@ fn assembly_poses(
         })
         .map(|(id, _)| *id)
         .collect();
-    if changed.is_empty() {
-        return Vec::new();
+    if !assemblies.is_empty() && doc.history.revision() != revision {
+        let solve = StudioSolve {
+            studio: element,
+            label: label.to_string(),
+            history: doc.history.id(),
+            edit: Some(doc.history.revision()),
+            assemblies,
+            stage: Stage::Builds,
+        };
+        world.insert_resource(solve);
     }
+    true
+}
+
+/// Whether two studios define the same variables (they differ at most in descriptions).
+fn same_definitions(a: &VariableStudio, b: &VariableStudio) -> bool {
+    let bare = |s: &VariableStudio| {
+        let mut s = s.clone();
+        for r in &mut s.variables {
+            r.var.description.clear();
+        }
+        s
+    };
+    bare(a) == bare(b)
+}
+
+type Poses = Vec<(ElementId, Vec<(InstanceId, Pose)>)>;
+
+/// Assemblies being solved again after a Variable Studio edit moved their mate offsets, so a
+/// large assembly doesn't hold the UI: the Part Studios they use are rebuilt (polled each frame
+/// through [`crate::assembly::AssemblyParts`], which knows linked and inserted ones too), then
+/// the solve runs on a task. What [`finish_studio_solve`] does with the result, by how the
+/// document is when it is ready:
+///
+/// | The document                                   | The placements                        |
+/// |------------------------------------------------|---------------------------------------|
+/// | as the edit left it, nothing since             | join the edit's undo step             |
+/// | assemblies and parts as solved, other steps since | a step of their own ("… placements") |
+/// | undone to before the edit (redo stack not empty) | wait: a redo brings the solved state back |
+/// | changed by another edit                        | solved again as it is now             |
+/// | another workspace or document                  | dropped                               |
+#[derive(Resource)]
+struct StudioSolve {
+    studio: ElementId,
+    label: String,
+    /// The history it belongs to ([`cadrs_core::History::id`]).
+    history: u64,
+    /// The history's revision right after the edit; `None` once anything happened since (the
+    /// placements are then a step of their own).
+    edit: Option<u64>,
+    assemblies: Vec<ElementId>,
+    stage: Stage,
+}
+
+enum Stage {
+    /// Waiting for the Part Studios' rebuilds.
+    Builds,
+    /// Solving `inputs` on a task.
+    Solving {
+        inputs: Vec<SolveInput>,
+        task: bevy::tasks::Task<Poses>,
+    },
+    /// Solved `inputs`: placed once the document is as they were.
+    Solved {
+        inputs: Vec<SolveInput>,
+        poses: Poses,
+        /// The history's revision when the document was last compared with `inputs` (`None`:
+        /// not yet).
+        checked: Option<u64>,
+    },
+}
+
+/// What an assembly was solved with: its model, and each source studio's build.
+struct SolveInput {
+    id: ElementId,
+    asm: Assembly,
+    builds: Vec<(ElementId, Option<Arc<Build>>)>,
+    solids: HashMap<InstanceId, Arc<cadrs_core::solid::Solid>>,
+}
+
+impl SolveInput {
+    /// Whether `other` is the same assembly with the same builds.
+    fn same(&self, other: &SolveInput) -> bool {
+        let same_build = |a: &Option<Arc<Build>>, b: &Option<Arc<Build>>| match (a, b) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        self.id == other.id
+            && self.asm == other.asm
+            && self.builds.len() == other.builds.len()
+            && self
+                .builds
+                .iter()
+                .zip(&other.builds)
+                .all(|((e, a), (f, b))| e == f && same_build(a, b))
+    }
+}
+
+/// The solver's inputs for `assemblies` as the document is now; `None` while a Part Studio they
+/// use is still rebuilding (with `wait`, it is waited for).
+fn solve_inputs(
+    world: &mut World,
+    assemblies: &[ElementId],
+    wait: bool,
+) -> Option<Vec<SolveInput>> {
+    let budget = (!wait).then_some(std::time::Duration::ZERO);
     world.resource_scope(|world, mut parts: Mut<crate::assembly::AssemblyParts>| {
         let doc = &world.resource::<ActiveDocument>().doc;
-        changed
-            .into_iter()
+        let mut ready = true;
+        let inputs = assemblies
+            .iter()
             .filter_map(|id| {
-                let asm = doc.element(id)?.assembly_model()?;
-                let model = cadrs_core::assembly::structure::solver_model(doc, asm);
-                let solids =
-                    cadrs_core::assembly::occurrence_solids(doc, asm, |e| parts.build(doc, e));
-                let sol = cadrs_core::assembly::solve(&model, &solids, &Default::default());
-                let poses = sol.changed(&model);
-                (!poses.is_empty()).then_some((id, poses))
+                let asm = doc.element(*id)?.assembly_model()?;
+                let mut builds = Vec::new();
+                let solids = cadrs_core::assembly::occurrence_solids(doc, asm, |e| {
+                    let (b, done) = parts.build_within(doc, e, budget);
+                    ready &= done;
+                    builds.push((e, b.clone()));
+                    b
+                });
+                Some(SolveInput {
+                    id: *id,
+                    asm: asm.clone(),
+                    builds,
+                    solids,
+                })
             })
-            .collect()
+            .collect();
+        ready.then_some(inputs)
     })
+}
+
+/// Advances the [`StudioSolve`] (see there).
+fn finish_studio_solve(world: &mut World) {
+    step_studio_solve(world, false);
+}
+
+/// Finishes the [`StudioSolve`] now, waiting for it (an edit is about to start). One waiting
+/// for a redo is dropped: the edit goes on from the undone state.
+fn finish_studio_solve_now(world: &mut World) {
+    while world.contains_resource::<StudioSolve>() {
+        if !step_studio_solve(world, true) {
+            world.remove_resource::<StudioSolve>();
+        }
+    }
+}
+
+/// One step of the [`StudioSolve`]; false if it is waiting: for the document to come back to
+/// the state it solved, or (without `wait`) for its builds or its task.
+fn step_studio_solve(world: &mut World, wait: bool) -> bool {
+    let Some(mut solve) = world.remove_resource::<StudioSolve>() else {
+        return true;
+    };
+    let (history, revision, browsing) = {
+        let h = &world.resource::<ActiveDocument>().history;
+        (h.id(), h.revision(), h.redo_len() > 0)
+    };
+    if history != solve.history {
+        // Another workspace or document.
+        return true;
+    }
+    if solve.edit.is_some_and(|r| r != revision) {
+        solve.edit = None;
+    }
+    // Browsing the history away from the edit: nothing is solved or placed until it comes back.
+    let browsing = browsing && solve.edit.is_none();
+    let progressed = match std::mem::replace(&mut solve.stage, Stage::Builds) {
+        Stage::Builds if browsing => false,
+        Stage::Builds => match solve_inputs(world, &solve.assemblies, wait) {
+            Some(inputs) => {
+                let jobs: Vec<(ElementId, Assembly, HashMap<_, _>)> = {
+                    let doc = &world.resource::<ActiveDocument>().doc;
+                    inputs
+                        .iter()
+                        .map(|i| {
+                            let model = cadrs_core::assembly::structure::solver_model(doc, &i.asm);
+                            (i.id, model, i.solids.clone())
+                        })
+                        .collect()
+                };
+                let task = bevy::tasks::AsyncComputeTaskPool::get().spawn(async move {
+                    jobs.iter()
+                        .filter_map(|(id, model, solids)| {
+                            let sol =
+                                cadrs_core::assembly::solve(model, solids, &Default::default());
+                            let poses = sol.changed(model);
+                            (!poses.is_empty()).then_some((*id, poses))
+                        })
+                        .collect()
+                });
+                solve.stage = Stage::Solving { inputs, task };
+                true
+            }
+            None => false,
+        },
+        Stage::Solving { inputs, task } if browsing => {
+            solve.stage = Stage::Solving { inputs, task };
+            false
+        }
+        Stage::Solving { inputs, mut task } => {
+            let done = if wait {
+                Some(bevy::tasks::block_on(&mut task))
+            } else {
+                bevy::tasks::futures::check_ready(&mut task)
+            };
+            match done {
+                Some(poses) => {
+                    solve.stage = Stage::Solved {
+                        inputs,
+                        poses,
+                        checked: None,
+                    };
+                    true
+                }
+                None => {
+                    solve.stage = Stage::Solving { inputs, task };
+                    false
+                }
+            }
+        }
+        Stage::Solved {
+            inputs,
+            poses,
+            checked,
+        } if browsing || (checked == Some(revision) && !wait) => {
+            // Undone (or redone with more to redo, where placing would drop the redo steps):
+            // wait for the history to move again.
+            solve.stage = Stage::Solved {
+                inputs,
+                poses,
+                checked: Some(revision),
+            };
+            false
+        }
+        Stage::Solved { inputs, poses, .. } => match solve_inputs(world, &solve.assemblies, wait) {
+            // Still rebuilding: look again next frame.
+            None => {
+                solve.stage = Stage::Solved {
+                    inputs,
+                    poses,
+                    checked: None,
+                };
+                false
+            }
+            Some(now)
+                if now.len() == inputs.len() && now.iter().zip(&inputs).all(|(a, b)| a.same(b)) =>
+            {
+                place_studio_poses(world, &solve, poses);
+                return true;
+            }
+            // Changed by another edit: solve again as the document is now.
+            Some(_) => {
+                solve.stage = Stage::Builds;
+                true
+            }
+        },
+    };
+    world.insert_resource(solve);
+    progressed
+}
+
+/// Commits a finished [`StudioSolve`]'s placements: in the edit's step if nothing happened
+/// since, else as a step of their own.
+fn place_studio_poses(world: &mut World, solve: &StudioSolve, poses: Poses) {
+    if poses.is_empty() {
+        return;
+    }
+    let doc = world.resource::<ActiveDocument>();
+    let Some(studio) = doc.doc.element(solve.studio).and_then(vs::studio_of) else {
+        return;
+    };
+    let label = match solve.edit {
+        Some(_) => solve.label.clone(),
+        None => format!("{} (placements)", solve.label),
+    };
+    let place = SetVariableStudio {
+        poses,
+        ..SetVariableStudio::new(&doc.doc, solve.studio, studio.clone(), &label)
+    };
+    let mut doc = world.resource_mut::<ActiveDocument>();
+    let revision = doc.history.revision();
+    if doc.execute(&place).is_ok() && solve.edit.is_some() && doc.history.revision() != revision {
+        // The edit's step and this one, counted from the top (at the step limit the oldest
+        // step went, so the edit's index isn't the one it had).
+        let mark = doc.history.undo_len().saturating_sub(2);
+        doc.squash_since(mark, &solve.label);
+    }
 }
 
 /// Applies `f` to the active Variable Studio's contents and commits them as `label`.
@@ -2470,5 +2731,228 @@ pub fn script(world: &mut World, arg: &str) {
             }
         }
         _ => warn!("variable-studio: unknown script command {arg:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadrs_core::assembly::mate::{MateKind, OffsetSlot};
+    use cadrs_core::samples::step_stool as ss;
+
+    /// The step stool with a studio whose `#lift` raises the Cross Bar through its mate's Z
+    /// offset.
+    fn stool() -> (App, ElementId) {
+        let mut doc = ss::document().unwrap();
+        let mut studio = cadrs_core::document::Element::variable_studio("Dimensions");
+        let s = studio.id;
+        let mut lift = studio::new_row("lift", &doc.units);
+        lift.var.expr = "0 mm".into();
+        let cadrs_core::document::ElementKind::VariableStudio(v) = &mut studio.kind else {
+            unreachable!()
+        };
+        v.variables.push(lift);
+        doc.elements.push(studio);
+        let asm = doc
+            .element_mut(ss::ASSEMBLY)
+            .unwrap()
+            .assembly_model_mut()
+            .unwrap();
+        let mate = asm
+            .mates
+            .iter_mut()
+            .find(|m| m.id == ss::FASTENED_1)
+            .unwrap();
+        let MateKind::Mate(m) = &mate.kind else {
+            unreachable!()
+        };
+        let z = m.offset.unwrap().translation[2];
+        mate.exprs = vec![(OffsetSlot::Z, format!("{z} mm + #lift"))];
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ActiveDocument::new(doc))
+            .init_resource::<crate::assembly::AssemblyParts>();
+        (app, s)
+    }
+
+    fn poses(app: &App) -> Vec<(InstanceId, Pose)> {
+        let doc = &app.world().resource::<ActiveDocument>().doc;
+        let asm = doc.element(ss::ASSEMBLY).unwrap().assembly_model().unwrap();
+        asm.instances.iter().map(|i| (i.id, i.pose)).collect()
+    }
+
+    /// How much further apart the Base and the Cross Bar are in `b` than in `a` (the solver may
+    /// move either).
+    fn apart(a: &[(InstanceId, Pose)], b: &[(InstanceId, Pose)]) -> f64 {
+        let at =
+            |p: &[(InstanceId, Pose)], i| p.iter().find(|(id, _)| *id == i).unwrap().1.translation;
+        let d = |p: &[(InstanceId, Pose)]| {
+            let (x, y) = (at(p, ss::BASE), at(p, ss::CROSS));
+            [y[0] - x[0], y[1] - x[1], y[2] - x[2]]
+        };
+        let (d0, d1) = (d(a), d(b));
+        ((d1[0] - d0[0]).powi(2) + (d1[1] - d0[1]).powi(2) + (d1[2] - d0[2]).powi(2)).sqrt()
+    }
+
+    /// Sets the studio's `#lift`.
+    fn lift(app: &mut App, s: ElementId, expr: &str) {
+        let doc = &app.world().resource::<ActiveDocument>().doc;
+        let mut st = vs::studio_of(doc.element(s).unwrap()).unwrap().clone();
+        st.variables[0].var.expr = expr.into();
+        assert!(set_studio(app.world_mut(), s, st, &format!("Lift {expr}")));
+    }
+
+    /// Runs the background solve until it is done, or waits for the document to come back.
+    fn settle(app: &mut App) {
+        let start = std::time::Instant::now();
+        loop {
+            assert!(start.elapsed().as_secs() < 120, "the solve never settled");
+            finish_studio_solve(app.world_mut());
+            let Some(solve) = app.world().get_resource::<StudioSolve>() else {
+                return;
+            };
+            let h = &app.world().resource::<ActiveDocument>().history;
+            let parked = match solve.stage {
+                Stage::Solved { checked, .. } => checked == Some(h.revision()),
+                Stage::Builds => solve.edit.is_none() && h.redo_len() > 0,
+                Stage::Solving { .. } => false,
+            };
+            if parked {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    fn doc(app: &mut App) -> Mut<'_, ActiveDocument> {
+        app.world_mut().resource_mut::<ActiveDocument>()
+    }
+
+    /// A studio edit commits at once; the assembly following it is solved on a task, and its
+    /// placements join the edit's undo step.
+    #[test]
+    fn an_assembly_is_solved_off_the_ui_thread_in_the_edits_step() {
+        let (mut app, s) = stool();
+        let before = poses(&app);
+        let undo = doc(&mut app).history.undo_len();
+        lift(&mut app, s, "25 mm");
+        assert!(app.world().contains_resource::<StudioSolve>());
+        settle(&mut app);
+        assert!(!app.world().contains_resource::<StudioSolve>());
+        let shift = apart(&before, &poses(&app));
+        assert!((shift - 25.0).abs() < 1e-6, "moved {shift} mm apart");
+        assert_eq!(doc(&mut app).history.undo_len(), undo + 1, "one undo step");
+        doc(&mut app).undo();
+        assert_eq!(poses(&app), before);
+    }
+
+    /// Undone before the solve is done: nothing is placed on the document the undo left; the
+    /// redo brings the edit back and its placements follow (a step of their own).
+    #[test]
+    fn an_undo_waits_for_the_redo() {
+        let (mut app, s) = stool();
+        let before = poses(&app);
+        let undo = doc(&mut app).history.undo_len();
+        lift(&mut app, s, "25 mm");
+        doc(&mut app).undo();
+        settle(&mut app);
+        assert_eq!(poses(&app), before);
+        assert_eq!(doc(&mut app).history.redo_len(), 1, "the redo is kept");
+        assert!(app.world().contains_resource::<StudioSolve>());
+        doc(&mut app).redo();
+        settle(&mut app);
+        assert!(!app.world().contains_resource::<StudioSolve>());
+        let shift = apart(&before, &poses(&app));
+        assert!((shift - 25.0).abs() < 1e-6, "moved {shift} mm apart");
+        assert_eq!(doc(&mut app).history.undo_len(), undo + 2);
+    }
+
+    /// An edit while the last one's solve runs: that one finishes first, so each edit undoes
+    /// with its own placements.
+    #[test]
+    fn each_edit_keeps_its_own_placements() {
+        let (mut app, s) = stool();
+        let before = poses(&app);
+        let undo = doc(&mut app).history.undo_len();
+        lift(&mut app, s, "10 mm");
+        lift(&mut app, s, "30 mm");
+        settle(&mut app);
+        assert_eq!(doc(&mut app).history.undo_len(), undo + 2);
+        assert!((apart(&before, &poses(&app)) - 30.0).abs() < 1e-6);
+        doc(&mut app).undo();
+        assert!((apart(&before, &poses(&app)) - 10.0).abs() < 1e-6);
+    }
+
+    /// Another edit before the solve is done that leaves the assembly and its parts as they
+    /// were: the placements still apply, as a step of their own after it.
+    #[test]
+    fn placements_after_an_unrelated_edit_are_their_own_step() {
+        let (mut app, s) = stool();
+        let before = poses(&app);
+        let undo = doc(&mut app).history.undo_len();
+        lift(&mut app, s, "25 mm");
+        let rename = cadrs_core::commands::RenameElement {
+            id: s,
+            name: "Sizes".into(),
+        };
+        doc(&mut app).execute(&rename).unwrap();
+        settle(&mut app);
+        assert!((apart(&before, &poses(&app)) - 25.0).abs() < 1e-6);
+        {
+            let mut d = doc(&mut app);
+            assert_eq!(d.history.undo_len(), undo + 3);
+            assert_eq!(d.history.undo_label(), Some("Lift 25 mm (placements)"));
+            d.undo();
+        }
+        assert_eq!(poses(&app), before, "the placements undo on their own");
+    }
+
+    /// At the history's step limit (the oldest step goes with each new one), the placements
+    /// still join the edit's step.
+    #[test]
+    fn placements_join_the_edit_at_the_step_limit() {
+        let (mut app, s) = stool();
+        doc(&mut app).history = cadrs_core::History::new(3);
+        for n in ["A", "B", "C", "D"] {
+            let rename = cadrs_core::commands::RenameElement {
+                id: s,
+                name: n.into(),
+            };
+            doc(&mut app).execute(&rename).unwrap();
+        }
+        assert_eq!(doc(&mut app).history.undo_len(), 3);
+        let before = poses(&app);
+        lift(&mut app, s, "25 mm");
+        settle(&mut app);
+        assert!((apart(&before, &poses(&app)) - 25.0).abs() < 1e-6);
+        {
+            let mut d = doc(&mut app);
+            assert_eq!(d.history.undo_label(), Some("Lift 25 mm"));
+            d.undo();
+        }
+        assert_eq!(
+            poses(&app),
+            before,
+            "one step undoes the edit and its placements"
+        );
+    }
+
+    /// An edit while a solve waits for an undo to be redone: the waiting solve is dropped (not
+    /// placed onto the undone state), and the new edit's own solve places its result.
+    #[test]
+    fn an_edit_after_an_undo_drops_the_waiting_solve() {
+        let (mut app, s) = stool();
+        let before = poses(&app);
+        let undo = doc(&mut app).history.undo_len();
+        lift(&mut app, s, "25 mm");
+        doc(&mut app).undo();
+        settle(&mut app);
+        assert_eq!(poses(&app), before);
+        lift(&mut app, s, "5 mm");
+        settle(&mut app);
+        assert!((apart(&before, &poses(&app)) - 5.0).abs() < 1e-6);
+        let d = doc(&mut app);
+        assert_eq!(d.history.undo_len(), undo + 1);
+        assert_eq!(d.history.redo_len(), 0);
     }
 }

@@ -1076,7 +1076,10 @@ fn insert_menu(paste: Option<String>) -> Menu {
         .separator()
         .item(MenuItem::new("create-part-studio", "Create Part Studio").icon("part-studio"))
         .item(MenuItem::new("create-assembly", "Create Assembly").icon("assembly"))
-        .item(MenuItem::new("create-variable-studio", "Create Variable Studio").icon("variables"))
+        .item(
+            MenuItem::new("create-variable-studio", "Create Variable Studio")
+                .icon("variable-studio"),
+        )
         // P3C.1: drawings.
         .item(MenuItem::new("create-drawing", "Create Drawing…").icon("details"))
         .item(MenuItem::new("create-folder", "Create folder").icon("folder"))
@@ -1230,7 +1233,7 @@ impl TabKind {
             TabKind::PcbStudio => "pcb-studio",
             TabKind::Render => "render-studio",
             TabKind::CamStudio => "cam-studio",
-            TabKind::VariableStudio => "variables",
+            TabKind::VariableStudio => "variable-studio",
         }
     }
 }

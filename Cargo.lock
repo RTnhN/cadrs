@@ -4199,9 +4199,9 @@ dependencies = [
 
 [[package]]
 name = "icon-rs"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a774236066f29af40b1704f75c13ec11e163950c709171720e129120f1e8ae4"
+checksum = "925077bb566e6524099bbb3e96bec3939e0711e2b42cc5ed83eb48fc5e5ce2dc"
 
 [[package]]
 name = "icu_collections"
