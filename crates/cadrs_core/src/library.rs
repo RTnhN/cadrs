@@ -101,13 +101,34 @@ pub struct DocumentEntry {
     pub meta: DocumentMeta,
 }
 
-/// A folder on the documents page.
+/// A folder on the documents page (#112: folders nest, and go to the trash with what they
+/// hold).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FolderEntry {
     pub id: FolderId,
     pub name: String,
     pub created: Timestamp,
     pub owned_by: String,
+    /// The folder it is in (`None`: the top level).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<FolderId>,
+    /// When it was moved to the trash (its documents and folders are hidden with it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trashed: Option<Timestamp>,
+}
+
+impl FolderEntry {
+    /// A new top-level folder.
+    pub fn new(id: FolderId, name: &str, user: &str, now: Timestamp) -> Self {
+        Self {
+            id,
+            name: name.to_string(),
+            created: now,
+            owned_by: user.to_string(),
+            parent: None,
+            trashed: None,
+        }
+    }
 }
 
 /// A document label (P3E.1): a name and a colour, shared by every document of the library.
@@ -198,7 +219,84 @@ impl Library {
         v
     }
 
-    /// The entries shown for `filter` (for `user`), sorted.
+    pub fn folder(&self, id: FolderId) -> Option<&FolderEntry> {
+        self.folders.iter().find(|f| f.id == id)
+    }
+
+    /// The folders in `parent` (`None`: the top level), trashed or not, by name.
+    pub fn subfolders(&self, parent: Option<FolderId>) -> Vec<FolderEntry> {
+        let mut v: Vec<FolderEntry> = self
+            .folders
+            .iter()
+            .filter(|f| f.parent == parent)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| natural_cmp(&a.name, &b.name).then_with(|| a.id.cmp(&b.id)));
+        v
+    }
+
+    /// `folder` and the folders it is in, innermost first (stopping at a missing one or a
+    /// loop).
+    pub fn folder_chain(&self, folder: FolderId) -> Vec<FolderId> {
+        let mut out = Vec::new();
+        let mut at = Some(folder);
+        while let Some(f) = at {
+            if out.contains(&f) {
+                break;
+            }
+            let Some(entry) = self.folder(f) else { break };
+            out.push(f);
+            at = entry.parent;
+        }
+        out
+    }
+
+    /// The folders from the top level down to `folder`, for a breadcrumb.
+    pub fn folder_path(&self, folder: FolderId) -> Vec<FolderEntry> {
+        let mut v: Vec<FolderEntry> = self
+            .folder_chain(folder)
+            .into_iter()
+            .filter_map(|f| self.folder(f).cloned())
+            .collect();
+        v.reverse();
+        v
+    }
+
+    /// Whether `folder` is `ancestor` or inside it, however deep.
+    pub fn is_within(&self, folder: FolderId, ancestor: FolderId) -> bool {
+        self.folder_chain(folder).contains(&ancestor)
+    }
+
+    /// Whether `folder` or a folder it is in is in the trash.
+    pub fn folder_hidden(&self, folder: FolderId) -> bool {
+        self.folder_chain(folder)
+            .iter()
+            .any(|f| self.folder(*f).is_some_and(|x| x.trashed.is_some()))
+    }
+
+    /// Whether a document is in a folder that is in the trash (it goes with it).
+    pub fn in_trashed_folder(&self, e: &DocumentEntry) -> bool {
+        e.meta.folder.is_some_and(|f| self.folder_hidden(f))
+    }
+
+    /// The folders in `folder`, however deep, `folder` first.
+    pub fn folder_tree(&self, folder: FolderId) -> Vec<FolderId> {
+        let mut out = vec![folder];
+        let mut k = 0;
+        while k < out.len() {
+            let at = out[k];
+            for f in &self.folders {
+                if f.parent == Some(at) && !out.contains(&f.id) {
+                    out.push(f.id);
+                }
+            }
+            k += 1;
+        }
+        out
+    }
+
+    /// The entries shown for `filter` (for `user`), sorted. A document in a trashed folder is
+    /// only listed with its folder (the Trash shows the folder).
     pub fn view(
         &self,
         filter: Filter,
@@ -212,6 +310,7 @@ impl Library {
             .entries
             .iter()
             .filter(|e| filter.matches(e, user))
+            .filter(|e| !self.in_trashed_folder(e))
             .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
             .cloned()
             .collect();
@@ -484,13 +583,14 @@ impl LibraryCommand for RestoreEntry {
     }
 }
 
-/// Creates a folder.
+/// Creates a folder (in `parent`, or at the top level).
 #[derive(Debug, Clone)]
 pub struct CreateFolder {
     pub id: FolderId,
     pub name: String,
     pub user: String,
     pub now: Timestamp,
+    pub parent: Option<FolderId>,
 }
 
 impl LibraryCommand for CreateFolder {
@@ -505,11 +605,14 @@ impl LibraryCommand for CreateFolder {
         if lib.folders.iter().any(|f| f.id == self.id) {
             return Err(CommandError::Invalid("folder id already in use".into()));
         }
+        if let Some(p) = self.parent
+            && lib.folder(p).is_none()
+        {
+            return Err(CommandError::Invalid("folder not found".into()));
+        }
         lib.folders.push(FolderEntry {
-            id: self.id,
-            name: name.to_string(),
-            created: self.now,
-            owned_by: self.user.clone(),
+            parent: self.parent,
+            ..FolderEntry::new(self.id, name, &self.user, self.now)
         });
         Ok(())
     }
@@ -536,6 +639,201 @@ impl LibraryCommand for MoveToFolder {
         entry_mut(lib, self.id)?.meta.folder = self.folder;
         Ok(())
     }
+}
+
+/// Moves documents and folders into a folder, or to the top level with `None`, in one step
+/// (#112: dragged onto a folder, or Move to with several selected). A folder can't go into
+/// itself or a folder inside it.
+#[derive(Debug, Clone)]
+pub struct MoveItems {
+    pub docs: Vec<DocumentId>,
+    pub folders: Vec<FolderId>,
+    pub to: Option<FolderId>,
+}
+
+impl LibraryCommand for MoveItems {
+    fn label(&self) -> String {
+        let n = self.docs.len() + self.folders.len();
+        if n == 1 && self.folders.is_empty() {
+            "Move document to folder".into()
+        } else if n == 1 {
+            "Move folder".into()
+        } else {
+            format!("Move {n} items")
+        }
+    }
+    fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
+        if let Some(t) = self.to {
+            if lib.folder(t).is_none() {
+                return Err(CommandError::Invalid("folder not found".into()));
+            }
+            if self.folders.iter().any(|f| lib.is_within(t, *f)) {
+                return Err(CommandError::Invalid(
+                    "a folder can't go into itself or a folder inside it".into(),
+                ));
+            }
+        }
+        for d in &self.docs {
+            entry_mut(lib, *d)?.meta.folder = self.to;
+        }
+        for f in &self.folders {
+            let e = lib
+                .folders
+                .iter_mut()
+                .find(|x| x.id == *f)
+                .ok_or_else(|| CommandError::Invalid("folder not found".into()))?;
+            e.parent = self.to;
+        }
+        Ok(())
+    }
+}
+
+/// Renames a folder.
+#[derive(Debug, Clone)]
+pub struct RenameFolder {
+    pub id: FolderId,
+    pub name: String,
+}
+
+impl LibraryCommand for RenameFolder {
+    fn label(&self) -> String {
+        format!("Rename folder to {}", self.name.trim())
+    }
+    fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
+        let name = self.name.trim();
+        if name.is_empty() {
+            return Err(CommandError::Invalid("name must not be empty".into()));
+        }
+        folder_mut(lib, self.id)?.name = name.to_string();
+        Ok(())
+    }
+}
+
+/// Moves a folder to the trash, or brings it back with `now` `None`: what it holds goes and
+/// comes back with it.
+#[derive(Debug, Clone)]
+pub struct TrashFolder {
+    pub id: FolderId,
+    pub now: Option<Timestamp>,
+}
+
+impl LibraryCommand for TrashFolder {
+    fn label(&self) -> String {
+        if self.now.is_some() {
+            "Move folder to trash".into()
+        } else {
+            "Restore folder".into()
+        }
+    }
+    fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
+        let f = folder_mut(lib, self.id)?;
+        if f.trashed.is_some() == self.now.is_some() {
+            return Err(CommandError::Invalid(if self.now.is_some() {
+                "folder is already in the trash".into()
+            } else {
+                "folder is not in the trash".into()
+            }));
+        }
+        f.trashed = self.now;
+        Ok(())
+    }
+}
+
+/// Moves documents and folders to the trash in one step (#112: a selection of several).
+#[derive(Debug, Clone)]
+pub struct TrashItems {
+    pub docs: Vec<DocumentId>,
+    pub folders: Vec<FolderId>,
+    pub now: Timestamp,
+}
+
+impl LibraryCommand for TrashItems {
+    fn label(&self) -> String {
+        format!(
+            "Move {} items to trash",
+            self.docs.len() + self.folders.len()
+        )
+    }
+    fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
+        for d in &self.docs {
+            let e = entry_mut(lib, *d)?;
+            if e.meta.trashed.is_none() {
+                e.meta.trashed = Some(self.now);
+            }
+        }
+        for f in &self.folders {
+            let e = folder_mut(lib, *f)?;
+            if e.trashed.is_none() {
+                e.trashed = Some(self.now);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Deletes a trashed folder permanently, with every folder and document in it (the store
+/// keeps the documents' files aside until the app exits, so undo can bring them back).
+#[derive(Debug, Clone)]
+pub struct PurgeFolder {
+    pub id: FolderId,
+}
+
+impl LibraryCommand for PurgeFolder {
+    fn label(&self) -> String {
+        "Delete folder permanently".into()
+    }
+    fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
+        if folder_mut(lib, self.id)?.trashed.is_none() {
+            return Err(CommandError::Invalid(
+                "only a folder in the trash can be deleted".into(),
+            ));
+        }
+        let tree = lib.folder_tree(self.id);
+        lib.entries
+            .retain(|e| e.meta.folder.is_none_or(|f| !tree.contains(&f)));
+        lib.folders.retain(|f| !tree.contains(&f.id));
+        Ok(())
+    }
+}
+
+/// Adds copies made on disk to the library in one step: folders (a folder copied with what it
+/// holds) and documents (the store writes the documents' copies first, as for [`AddEntry`]).
+#[derive(Debug, Clone)]
+pub struct AddCopies {
+    pub folders: Vec<FolderEntry>,
+    pub entries: Vec<DocumentEntry>,
+}
+
+impl LibraryCommand for AddCopies {
+    fn label(&self) -> String {
+        match (self.folders.first(), self.entries.as_slice()) {
+            (Some(f), _) => format!("Copy folder {}", f.name),
+            (None, [e]) => format!("Copy document {}", e.name),
+            (None, many) => format!("Copy {} documents", many.len()),
+        }
+    }
+    fn apply(&self, lib: &mut Library) -> Result<(), CommandError> {
+        for f in &self.folders {
+            if lib.folder(f.id).is_some() {
+                return Err(CommandError::Invalid("folder id already in use".into()));
+            }
+            lib.folders.push(f.clone());
+        }
+        for e in &self.entries {
+            if lib.get(e.id).is_some() {
+                return Err(CommandError::Invalid("document id already in use".into()));
+            }
+            lib.entries.push(e.clone());
+        }
+        Ok(())
+    }
+}
+
+fn folder_mut(lib: &mut Library, id: FolderId) -> Result<&mut FolderEntry, CommandError> {
+    lib.folders
+        .iter_mut()
+        .find(|f| f.id == id)
+        .ok_or_else(|| CommandError::Invalid("folder not found".into()))
 }
 
 /// Adds a document that already exists on disk to the library (Copy…: the store writes the
@@ -972,6 +1270,7 @@ mod tests {
             name: " Fixtures ".into(),
             user: "me".into(),
             now: 5,
+            parent: None,
         };
         h.execute(&mut l, &cmd).unwrap();
         assert_eq!(l.folders[0].name, "Fixtures");
@@ -1199,5 +1498,187 @@ mod tests {
         assert!(ItemType::All.shows_documents() && ItemType::All.shows_folders());
         assert!(ItemType::Documents.shows_documents() && !ItemType::Documents.shows_folders());
         assert!(!ItemType::Folders.shows_documents() && ItemType::Folders.shows_folders());
+    }
+
+    fn folder(n: u128, name: &str, parent: Option<u128>) -> FolderEntry {
+        FolderEntry {
+            parent: parent.map(FolderId::from_u128),
+            ..FolderEntry::new(FolderId::from_u128(n), name, "me", 0)
+        }
+    }
+
+    /// A library with folders A ⊃ B, and C, and the documents bracket in B and cover in C.
+    fn nested() -> Library {
+        let mut l = lib();
+        l.folders = vec![
+            folder(10, "A", None),
+            folder(11, "B", Some(10)),
+            folder(12, "C", None),
+        ];
+        l.entries[0].meta.folder = Some(FolderId::from_u128(11));
+        l.entries[3].meta.folder = Some(FolderId::from_u128(12));
+        l
+    }
+
+    #[test]
+    fn folders_nest() {
+        let l = nested();
+        let (a, b) = (FolderId::from_u128(10), FolderId::from_u128(11));
+        let path: Vec<String> = l.folder_path(b).into_iter().map(|f| f.name).collect();
+        assert_eq!(path, ["A", "B"]);
+        assert!(l.is_within(b, a) && !l.is_within(a, b));
+        assert_eq!(l.folder_tree(a), [a, b]);
+        let top: Vec<String> = l.subfolders(None).into_iter().map(|f| f.name).collect();
+        assert_eq!(top, ["A", "C"]);
+    }
+
+    #[test]
+    fn move_items_in_one_step_and_never_into_itself() {
+        let mut l = nested();
+        let mut h = LibraryHistory::default();
+        let (a, b, c) = (
+            FolderId::from_u128(10),
+            FolderId::from_u128(11),
+            FolderId::from_u128(12),
+        );
+        let (d2, d3) = (DocumentId::from_u128(2), DocumentId::from_u128(3));
+        h.execute(
+            &mut l,
+            &MoveItems {
+                docs: vec![d2, d3],
+                folders: vec![c],
+                to: Some(b),
+            },
+        )
+        .unwrap();
+        assert_eq!(l.get(d2).unwrap().meta.folder, Some(b));
+        assert_eq!(l.get(d3).unwrap().meta.folder, Some(b));
+        assert_eq!(l.folder(c).unwrap().parent, Some(b));
+        // A folder into itself or a folder inside it: refused, nothing changes.
+        let before = l.clone();
+        for to in [a, b] {
+            assert!(
+                h.execute(
+                    &mut l,
+                    &MoveItems {
+                        docs: vec![],
+                        folders: vec![a],
+                        to: Some(to),
+                    },
+                )
+                .is_err()
+            );
+        }
+        assert_eq!(l, before);
+        // One undo puts all three back.
+        h.undo(&mut l);
+        assert_eq!(l, nested());
+    }
+
+    #[test]
+    fn a_trashed_folder_hides_what_it_holds_and_brings_it_back() {
+        let mut l = nested();
+        let mut h = LibraryHistory::default();
+        let a = FolderId::from_u128(10);
+        let owned = |l: &Library| {
+            names(&l.view(
+                Filter::OwnedByMe,
+                "me",
+                "",
+                SortKey::Name,
+                SortDir::Ascending,
+            ))
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        };
+        assert!(owned(&l).contains(&"bracket".to_string()));
+        h.execute(
+            &mut l,
+            &TrashFolder {
+                id: a,
+                now: Some(9),
+            },
+        )
+        .unwrap();
+        // bracket is in B, inside A: hidden with it, and not listed in the Trash on its own.
+        assert!(!owned(&l).contains(&"bracket".to_string()));
+        assert!(
+            l.view(Filter::Trash, "me", "", SortKey::Name, SortDir::Ascending)
+                .is_empty()
+        );
+        assert!(l.folder_hidden(FolderId::from_u128(11)));
+        h.execute(&mut l, &TrashFolder { id: a, now: None })
+            .unwrap();
+        assert!(owned(&l).contains(&"bracket".to_string()));
+    }
+
+    #[test]
+    fn purging_a_folder_deletes_what_it_holds() {
+        let mut l = nested();
+        let mut h = LibraryHistory::default();
+        let a = FolderId::from_u128(10);
+        assert!(
+            h.execute(&mut l, &PurgeFolder { id: a }).is_err(),
+            "not trashed"
+        );
+        h.execute(
+            &mut l,
+            &TrashFolder {
+                id: a,
+                now: Some(9),
+            },
+        )
+        .unwrap();
+        h.execute(&mut l, &PurgeFolder { id: a }).unwrap();
+        assert!(l.folder(a).is_none() && l.folder(FolderId::from_u128(11)).is_none());
+        assert!(
+            l.get(DocumentId::from_u128(1)).is_none(),
+            "bracket went with B"
+        );
+        assert!(l.folder(FolderId::from_u128(12)).is_some());
+        h.undo(&mut l);
+        assert!(l.get(DocumentId::from_u128(1)).is_some());
+    }
+
+    #[test]
+    fn rename_and_copy_folders() {
+        let mut l = nested();
+        let mut h = LibraryHistory::default();
+        let c = FolderId::from_u128(12);
+        h.execute(
+            &mut l,
+            &RenameFolder {
+                id: c,
+                name: " Covers ".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(l.folder(c).unwrap().name, "Covers");
+        assert!(
+            h.execute(
+                &mut l,
+                &RenameFolder {
+                    id: c,
+                    name: " ".into()
+                }
+            )
+            .is_err()
+        );
+        let copy = FolderEntry::new(FolderId::from_u128(20), "Copy of Covers", "me", 5);
+        let mut doc = l.get(DocumentId::from_u128(4)).unwrap().clone();
+        doc.id = DocumentId::from_u128(21);
+        doc.meta.folder = Some(copy.id);
+        h.execute(
+            &mut l,
+            &AddCopies {
+                folders: vec![copy.clone()],
+                entries: vec![doc],
+            },
+        )
+        .unwrap();
+        assert_eq!(l.in_folder(copy.id).len(), 1);
+        h.undo(&mut l);
+        assert!(l.folder(copy.id).is_none() && l.get(DocumentId::from_u128(21)).is_none());
     }
 }

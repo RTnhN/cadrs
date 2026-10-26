@@ -13,7 +13,10 @@
 //!   swapped for the new ones and the app restarts. The running executable is renamed rather
 //!   than overwritten (Windows can't delete it while it runs); the next start removes it.
 //! - A build that isn't an install (run from a checkout's `target/`, with no `libraries/` beside
-//!   it), or a platform with no release archive, gets a link to the release page instead.
+//!   it), or a platform with no release archive, gets a link to the release page instead. macOS
+//!   is one for now: its release is a disk image of a signed app bundle (#103), and swapping files
+//!   inside the bundle would break its signature, so the new disk image is downloaded from the
+//!   page and dragged over the old app.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -826,6 +829,7 @@ fn archive_name(version: &str) -> Option<String> {
     let ext = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => "linux.tar.gz",
         ("windows", "x86_64") => "windows.zip",
+        // macOS (`cadrs-v<version>-universal-macos.dmg`): the release page (see the module docs).
         _ => return None,
     };
     Some(format!("cadrs-v{version}-x86_64-{ext}"))

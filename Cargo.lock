@@ -2206,7 +2206,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bevy",
  "cadrs_app",
@@ -2219,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_app"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bevy",
  "blake3",
@@ -2261,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_cam"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "clipper2-rust",
  "earcutr",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_core"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bincode",
  "blake3",
@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_drawing"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_kernel",
  "cadrs_sketch",
@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_easyeda"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_eda",
  "serde_json",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_eda"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "clipper2-rust",
  "earcutr",
@@ -2344,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_fea"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "faer",
  "rayon",
@@ -2353,7 +2353,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_gpu"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bytemuck",
  "cadrs_gpu_kernels",
@@ -2364,7 +2364,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_gpu_kernels"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "glam 0.33.9",
  "libm",
@@ -2373,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_harness"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bevy",
  "cadrs_ui",
@@ -2384,7 +2384,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_idf"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "flate2",
  "proptest",
@@ -2394,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_kernel"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_gpu",
  "cadrs_kernel",
@@ -2408,7 +2408,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_kicad"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_eda",
  "serde_json",
@@ -2417,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_libgen"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_eda",
  "uuid",
@@ -2425,7 +2425,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_mcp"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2452,7 +2452,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_onshape"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "base64 0.22.1",
  "cadrs_core",
@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_pcb"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_core",
  "cadrs_eda",
@@ -2481,7 +2481,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_render"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "image",
  "rayon",
@@ -2489,7 +2489,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_router"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bytemuck",
  "cadrs_eda",
@@ -2502,7 +2502,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_router_kernels"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "glam 0.33.9",
  "spirv-std",
@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_sheetmetal"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "earcutr",
  "geo",
@@ -2523,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_sketch"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_kernel",
  "earcutr",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_ui"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "bevy",
  "icon-rs",
@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "cadrs_vars"
-version = "0.1.8"
+version = "0.1.9-beta"
 dependencies = [
  "cadrs_sketch",
  "ron",

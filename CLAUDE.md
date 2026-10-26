@@ -22,8 +22,10 @@ Onshape-style CAD in Rust + Bevy 0.19.1. Local notes in `docs/` (git-ignored: `P
 - Windows exe: `cargo build -r --target x86_64-pc-windows-gnu` (MinGW is installed).
 - Release: bump `version` in the root `Cargo.toml`, write `tools/release/notes/v<version>.md`,
   then push the tag `v<version>`; `.github/workflows/release.yml` builds the Linux and Windows
-  archives, publishes the GitHub release and redeploys the site. `tools/release/build.sh` builds
-  the same archives locally.
+  archives and the macOS disk image (universal, ad-hoc signed; only on GitHub's macOS runner),
+  publishes the GitHub release and redeploys the site. `tools/release/build.sh` builds the Linux
+  and Windows archives locally. Actions › Release › Run workflow with "Only build" builds them all
+  as the run's artifacts without releasing.
 - Autorouter GPU shader: after changing `crates/cadrs_router_kernels`, rebuild its SPIR-V with
   `cargo gpu build --shader-crate crates/cadrs_router_kernels --output-dir crates/cadrs_router/shaders`
   (rust-gpu; commit the `.spv`). Without one the router runs on the CPU. Same for the kernel's

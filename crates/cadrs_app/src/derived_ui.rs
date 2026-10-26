@@ -2421,6 +2421,8 @@ pub fn script(world: &mut World, arg: &str) {
                     name: "Linked parts".into(),
                     created: now - 7_200,
                     owned_by: user.clone(),
+                    parent: None,
+                    trashed: None,
                 });
                 if let Err(e) = store.sync(&lib, &after) {
                     warn!("derived setup: {e}");

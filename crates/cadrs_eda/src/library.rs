@@ -267,8 +267,9 @@ struct LibraryInfo {
 }
 
 /// The folders the built-in libraries load from, in order: `$CADRS_LIBRARIES` (a path list)
-/// when set; else `libraries/` beside the executable or two levels up (`target/release/`), and
-/// the repository's `libraries/` this was built from.
+/// when set; else `libraries/` beside the executable, in the macOS app bundle's
+/// `Contents/Resources/` or two levels up (`target/release/`), and the repository's `libraries/`
+/// this was built from.
 pub fn builtin_dirs() -> Vec<PathBuf> {
     if let Some(v) = std::env::var_os("CADRS_LIBRARIES") {
         return std::env::split_paths(&v).collect();
@@ -279,6 +280,7 @@ pub fn builtin_dirs() -> Vec<PathBuf> {
         .and_then(|e| e.parent().map(Path::to_path_buf))
     {
         dirs.push(exe_dir.join("libraries"));
+        dirs.extend(exe_dir.parent().map(|d| d.join("Resources/libraries")));
         dirs.extend(
             exe_dir
                 .parent()

@@ -1,6 +1,16 @@
 # cadrs
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
+<!-- Download buttons: the latest release's files under their names without the version (see
+.github/workflows/release.yml), the version on each badge read from GitHub by shields.io. macOS
+goes to the releases page (its badge counts pre-releases) until a full release has the Mac
+build; then link it to https://github.com/rvdende/cadrs/releases/latest/download/cadrs-universal-macos.dmg like the others. -->
+<p>
+  <a href="https://github.com/rvdende/cadrs/releases/latest/download/cadrs-x86_64-windows.zip"><img alt="Download for Windows" src="https://img.shields.io/github/v/release/rvdende/cadrs?style=for-the-badge&label=Windows&color=0078d4&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZmlsbD0nd2hpdGUnIGQ9J00yIDQuNCAxMC4zIDMuM3Y4SDJ6TTExLjMgMy4xIDIyIDEuN3Y5LjZIMTEuM3pNMiAxMi40aDguM3Y4LjJMMiAxOS41ek0xMS4zIDEyLjRIMjJ2OS45bC0xMC43LTEuNXonLz48L3N2Zz4="></a>
+  <a href="https://github.com/rvdende/cadrs/releases"><img alt="Download for macOS" src="https://img.shields.io/github/v/release/rvdende/cadrs?style=for-the-badge&include_prereleases&label=macOS&color=444444&logo=apple"></a>
+  <a href="https://github.com/rvdende/cadrs/releases/latest/download/cadrs-x86_64-linux.tar.gz"><img alt="Download for Linux" src="https://img.shields.io/github/v/release/rvdende/cadrs?style=for-the-badge&label=Linux&color=e95420&logo=linux&logoColor=white"></a>
+</p>
+
 **A parametric, feature-based CAD app written in Rust**, with a Bevy UI and its own pure-Rust
 B-rep modeling kernel. Its workflow follows Onshape's: sketch on a plane, constrain and dimension,
 build parts from features, put them together in assemblies, and make drawings from them.
@@ -11,7 +21,14 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 ## Install
 
-Prebuilt Linux and Windows builds are on [GitHub Releases](https://github.com/rvdende/cadrs/releases).
+Prebuilt Linux, Windows and macOS builds are on [GitHub Releases](https://github.com/rvdende/cadrs/releases).
+
+On macOS, open the `.dmg` and drag cadrs to Applications. It runs on Apple silicon and Intel
+Macs (macOS 11 or later). The app isn't signed with an Apple Developer ID yet, so the first time
+macOS won't open it: right-click cadrs in Applications and choose Open, then Open again (on
+macOS 15 and later, open it once, then choose Open Anyway in System Settings › Privacy &
+Security). A newer release is installed the same way, over the old app.
+
 To install from source, with the [build prerequisites](#building) in place:
 
 ```sh
@@ -165,6 +182,12 @@ them, and `CADRS_BLESS=1` saves new ones.
 [crates/cadrs_kernel/README.md](crates/cadrs_kernel/README.md) describes the modeling layer:
 the kernel API, persistent face and edge naming, and the native kernel's design. The notes in
 `reference/onshape/` record how Onshape behaves, which is what cadrs is measured against.
+
+## Sponsors
+
+[Sponsor cadrs on GitHub](https://github.com/sponsors/rvdende). The list below updates daily.
+
+<!-- sponsors --><a href="https://github.com/thomasfla"><img src="https:&#x2F;&#x2F;github.com&#x2F;thomasfla.png" width="60px" alt="User avatar: Thomas Flayols" /></a><!-- sponsors -->
 
 ## License
 

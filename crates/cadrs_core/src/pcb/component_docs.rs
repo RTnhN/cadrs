@@ -118,12 +118,16 @@ pub fn ensure_folder(
             name: f.name.clone(),
             created: now,
             owned_by: user.to_string(),
+            parent: None,
+            trashed: None,
         },
         None => FolderEntry {
             id: FolderId::new(),
             name: DEFAULT_COMPONENT_FOLDER.into(),
             created: now,
             owned_by: user.to_string(),
+            parent: None,
+            trashed: None,
         },
     };
     let mut after = before.clone();
@@ -222,6 +226,8 @@ mod tests {
             name: "Mine".into(),
             created: 2,
             owned_by: "u".into(),
+            parent: None,
+            trashed: None,
         });
         store.sync(&before, &after).unwrap();
         let names: Vec<String> = store.list().0.folders.into_iter().map(|f| f.name).collect();
