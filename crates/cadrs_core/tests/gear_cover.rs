@@ -114,95 +114,124 @@ fn edge_ref(part: &Part, p: [f64; 3]) -> EdgeRef {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Closed forms (mm). The cover: W = 110 (x −55..55), L = 200 (y −200..0), H = 40, corners R 20
-// (centres (±35, −180) and (±35, −20)); the slope z = 24 + 0.2(y + 200) for y < −120; bosses
-// R 15, 6 high on the top at (±30, −40); holes M5 Close Ø5.3 (r_h 2.65) with a Ø9.75 (r_c
-// 4.875) × 5 counterbore; shell t = 4 with the bottom open.
+// The expected volumes (mm³), worked out by hand from the stand-in's dimensions (the
+// `gear_cover` constants) and the sizes the course's features use (below): no kernel is
+// involved. The test rebuilds the part with the kernel after each step and checks the volume
+// the kernel measures (`Studio::volume`, the part's mass properties) against these.
+//
+// The cover: x −HALF_WIDTH..HALF_WIDTH, y −LENGTH..0, z 0..HEIGHT, its plan's corners rounded
+// CORNER_R; the slope z = SLOPE_Z0 + SLOPE_K·(y + LENGTH) for y < SLOPE_END; two bosses of
+// radius BOSS_R, BOSS_H high on the top; six M5 Close holes (Ø 2·RH) through all with a Ø 2·RC
+// × CBORE counterbore, two on the bosses and four on the flat top; a shell of T with the
+// bottom open; a CHAMFER × 45° chamfer round each boss's top edge.
 
+/// Shell 1's thickness.
 const T: f64 = 4.0;
+/// The M5 Close hole's radius and its counterbore's radius and depth (the hole table's).
 const RH: f64 = 2.65;
 const RC: f64 = 4.875;
+const CBORE: f64 = 5.0;
+/// The bosses' chamfer.
+const CHAMFER: f64 = 2.0;
+/// The holes on the bosses and on the flat top.
+const BOSS_HOLES: f64 = 2.0;
+const TOP_HOLES: f64 = 4.0;
 
-/// ∫₀ˢ √(R² − u²) du.
-fn g(r: f64, s: f64) -> f64 {
-    (s * (r * r - s * s).max(0.0).sqrt() + r * r * (s / r).clamp(-1.0, 1.0).asin()) / 2.0
+/// The rounded corners' centres sit CORNER_R in from the sides: x ±(HALF_WIDTH − CORNER_R),
+/// y −LENGTH + CORNER_R (front) and −CORNER_R (back).
+fn corner_x() -> f64 {
+    gc::HALF_WIDTH - gc::CORNER_R
+}
+
+/// The slope's run from the front corners' centre line to where it meets the top.
+fn slope_run() -> f64 {
+    gc::SLOPE_END + gc::LENGTH - gc::CORNER_R
 }
 
 /// The body before any applied feature: the rounded prism, less the slope's wedge, plus the
-/// bosses.
-///   prism: H·(W·L − (4 − π)R²);
-///   wedge: ∫ w(y)·(H − z_s(y)) dy for y ∈ [−200, −120], with H − z_s = 0.2(−120 − y). On
-///     [−180, −120] w = 110: 110·0.2·60²/2 = 39 600. In the front corners (u = y + 180 ∈
-///     [−20, 0], w = 2(35 + √(400 − u²)), H − z_s = 0.2(60 − u)):
-///     0.4 [35·∫(60 − u) + 60·∫√(400 − u²) − ∫u√(400 − u²)] = 0.4 [35·1400 + 60·100π + 8000/3];
-///   bosses: 2·π·15²·6.
-fn body_volume() -> f64 {
-    let prism = 40.0 * (110.0 * 200.0 - (4.0 - PI) * 400.0);
-    let wedge = 39_600.0 + 0.4 * (35.0 * 1400.0 + 6000.0 * PI + 8000.0 / 3.0);
-    prism - wedge + 2.0 * PI * 225.0 * 6.0
+/// bosses. With R = CORNER_R, K = SLOPE_K, c = corner_x() and D = slope_run():
+///   prism: HEIGHT·(2·HALF_WIDTH·LENGTH − (4 − π)R²);
+///   wedge: ∫ w(y)·(HEIGHT − z_s(y)) dy over the slope, where HEIGHT − z_s = K·(SLOPE_END − y).
+///     Between the front corners and SLOPE_END the width is 2·HALF_WIDTH: HALF_WIDTH·K·D². In
+///     the front corners (u = y + LENGTH − R ∈ [−R, 0], w = 2(c + √(R² − u²)), HEIGHT − z_s =
+///     K(D − u)): 2K [c·(D·R + R²/2) + D·πR²/4 + R³/3];
+///   bosses: 2·π·BOSS_R²·BOSS_H.
+fn expected_body_volume() -> f64 {
+    let (r, k, c, d) = (gc::CORNER_R, gc::SLOPE_K, corner_x(), slope_run());
+    let prism = gc::HEIGHT * (2.0 * gc::HALF_WIDTH * gc::LENGTH - (4.0 - PI) * r * r);
+    let wedge = gc::HALF_WIDTH * k * d * d
+        + 2.0 * k * (c * (d * r + r * r / 2.0) + d * PI * r * r / 4.0 + r.powi(3) / 3.0);
+    let bosses = 2.0 * PI * gc::BOSS_R * gc::BOSS_R * gc::BOSS_H;
+    prism - wedge + bosses
 }
 
-/// What the six through-all counterbored holes remove from the body: on the two bosses (from
-/// their top at z 46) πr_c²·5 + πr_h²·41; the four on the flat top (from z 40) πr_c²·5 +
-/// πr_h²·35.
-fn holes_volume() -> f64 {
-    2.0 * (PI * RC * RC * 5.0 + PI * RH * RH * 41.0)
-        + 4.0 * (PI * RC * RC * 5.0 + PI * RH * RH * 35.0)
+/// What the counterbored holes, through all, remove from the body: each the counterbore
+/// πRC²·CBORE and the hole under it πRH²·(depth − CBORE), from the bosses' top (HEIGHT +
+/// BOSS_H) or the flat top (HEIGHT).
+fn expected_holes_volume() -> f64 {
+    let hole = |depth: f64| PI * RC * RC * CBORE + PI * RH * RH * (depth - CBORE);
+    BOSS_HOLES * hole(gc::HEIGHT + gc::BOSS_H) + TOP_HOLES * hole(gc::HEIGHT)
 }
 
-/// The shell's cavity when it comes after the holes (the course's order after step 4): the
-/// points of the holed body at least t from its faces (the bottom is open). The cover is convex,
-/// so away from the bosses and holes the cavity is the cover offset by t: plan x −51..51, y
-/// −196..−4 with corners R 16 on the same centres, up to z 36 and under the slope moved t along
-/// its normal (z = a + 0.2 u, u = y + 180, a = 28 − 4√1.04; it meets z 36 at
-/// y* = −140 + 20√1.04):
-///   front corners (u ∈ [−16, 0]): 2[35(16a − 25.6) + a·64π + 0.2·(−4096/3)];
-///   [−180, y*]: 102 [a (y* + 180) + 0.1 (y* + 180)²];  [y*, −20]: 102·36·(−20 − y*);
-///   back corners: 36·2(35·16 + 64π).
-/// Round each hole and boss the cavity is a solid of revolution about its axis (Pappus): its
-/// top z_max(r) from r = r_h + t (the wall round the hole) outwards, where a concave corner of
-/// the body (a counterbore's floor meeting its wall, a boss meeting the top) rounds the cavity
-/// with radius t, and a convex one leaves it sharp:
-///   boss: r ∈ [6.65, 8.875] 41 − √(t² − (r − r_c)²); [8.875, 11] 42 (the boss top less t);
-///     [11, 15] 40 − √(t² − (15 − r)²); replacing z 36 over r < 15;
-///   flat hole: r ∈ [6.65, 8.875] 35 − √(t² − (r − r_c)²), replacing z 36 over r < 8.875.
-fn cavity_volume() -> f64 {
-    let a = 28.0 - 4.0 * 1.04f64.sqrt();
-    let ys = -140.0 + 20.0 * 1.04f64.sqrt();
-    let front = 2.0 * (35.0 * (16.0 * a - 25.6) + a * 64.0 * PI + 0.2 * (-4096.0 / 3.0));
-    let slope = 102.0 * (a * (ys + 180.0) + 0.1 * (ys + 180.0).powi(2));
-    let flat = 102.0 * 36.0 * (-20.0 - ys);
-    let back = 36.0 * 2.0 * (35.0 * 16.0 + 64.0 * PI);
+/// The shell's cavity when it comes after the holes (the course's order after step 4): every
+/// face moved T into the body and extended until they meet (the bottom is open). The cavity's
+/// corners are sharp, under a concave corner of the body (a counterbore's floor meeting its
+/// wall, a boss meeting the top) as under a convex one, as Onshape shells (issue #105).
+///
+/// Away from the bosses and holes it is the cover moved in by T: half-width HALF_WIDTH − T,
+/// y −LENGTH + T..−T, corners of radius r = CORNER_R − T on the same centres, up to z
+/// HEIGHT − T and under the slope moved T along its normal (0, −K, 1)/√(1 + K²). In u as above
+/// that is z = a + K·u, a = SLOPE_Z0 + K·CORNER_R − T√(1 + K²), meeting z HEIGHT − T at
+/// u* = (HEIGHT − T − a)/K:
+///   front corners (u ∈ [−r, 0]): 2[c·(a·r − K·r²/2) + a·πr²/4 − K·r³/3];
+///   [0, u*]: w·(a·u* + K·u*²/2), w = 2(HALF_WIDTH − T);
+///   [u*, LENGTH − 2·CORNER_R] (the back corners' centre line): w·(HEIGHT − T)·(… − u*);
+///   back corners: (HEIGHT − T)·2(c·r + πr²/4).
+/// Round each hole and boss it is a solid of revolution about the axis, whose top z(r), from
+/// the hole's wall moved out (r = RH + T), replaces the HEIGHT − T above:
+///   boss: r ∈ [RH + T, RC + T] the counterbore's floor less T; [RC + T, BOSS_R − T] the boss
+///     top less T; [BOSS_R − T, BOSS_R] the top less T, which is HEIGHT − T anyway;
+///   flat hole: r ∈ [RH + T, RC + T] its counterbore's floor less T.
+fn expected_cavity_volume() -> f64 {
+    let (k, c) = (gc::SLOPE_K, corner_x());
+    let r = gc::CORNER_R - T;
+    let top = gc::HEIGHT - T;
+    let w = 2.0 * (gc::HALF_WIDTH - T);
+    let a = gc::SLOPE_Z0 + k * gc::CORNER_R - T * (1.0 + k * k).sqrt();
+    let us = (top - a) / k;
+    let back_line = gc::LENGTH - 2.0 * gc::CORNER_R;
+    let front = 2.0 * (c * (a * r - k * r * r / 2.0) + a * PI * r * r / 4.0 - k * r.powi(3) / 3.0);
+    let slope = w * (a * us + k * us * us / 2.0);
+    let flat = w * top * (back_line - us);
+    let back = top * 2.0 * (c * r + PI * r * r / 4.0);
     let main = front + slope + flat + back;
-    // ∫ 2π r √(t² − (r − c)²) dr over r ∈ [c + s0, c + s1] = 2π [−(t² − s²)^{3/2}/3 + c·g(t, s)].
-    let ring = |c: f64, s0: f64, s1: f64| {
-        let f = |s: f64| -(T * T - s * s).max(0.0).powf(1.5) / 3.0 + c * g(T, s);
-        2.0 * PI * (f(s1) - f(s0))
-    };
-    let (r0, r1) = (RH + T, RC + T);
-    let annulus = |z: f64, a: f64, b: f64| z * PI * (b * b - a * a);
-    let boss = annulus(41.0, r0, r1) - ring(RC, r0 - RC, T) + annulus(42.0, r1, 11.0)
-        // [11, 15]: 40·π(15² − 11²) − ∫ 2π r √(t² − (15 − r)²) dr, with r = 15 − s:
-        // 2π ∫₀ᵗ (15 − s)√(t² − s²) ds = 2π (15·πt²/4 − t³/3).
-        + annulus(40.0, 11.0, 15.0)
-        - 2.0 * PI * (15.0 * PI * T * T / 4.0 - T * T * T / 3.0)
-        - annulus(36.0, 0.0, 15.0);
-    let hole = annulus(35.0, r0, r1) - ring(RC, r0 - RC, T) - annulus(36.0, 0.0, r1);
-    main + 2.0 * boss + 4.0 * hole
+    // A ring of the cavity, r ∈ [r0, r1], up to z.
+    let annulus = |z: f64, r0: f64, r1: f64| z * PI * (r1 * r1 - r0 * r0);
+    let (wall, cbore) = (RH + T, RC + T);
+    let boss_top = gc::HEIGHT + gc::BOSS_H;
+    let boss = annulus(boss_top - CBORE - T, wall, cbore)
+        + annulus(boss_top - T, cbore, gc::BOSS_R - T)
+        - annulus(top, 0.0, gc::BOSS_R - T);
+    let hole = annulus(gc::HEIGHT - CBORE - T, wall, cbore) - annulus(top, 0.0, cbore);
+    main + BOSS_HOLES * boss + TOP_HOLES * hole
 }
 
-/// A 2 mm × 45° chamfer on a boss's top edge (r 15) removes a 2 × 2 right triangle whose
-/// centroid is 2/3 in from the edge: 2π(15 − 2/3)·2 each.
-fn chamfer_volume() -> f64 {
-    2.0 * 2.0 * PI * (15.0 - 2.0 / 3.0) * 2.0
+/// A CHAMFER × 45° chamfer round a boss's top edge removes a right triangle of area
+/// CHAMFER²/2 whose centroid is CHAMFER/3 in from the edge (Pappus): 2π(BOSS_R − CHAMFER/3)
+/// times that, on each boss.
+fn expected_chamfer_volume() -> f64 {
+    2.0 * 2.0 * PI * (gc::BOSS_R - CHAMFER / 3.0) * CHAMFER * CHAMFER / 2.0
 }
 
 #[test]
 fn closed_forms_hold_on_their_own() {
     // The cavity's plain parts: with no holes or bosses the cavity would be the offset cover.
-    assert!(cavity_volume() > 0.0 && body_volume() > cavity_volume());
+    assert!(expected_cavity_volume() > 0.0 && expected_body_volume() > expected_cavity_volume());
     // A sanity figure for the report: the finished cover is about 2.1e5 mm³.
-    let v = body_volume() - holes_volume() - cavity_volume() - chamfer_volume();
+    let v = expected_body_volume()
+        - expected_holes_volume()
+        - expected_cavity_volume()
+        - expected_chamfer_volume();
     assert!(v > 1.5e5 && v < 3.0e5, "{v}");
 }
 
@@ -216,7 +245,7 @@ fn gear_cover_course_steps() {
     assert_eq!(el.folders()[0].name, "Base Features");
     assert_eq!(el.folders()[0].features.len(), 6);
     assert!(!el.folders()[0].open);
-    close(s.volume(), body_volume(), 1e-4);
+    close(s.volume(), expected_body_volume(), 1e-4);
     let part = s.part();
 
     // Step 1 (PS17.3): Shell 1, the bottom face (Face of Extrude 1), 4 mm.
@@ -227,13 +256,13 @@ fn gear_cover_course_steps() {
         FeatureId::new(),
         ShellFeature {
             faces: vec![bottom],
-            thickness: 4.0,
-            thickness_expr: "4 mm".into(),
+            thickness: T,
+            thickness_expr: format!("{T} mm"),
             ..ShellFeature::default()
         },
     ));
     let shelled = s.volume();
-    assert!(shelled < body_volume() / 2.0, "{shelled}");
+    assert!(shelled < expected_body_volume() / 2.0, "{shelled}");
 
     // Step 2 (PS17.4): Sketch 4 on the bosses' top face: the two points concentric with the
     // bosses' edges, and four on the flat top, symmetric about the YZ plane.
@@ -310,7 +339,7 @@ fn gear_cover_course_steps() {
             spec.cbore_diameter.value,
             spec.cbore_depth.value
         ),
-        (5.3, 9.75, 5.0)
+        (2.0 * RH, 2.0 * RC, CBORE)
     );
     let hole = s.add(AddFeature::hole(
         s.el,
@@ -350,7 +379,7 @@ fn gear_cover_course_steps() {
     .unwrap();
     assert_eq!(s.features().last().unwrap().id, shell);
     // The closed form: the holed body less the cavity.
-    let v_shell = body_volume() - holes_volume() - cavity_volume();
+    let v_shell = expected_body_volume() - expected_holes_volume() - expected_cavity_volume();
     close(s.volume(), v_shell, 1e-3);
 
     // Step 5 (PS17.7): Chamfer 2 mm × 45°, Distance and angle, Offset, on the two bosses' top
@@ -364,17 +393,17 @@ fn gear_cover_course_steps() {
         ChamferFeature {
             entities: vec![EdgeOrFace::Edge(e1), EdgeOrFace::Edge(e2)],
             kind: ChamferType::DistanceAngle,
-            distance: 2.0,
-            distance_expr: "2 mm".into(),
+            distance: CHAMFER,
+            distance_expr: format!("{CHAMFER} mm"),
             angle: 45.0,
             angle_expr: "45 deg".into(),
             ..ChamferFeature::default()
         },
     ));
     // Before the fillets: the closed form.
-    let v_before_fillets = v_shell - chamfer_volume();
-    let occt_before_fillets = s.volume();
-    close(occt_before_fillets, v_before_fillets, 1e-3);
+    let v_before_fillets = v_shell - expected_chamfer_volume();
+    let kernel_before_fillets = s.volume();
+    close(kernel_before_fillets, v_before_fillets, 1e-3);
     let before = s.part();
     // CoM X = 0 by symmetry.
     close(before.mass.unwrap().center_of_mass.x, 0.0, 1e-6);
@@ -472,12 +501,12 @@ fn gear_cover_course_steps() {
         low < removed && removed < high,
         "the Width fillet removed {removed}, expected {low}..{high}"
     );
-    // And OCCT's exact volume against the display mesh's (0.05 mm deflection): the mesh's
+    // And the kernel's exact volume against the display mesh's (0.05 mm deflection): the mesh's
     // chords cut into the curved faces, so it is a little smaller, by under 1.5e-4.
     let mesh = done.solid.volume();
     assert!(
         (m.volume - mesh).abs() < 1.5e-4 * m.volume,
-        "OCCT {} vs mesh {mesh}",
+        "kernel {} vs mesh {mesh}",
         m.volume
     );
     close(m.center_of_mass.x, 0.0, 1e-6);
@@ -490,14 +519,16 @@ fn gear_cover_course_steps() {
     println!(
         "gear cover stand-in: V before fillets {:.3} mm³ (closed form {:.3}), after {:.3} mm³ (mesh {:.3}), \
          width fillet removed {removed:.3} ({low:.3}..{high:.3}), mass {:.4} kg",
-        occt_before_fillets, v_before_fillets, m.volume, mesh, mass
+        kernel_before_fillets, v_before_fillets, m.volume, mesh, mass
     );
-    // The golden value, recorded once (OCCT 7.8.1): the finished stand-in.
+    // The golden value: the finished stand-in.
     close(mass, GOLDEN_MASS_KG, 5e-4);
 }
 
-/// The finished stand-in's mass (kg), recorded from OCCT and cross-checked against the mesh.
-const GOLDEN_MASS_KG: f64 = 0.521_059;
+/// The finished stand-in's mass (kg), recorded from the kernel and cross-checked against the
+/// mesh (again with the shell's sharp cavity corners, issue #105: 1 490 mm³ more, as the closed
+/// form has it).
+const GOLDEN_MASS_KG: f64 = 0.525_171;
 
 #[test]
 fn the_fixture_is_current() {

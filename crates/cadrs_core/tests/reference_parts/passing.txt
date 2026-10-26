@@ -38,6 +38,8 @@
 41-tube-radial-holes
 42-overlapping-patterns
 43-cut-splits-body
+44-shell-l-bracket
+45-shell-boss-plate
 46-shell-two-open-faces
 47-draft-curved-pocket
 48-pulley
