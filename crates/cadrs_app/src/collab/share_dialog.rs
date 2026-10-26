@@ -29,7 +29,8 @@ use super::sharing::{self, ContactBook};
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(on_select)
         .add_observer(on_checkbox)
-        .add_observer(on_segment);
+        .add_observer(on_segment)
+        .add_observer(on_remove);
 }
 
 /// The dialog's root.
@@ -491,12 +492,11 @@ fn person_row(
                 r.spawn(t.text(what, t.font_sm, FontWeight::NORMAL, t.muted_foreground));
             }
         }
-    })
-    .observe(on_row_activate);
+    });
 }
 
-/// The ✕ of a member's row.
-fn on_row_activate(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
+/// The ✕ of a member's row (global: a button's `Activate` doesn't reach its row).
+fn on_remove(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
     let Some(i) = q.get(a.event_target()).ok().and_then(|n| {
         n.as_str()
             .strip_prefix("share-member-")?
