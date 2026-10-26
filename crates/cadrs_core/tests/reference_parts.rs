@@ -427,6 +427,20 @@ impl Recipe {
         }
         let g = self.geometry(id);
         let mut specs = Vec::new();
+        // An entity's point that references the origin is the sketch's fixed origin, as
+        // SolidCraft's reader shares it: coincident with it, not only drawn there.
+        for e in f["entities"].as_array().into_iter().flatten() {
+            for end in ["start", "end", "center"] {
+                if e[end]["ref"].as_str() == Some("origin") {
+                    let eid = e["id"].as_str().unwrap_or("");
+                    let c = serde_json::json!({
+                        "type": "coincident",
+                        "refs": [format!("{eid}.{end}"), "origin"],
+                    });
+                    specs.push(constraint_spec(&info, &g, &c, turned)?);
+                }
+            }
+        }
         for c in f["constraints"].as_array().into_iter().flatten() {
             specs.push(constraint_spec(&info, &g, c, turned)?);
         }

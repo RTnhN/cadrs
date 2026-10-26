@@ -54,4 +54,5 @@
 62-heat-sink
 63-hinge-knuckle
 64-sketch-tangent-arc-chain
+65-sketch-gear-tooth
 66-sketch-linkage
