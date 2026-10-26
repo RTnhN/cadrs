@@ -347,7 +347,7 @@ fn a_torus_band_in_two_pieces_is_one_face() {
 /// Pieces that close a whole turn joined: one face as one revolve makes it (#114). A torus of
 /// two halves and of four quarters (a circular pattern), 2π²Rr²; a sphere of a quarter and
 /// three, 4/3 πr³ and 4πr²; a cone of two halves (a pole at its apex), πr²h/3 and its base
-/// and side, πr² + πr·√(r² + h²).
+/// and side, πr² + πr·√(r² + h²); and a circle with a piece cut off, revolved round.
 #[test]
 fn pieces_closing_a_whole_turn_are_one_face() {
     let turned = |axis: &Axis, deg: f64| {
@@ -463,6 +463,36 @@ fn pieces_closing_a_whole_turn_are_one_face() {
     let u = pieces(&mut k, &tri, up, &[180.0, 180.0]);
     let side = PI * rc * (rc * rc + h * h).sqrt();
     expect(&k, u, PI * rc * rc * h / 3.0, Some(PI * rc * rc + side), 2);
+    // A circle with a piece cut off (r 6 about R 25, the 60° segment below a chord): its arc's
+    // torus wraps round the axis, bounded where the arc ends, so the new seam must run through
+    // the arc, not through the gap. The segment and the arc both have their centroids at R
+    // from the axis (Pappus): (πr² − r²/2·(θ − sin θ))·2πR; the arc's side r(2π − θ)·2πR and
+    // the chord's flat ring π((R + r/2)² − (R − r/2)²) = 2πRr.
+    let theta = PI / 3.0;
+    let q = |a: f64| Point2::new(big + r * a.cos(), r * a.sin());
+    let (a0, a1) = (-PI / 3.0, 4.0 * PI / 3.0);
+    let cut = Loop {
+        curves: vec![
+            Curve2::Arc {
+                center: Point2::new(big, 0.0),
+                radius: r,
+                start_angle: a0,
+                sweep: a1 - a0,
+                source: None,
+            },
+            Curve2::Line {
+                a: q(a1),
+                b: q(a0),
+                source: None,
+            },
+        ],
+    };
+    let volume = (PI * r * r - r * r / 2.0 * (theta - theta.sin())) * 2.0 * PI * big;
+    let area = r * (2.0 * PI - theta) * 2.0 * PI * big + 2.0 * PI * big * r;
+    for degs in [&[90.0, 270.0][..], &[180.0, 180.0]] {
+        let u = pieces(&mut k, &cut, down, degs);
+        expect(&k, u, volume, Some(area), 2);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

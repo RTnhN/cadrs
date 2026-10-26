@@ -1349,52 +1349,65 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         // Seam edge along the iso-u line from s1 to s2.
         let iso = surf.iso_u(us)?;
         let p2 = b.verts[s2v].p;
-        let (v1, v2) = (start1.y, {
+        let v1 = start1.y;
+        let v_near = {
             let (_, v) = surf.project(&p2, Some((us, start1.y)));
             v
-        });
-        let mut ch2 = chains[i2].clone();
-        realign(b, &mut ch2, P2::new(end1.x, v2));
-        let (lo, hi, vlo, vhi) = if v1 < v2 {
-            (s1, s2v, v1, v2)
-        } else {
-            (s2v, s1, v2, v1)
         };
-        b.edges.push(Edge {
-            curve: iso,
-            t: [vlo, vhi],
-            v: [lo, hi],
-            degenerate: false,
-            tol: super::topo::TOL_MIN,
-        });
-        let se = b.edges.len() - 1;
+        // Where v closes too (a torus), the seam can run either way round from s1 to s2: the
+        // nearer may cross what is cut away (an arc's band: through the arc's gap), so the other
+        // way is tried when the loop comes out clockwise.
+        let candidates: Vec<f64> = if surf.v_periodic() {
+            vec![v_near, v_near + if v_near > v1 { -TAU } else { TAU }]
+        } else {
+            vec![v_near]
+        };
         let line_at = |u: f64| Curve::Line {
             o: P3::new(u, 0.0, 0.0),
             d: V3::new(0.0, 1.0, 0.0),
         };
-        // From s1 (at u_s + 2πw) to s2, then chain 2, then from s2 (at u_s) back to s1.
-        let up_first = v1 < v2; // the seam edge runs s1 → s2
-        let mut lp = ch1;
-        lp.push(Coedge {
-            edge: se,
-            fwd: up_first,
-            pc: line_at(end1.x),
-        });
-        lp.extend(ch2);
-        lp.push(Coedge {
-            edge: se,
-            fwd: !up_first,
-            pc: line_at(start1.x),
-        });
-        loops.push(lp);
+        let mut found: Option<Vec<Coedge>> = None;
+        for v2 in candidates {
+            let mut ch2 = chains[i2].clone();
+            realign(b, &mut ch2, P2::new(end1.x, v2));
+            let (lo, hi, vlo, vhi) = if v1 < v2 {
+                (s1, s2v, v1, v2)
+            } else {
+                (s2v, s1, v2, v1)
+            };
+            b.edges.push(Edge {
+                curve: iso.clone(),
+                t: [vlo, vhi],
+                v: [lo, hi],
+                degenerate: false,
+                tol: super::topo::TOL_MIN,
+            });
+            let se = b.edges.len() - 1;
+            // From s1 (at u_s + 2πw) to s2, then chain 2, then from s2 (at u_s) back to s1.
+            let up_first = v1 < v2; // the seam edge runs s1 → s2
+            let mut lp = ch1.clone();
+            lp.push(Coedge {
+                edge: se,
+                fwd: up_first,
+                pc: line_at(end1.x),
+            });
+            lp.extend(ch2);
+            lp.push(Coedge {
+                edge: se,
+                fwd: !up_first,
+                pc: line_at(start1.x),
+            });
+            // The loop must be counter-clockwise in oriented uv.
+            if area(b, &lp) > 0.0 {
+                found = Some(lp);
+                break;
+            }
+        }
+        loops.push(found?);
         for (i, ch) in chains.into_iter().enumerate() {
             if i != i1 && i != i2 {
                 holes.push(ch);
             }
-        }
-        // The loop must be counter-clockwise in oriented uv; otherwise give up.
-        if area(b, &loops[0]) <= 0.0 {
-            return None;
         }
     }
     loops.extend(holes);
