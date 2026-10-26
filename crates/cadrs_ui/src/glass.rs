@@ -145,7 +145,7 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
         (GlassKind::Input, _) => 0.6,
     };
     let base = if dark {
-        Color::srgb_u8(0x15, 0x1c, 0x1f)
+        Color::srgb_u8(0x1d, 0x1c, 0x19)
     } else {
         Color::srgb_u8(0xfb, 0xfe, 0xfe)
     };
@@ -403,9 +403,66 @@ fn shape_frames(
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct Wallpaper;
 
-/// The wallpaper for a page's root node.
+/// The dark wallpaper's pattern: the schematic's grid, a faint line every [`GRID_PX`] with a
+/// cross where two meet.
+#[derive(Component, Debug, Clone, Copy, Default)]
+struct WallpaperGrid;
+
+/// The wallpaper grid's pitch (logical px).
+const GRID_PX: u32 = 44;
+
+/// The wallpaper for a page's root node (its first child is the dark scheme's grid).
 pub fn wallpaper() -> impl Bundle {
-    (Wallpaper, BackgroundGradient(wallpaper_layers(false)))
+    (
+        Wallpaper,
+        BackgroundGradient(wallpaper_layers(false)),
+        Children::spawn(Spawn((
+            Name::new("wallpaper-grid"),
+            WallpaperGrid,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            Visibility::Hidden,
+            Pickable::IGNORE,
+        ))),
+    )
+}
+
+/// One tile of the wallpaper grid: lines through the middle in the schematic's faint grid
+/// colour, a brighter cross where they meet.
+fn grid_tile() -> Image {
+    let n = GRID_PX as usize;
+    let c = n / 2;
+    let mut px = vec![0u8; n * n * 4];
+    let mut put = |x: usize, y: usize, rgba: [u8; 4]| {
+        let i = (y * n + x) * 4;
+        px[i..i + 4].copy_from_slice(&rgba);
+    };
+    let line = [0x5a, 0x52, 0x3e, 0x1c];
+    let cross = [0x8a, 0x80, 0x66, 0x5c];
+    for i in 0..n {
+        put(i, c, line);
+        put(c, i, line);
+    }
+    for d in 0..=4 {
+        for (x, y) in [(c + d, c), (c - d, c), (c, c + d), (c, c - d)] {
+            put(x, y, cross);
+        }
+    }
+    Image::new(
+        bevy::render::render_resource::Extent3d {
+            width: GRID_PX,
+            height: GRID_PX,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        px,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    )
 }
 
 fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
@@ -416,11 +473,12 @@ fn rgba(r: u8, g: u8, b: u8, a: f32) -> Color {
 /// other.
 fn wallpaper_layers(dark: bool) -> Vec<Gradient> {
     let (from, to, cyan, violet) = if dark {
+        // The schematic's warm ground, a breath of cyan and of gold in the corners.
         (
-            rgba(0x0b, 0x13, 0x17, 1.0),
-            rgba(0x11, 0x14, 0x1d, 1.0),
-            rgba(0x12, 0x8a, 0x94, 0.34),
-            rgba(0x4a, 0x3c, 0xa8, 0.24),
+            rgba(0x1d, 0x1c, 0x1a, 1.0),
+            rgba(0x23, 0x22, 0x1e, 1.0),
+            rgba(0x1c, 0x6e, 0x70, 0.22),
+            rgba(0x8a, 0x6a, 0x30, 0.16),
         )
     } else {
         (
@@ -452,14 +510,38 @@ fn wallpaper_layers(dark: bool) -> Vec<Gradient> {
     ]
 }
 
+#[allow(clippy::type_complexity)]
 fn sync_wallpapers(
     appearance: Res<Appearance>,
     mut q: Query<(&mut BackgroundGradient, Ref<Wallpaper>)>,
+    mut grids: Query<(Entity, &mut Visibility, Has<ImageNode>), With<WallpaperGrid>>,
+    mut images: ResMut<Assets<Image>>,
+    mut tile: Local<Option<Handle<Image>>>,
+    mut commands: Commands,
 ) {
     let dark = appearance.is_dark();
     for (mut g, w) in &mut q {
         if appearance.is_changed() || w.is_added() {
             g.0 = wallpaper_layers(dark);
+        }
+    }
+    for (e, mut vis, has_image) in &mut grids {
+        vis.set_if_neq(if dark {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+        if !has_image {
+            let handle = tile.get_or_insert_with(|| images.add(grid_tile())).clone();
+            commands.entity(e).try_insert(ImageNode {
+                image: handle,
+                image_mode: NodeImageMode::Tiled {
+                    tile_x: true,
+                    tile_y: true,
+                    stretch_value: 1.0,
+                },
+                ..default()
+            });
         }
     }
 }

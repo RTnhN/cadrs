@@ -97,6 +97,7 @@ impl Plugin for ViewportPlugin {
                     style_planes,
                     draw_plane_edges,
                     sync_grid,
+                    fit_grid,
                     sync_plane_rows,
                 )
                     .after(apply_view_to_camera)
@@ -164,9 +165,15 @@ impl PlanesVisible {
     }
 }
 
-/// Whether the infinite grid is shown (off by default, as in Onshape).
-#[derive(Resource, Default)]
+/// Whether the ground grid (on the Top plane) is shown: on by default.
+#[derive(Resource)]
 pub struct GridVisible(pub bool);
+
+impl Default for GridVisible {
+    fn default() -> Self {
+        Self(true)
+    }
+}
 
 /// Marks the UI node the 3D view shows through (between the panels). Its rect is the
 /// viewport: the view is centered in it and pointer input over it drives the camera.
@@ -770,13 +777,12 @@ pub fn isometric_transform() -> Transform {
     Transform::from_translation(v.camera_position()).with_rotation(v.rotation())
 }
 
-/// The plane fill: pale blue at low opacity. Chosen in linear space so one plane over white is
-/// `#f4f8fb` and two overlapping planes about `#e9eff5`, as measured in the reference.
-/// In dark, fainter, so the three planes don't tint the whole view.
+/// The plane fill: a pale cyan at low opacity; in dark, the schematic's warm grid colour,
+/// fainter, so the three planes don't tint the whole view.
 pub fn plane_fill() -> Color {
     cadrs_ui::by_scheme(
-        Color::LinearRgba(LinearRgba::new(0.047, 0.387, 0.647, 0.10)),
-        Color::LinearRgba(LinearRgba::new(0.16, 0.42, 0.78, 0.06)),
+        Color::LinearRgba(LinearRgba::new(0.05, 0.42, 0.47, 0.09)),
+        Color::LinearRgba(LinearRgba::new(0.254, 0.216, 0.133, 0.07)),
     )
 }
 
@@ -2153,7 +2159,8 @@ fn draw_plane_edges(
     mut hover_gizmos: Gizmos<HoverGizmos>,
     mut edge_on_gizmos: Gizmos<EdgeOnGizmos>,
     q: Query<(&PlaneKind, &GlobalTransform, &InheritedVisibility)>,
-    theme: Res<Theme>,
+    // The scheme's (gizmos aren't mapped like the UI).
+    theme: Res<cadrs_ui::color_scheme::ActiveTheme>,
     highlight: Res<PlaneHighlight>,
     selection: Res<Selection>,
     view: Res<ViewportView>,
@@ -2234,10 +2241,55 @@ trait PlaneEdge {
 }
 
 impl PlaneEdge for Theme {
-    /// The outline color: `#93a8c4`, between the `#8e9fb9` and `#96aac2` measured on the
-    /// plane outlines in `screens/22`.
+    /// The outline color: a cyan grey in light, the schematic's warm grid colour in dark.
     fn plane_edge_line(&self) -> Color {
         self.plane_edge
+    }
+}
+
+/// The ground grid's spacing follows the zoom (a minor line every 1, 10, 100 … mm, at least
+/// 24 px apart; a major one every tenth) and it fades out past the view; its colours follow
+/// the scheme: in dark, the schematic's faint warm lines, its salmon and green for the axes.
+fn fit_grid(
+    view: Res<ViewportView>,
+    mut q: Query<&mut InfiniteGridSettings>,
+    mut last: Local<Option<(f32, f32, bool)>>,
+) {
+    let v = &view.view;
+    let step = 10f32.powf((v.scale * 24.0).max(1e-6).log10().ceil());
+    let fade = if v.perspective {
+        v.eye_distance() * 4.0
+    } else {
+        crate::camera::camera_distance(v.scale) + v.scale * 3000.0
+    };
+    let dark = cadrs_ui::dark_in_force();
+    if *last == Some((step, fade, dark)) {
+        return;
+    }
+    *last = Some((step, fade, dark));
+    let hex = |s: &str| Color::Srgba(Srgba::hex(s).expect("valid hex color"));
+    let (minor, major, x, y) = if dark {
+        (
+            hex("#2f2d27"),
+            hex("#47423a"),
+            hex("#e67b54").with_alpha(0.8),
+            hex("#73bc74").with_alpha(0.8),
+        )
+    } else {
+        (
+            hex("#e3e8ea"),
+            hex("#c9d1d4"),
+            hex("#e8857f"),
+            hex("#7fc27a"),
+        )
+    };
+    for mut g in &mut q {
+        g.minor_line_color = minor;
+        g.major_line_color = major;
+        g.x_axis_color = x;
+        g.z_axis_color = y;
+        g.scale = 1.0 / step;
+        g.fadeout_distance = fade;
     }
 }
 
