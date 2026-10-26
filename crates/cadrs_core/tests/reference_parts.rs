@@ -28,12 +28,13 @@ use cadrs_core::applied::{
     HolePoint, ShellFeature, VertexRadius,
 };
 use cadrs_core::commands::{
-    AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, SetExtrude, SetRevolve,
+    AddExtrude, AddFeature, AddRevolve, AddSketch, DeleteFeature, EditSketch, SetExtrude,
+    SetRevolve,
 };
 use cadrs_core::document::{
-    AxisRef, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, Document, EdgeRef, EndCondition,
-    EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef, RevolveFeature, RevolveType,
-    VertexRef,
+    AxisRef, BodyType, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, Document, EdgeRef,
+    EndCondition, EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef, RevolveFeature,
+    RevolveType, ThinWall, VertexRef,
 };
 use cadrs_core::draft::{DraftFeature, ExtrudeDraft};
 use cadrs_core::hole::{HoleEnd, HoleSpec, HoleStyle, Length};
@@ -261,6 +262,75 @@ impl Recipe {
             .ok_or_else(|| Stop::Failed("the offset plane didn't build".into()))?;
         self.offsets.push((k, off, p));
         Ok((p, frame))
+    }
+
+    /// A plane `angle` degrees from `base_plane` about a world axis, as a Line angle plane: the
+    /// axis drawn as a construction line in a sketch on a default plane that holds it. The
+    /// angle's way round is the one that gives the recipe's `result_normal` when it has one.
+    fn angled_plane(&mut self, f: &Value) -> R<(PlaneRef, Frame)> {
+        let (on, end) = match f["axis"].as_str().unwrap_or("") {
+            "world X axis" => (PlaneRef::Top, Vec2::new(1.0, 0.0)),
+            "world Y axis" => (PlaneRef::Top, Vec2::new(0.0, 1.0)),
+            "world Z axis" => (PlaneRef::Front, Vec2::new(0.0, 1.0)),
+            other => return unsupported(format!("a plane at an angle about `{other}`")),
+        };
+        let base = self.plane_ref(&f["base_plane"])?;
+        let angle = self.num(f.get("angle"))?;
+        let sketch = FeatureId::new();
+        self.exec(&AddSketch {
+            element: self.el,
+            feature: sketch,
+            plane: Some(on),
+        })?;
+        self.exec(&EditSketch {
+            element: self.el,
+            feature: sketch,
+            op: SketchOp::AddPolyline {
+                points: vec![Vec2::new(0.0, 0.0), end],
+                closed: false,
+                construction: true,
+                label: "Add line",
+            },
+        })?;
+        let curve = self.geometry(sketch).curves.keys().next().unwrap();
+        let want = f.get("result_normal").and_then(v3).map(unit);
+        for flip in [false, true] {
+            let id = self.add(
+                "Plane",
+                FeatureKind::Plane(PlaneFeature {
+                    kind: PlaneType::LineAngle,
+                    entities: vec![
+                        PlaneEntity::SketchCurve { sketch, curve },
+                        PlaneEntity::Plane(base),
+                    ],
+                    angle,
+                    angle_expr: format!("{angle} deg"),
+                    flip,
+                    ..PlaneFeature::default()
+                }),
+            )?;
+            let Some(PlaneRef::Feature(fp)) =
+                cadrs_core::parts::plane_feature_ref(&self.features_now(), id)
+            else {
+                return failed("the angled plane didn't build");
+            };
+            let n = unit(cross(fp.u, fp.v));
+            if want.is_none_or(|w| dot(w, n).abs() > 1.0 - 1e-9) {
+                let frame = Frame {
+                    o: fp.origin,
+                    x: fp.u,
+                    y: fp.v,
+                    n,
+                };
+                return Ok((PlaneRef::Feature(fp), frame));
+            }
+            self.exec(&DeleteFeature {
+                element: self.el,
+                feature: id,
+                label: "Delete Plane".into(),
+            })?;
+        }
+        failed("no way round the angle gives the recipe's plane")
     }
 
     /// A recipe plane (`{ref, origin, x_dir, y_dir, normal}`) as its frame.
@@ -626,17 +696,44 @@ impl Recipe {
     }
 
     fn extrude(&mut self, f: &Value) -> R<FeatureId> {
-        if f.get("thin").is_some_and(|t| !t.is_null()) {
-            return unsupported("thin extrude");
-        }
-        let profiles = self.profiles(f)?;
-        let sketch = profiles[0].0;
-        let regions: Vec<RegionRef> = profiles.into_iter().flat_map(|(_, r)| r).collect();
         let mut e = ExtrudeFeature {
-            regions,
             op: Self::op_of(f)?,
             ..ExtrudeFeature::default()
         };
+        let sketch;
+        let thin = &f["thin"];
+        if !thin.is_null() {
+            // A thin wall along a sketch's curves (all of them: cadrs' thin extrude takes whole
+            // sketches): `thickness` inside a closed profile, `thickness2` outside.
+            let sname = thin["sketch"].as_str().unwrap_or("");
+            let Some(info) = self.sketches.get(sname) else {
+                return unsupported(format!("thin wall of unknown sketch `{sname}`"));
+            };
+            let listed = thin["curves"].as_array().map_or(0, Vec::len);
+            if listed != self.geometry(info.id).curves.len() {
+                return unsupported("a thin wall along some of a sketch's curves");
+            }
+            sketch = info.id;
+            let t1 = self.num(thin.get("thickness"))?;
+            let t2 = match thin["side"].as_str().unwrap_or("one_side") {
+                "two_sides" => self.num(thin.get("thickness2"))?,
+                "one_side" => 0.0,
+                other => return unsupported(format!("a thin wall `{other}`")),
+            };
+            e.sketches = vec![sketch];
+            e.body = BodyType::Thin;
+            e.thin = ThinWall {
+                thickness1: t1,
+                thickness1_expr: format!("{t1} mm"),
+                thickness2: t2,
+                thickness2_expr: format!("{t2} mm"),
+                ..ThinWall::default()
+            };
+        } else {
+            let profiles = self.profiles(f)?;
+            sketch = profiles[0].0;
+            e.regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+        }
         let x = &f["extent"];
         let negative = x["direction"].as_str() == Some("negative");
         let against = self.against(sketch);
@@ -903,6 +1000,11 @@ impl Recipe {
             "sketch" => return self.sketch(f),
             "extrude" => self.extrude(f)?,
             "revolve" => self.revolve(f)?,
+            "construction_plane" if f["method"].as_str() == Some("at_angle") => {
+                let plane = self.angled_plane(f)?;
+                self.planes.insert(name, plane);
+                return Ok(());
+            }
             "construction_plane" => {
                 if f["method"].as_str() != Some("offset") {
                     return unsupported(format!("construction plane `{}`", f["method"]));
