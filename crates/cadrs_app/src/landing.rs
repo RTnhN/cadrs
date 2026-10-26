@@ -48,6 +48,8 @@ use crate::{ActiveDocument, AppClock, AppState, DocumentStore, UserProfile};
 
 #[path = "landing_details.rs"]
 mod details;
+#[path = "landing_organize.rs"]
+mod organize;
 pub use details::import_file as import_mesh_document;
 pub use details::{DetailsTab, LandingDetails, Pick};
 
@@ -104,6 +106,7 @@ impl Plugin for LandingPlugin {
             .add_observer(on_row_context_menu)
             .add_observer(on_context_action)
             .add_observer(on_section_toggled);
+        organize::plugin(app);
     }
 }
 
@@ -256,6 +259,10 @@ enum LandingDialog {
     DeleteLabel(LabelId),
     /// P3E.1: "Open a copy" of the bundled sample `SAMPLES[i]`.
     SampleCopy(usize),
+    /// #112: a folder's Rename…, Copy… and Delete permanently….
+    RenameFolder(FolderId),
+    CopyFolder(FolderId),
+    PurgeFolder(FolderId),
 }
 
 const SECTION_NAMES: [&str; 3] = [
@@ -849,9 +856,11 @@ fn rebuild_main(
     let t = theme.clone();
     commands.entity(panel).despawn_related::<Children>();
     let picked = details_state.pick;
+    // A folder in the trash (or in one that is) isn't opened.
     let folder = state
         .folder
-        .and_then(|f| lib.lib.folders.iter().find(|x| x.id == f).cloned());
+        .filter(|f| state.filter == Filter::Trash || !lib.lib.folder_hidden(*f))
+        .and_then(|f| lib.lib.folder(f).cloned());
     let mut entries = lib.lib.view(
         state.filter,
         &user.id,
@@ -884,24 +893,39 @@ fn rebuild_main(
         .collect();
     let has_labels = !lib.lib.labels.is_empty();
     let cols = columns(&state, has_labels);
+    // The top-level folders (the Folders section).
     let folders: Vec<(FolderId, String)> = lib
         .lib
-        .folders
-        .iter()
+        .subfolders(None)
+        .into_iter()
+        .filter(|f| f.trashed.is_none())
         .map(|f| (f.id, f.name.clone()))
         .collect();
-    // Folders are listed above the documents, as in Onshape's list view.
-    let folder_rows: Vec<FolderListing> = if folder.is_none()
-        && state.item_type.shows_folders()
-        && matches!(state.filter, Filter::OwnedByMe | Filter::CreatedByMe)
+    // Folders are listed above the documents, as in Onshape's list view: at the top level or
+    // in the folder open (#112: folders nest; a search finds them anywhere), and in the Trash
+    // the folders moved there.
+    let folder_rows: Vec<FolderListing> = if state.item_type.shows_folders()
+        && (matches!(state.filter, Filter::OwnedByMe | Filter::CreatedByMe)
+            || (state.filter == Filter::Trash && folder.is_none()))
     {
         let needle = state.search.trim().to_lowercase();
+        let trash = state.filter == Filter::Trash;
         let mut v: Vec<&cadrs_core::FolderEntry> = lib
             .lib
             .folders
             .iter()
             .filter(|f| {
-                f.owned_by == user.id
+                let placed = if trash {
+                    // Only the folders moved to the trash themselves (their contents go with
+                    // them).
+                    f.trashed.is_some() && f.parent.is_none_or(|p| !lib.lib.folder_hidden(p))
+                } else if !needle.is_empty() && folder.is_none() {
+                    !lib.lib.folder_hidden(f.id)
+                } else {
+                    f.trashed.is_none() && f.parent == folder.as_ref().map(|x| x.id)
+                };
+                placed
+                    && f.owned_by == user.id
                     && (needle.is_empty() || f.name.to_lowercase().contains(&needle))
             })
             .collect();
@@ -958,7 +982,39 @@ fn rebuild_main(
         commands.queue(|w: &mut World| w.resource_mut::<LandingDetails>().pick = None);
         None
     };
+    // #112: the selection keeps what is still listed; a Shift+click range runs over the list
+    // as shown.
+    let order: Vec<Pick> = folder_rows
+        .iter()
+        .map(|f| Pick::Folder(f.id))
+        .chain(rows.iter().map(|r| Pick::Doc(r.0.id)))
+        .collect();
+    let selection: Vec<Pick> = details_state
+        .selection
+        .iter()
+        .copied()
+        .filter(|p| {
+            order.contains(p)
+                || Some(*p) == picked
+                || matches!(p, Pick::Folder(f) if listed_here && folders.iter().any(|x| x.0 == *f))
+        })
+        .collect();
+    if selection != details_state.selection {
+        let keep = selection.clone();
+        commands.queue(move |w: &mut World| w.resource_mut::<LandingDetails>().selection = keep);
+    }
+    commands.insert_resource(details::ListOrder(order));
     let title = filter_title(state.filter, &lib.lib);
+    let folder_path: Vec<(FolderId, String)> = folder
+        .as_ref()
+        .map(|f| {
+            lib.lib
+                .folder_path(f.id)
+                .into_iter()
+                .map(|x| (x.id, x.name))
+                .collect()
+        })
+        .unwrap_or_default();
     let labels = lib.lib.labels.clone();
     let state = state.clone();
     let user = user.clone();
@@ -977,7 +1033,7 @@ fn rebuild_main(
             },
         ))
         .with_children(|h| match &folder {
-            Some(f) => details::breadcrumb(h, &t, state.filter, &title, &f.name),
+            Some(_) => details::breadcrumb(h, &t, state.filter, &title, &folder_path),
             None => {
                 h.spawn(icon(filter_icon(state.filter), 20.0, t.foreground));
                 h.spawn((
@@ -989,7 +1045,7 @@ fn rebuild_main(
 
         let show_sections = state.filter == Filter::OwnedByMe && folder.is_none();
         if show_sections {
-            sections(m, &t, &state, recent, folders, picked);
+            sections(m, &t, &state, recent, folders, &selection);
         }
 
         if let Some(list) = samples_list {
@@ -1051,7 +1107,8 @@ fn rebuild_main(
                 _ if folder.is_some() => (
                     "folder",
                     "This folder is empty".into(),
-                    "Right-click a document and choose Move to… to put it here.".into(),
+                    "Drag documents or folders here, or right-click one and choose Move to…."
+                        .into(),
                     false,
                 ),
                 _ if state.item_type != ItemType::All => (
@@ -1107,7 +1164,7 @@ fn rebuild_main(
                 &t,
                 &folder_rows_simple(&folder_rows),
                 rows,
-                picked,
+                &selection,
                 &labels,
             );
             return;
@@ -1176,10 +1233,12 @@ fn rebuild_main(
                             .text_cell(&t, f.date)
                             .text_cell(&t, "me")
                             .text_cell(&t, "me")
-                            .selected(picked == Some(Pick::Folder(f.id)));
+                            .selected(selection.contains(&Pick::Folder(f.id)));
                         list.spawn((
                             row.build(&t),
                             PickRow(Pick::Folder(f.id)),
+                            organize::FolderRow(f.id),
+                            organize::DropFolder(Some(f.id)),
                             cadrs_ui::DoubleClickable,
                         ))
                         .entry::<Node>()
@@ -1268,7 +1327,7 @@ fn rebuild_main(
                             .text_cell(&t, date)
                             .text_cell(&t, user.display(&e.meta.modified_by))
                             .text_cell(&t, user.display(&e.meta.owned_by))
-                            .selected(picked == Some(Pick::Doc(e.id)));
+                            .selected(selection.contains(&Pick::Doc(e.id)));
                         list.spawn((
                             row.build(&t),
                             DocRow(e.id),
@@ -1315,9 +1374,10 @@ fn sections(
     state: &LandingState,
     recent: Vec<(DocumentEntry, Option<Handle<Image>>)>,
     folders: Vec<(FolderId, String)>,
-    picked: Option<Pick>,
+    selection: &[Pick],
 ) {
     let tc = t.clone();
+    let selection = selection.to_vec();
     m.spawn((
         Name::new("sections"),
         Node {
@@ -1463,6 +1523,9 @@ fn sections(
                             row.spawn((
                                 Name::new(format!("folder-{i}")),
                                 PickRow(Pick::Folder(id)),
+                                organize::FolderRow(id),
+                                organize::DropFolder(Some(id)),
+                                ContextMenuTarget,
                                 cadrs_ui::DoubleClickable,
                                 bevy::ui_widgets::Button,
                                 bevy::picking::hover::Hovered::default(),
@@ -1473,7 +1536,7 @@ fn sections(
                                     foreground: cadrs_ui::StateColors::all(t.foreground),
                                     focus_ring: t.focus_ring,
                                 },
-                                cadrs_ui::style::InitState { disabled: false, selected: picked == Some(Pick::Folder(id)), force: None },
+                                cadrs_ui::style::InitState { disabled: false, selected: selection.contains(&Pick::Folder(id)), force: None },
                                 Node {
                                     height: Val::Px(32.0),
                                     padding: UiRect::horizontal(Val::Px(10.0)),
@@ -1933,6 +1996,7 @@ fn on_row_context_menu(
     ev: On<ContextMenuRequested>,
     q: Query<&DocRow>,
     state: Res<LandingState>,
+    details_state: Res<LandingDetails>,
     theme: Res<Theme>,
     lib: Res<DocLibrary>,
     mut commands: Commands,
@@ -1940,6 +2004,20 @@ fn on_row_context_menu(
     let Ok(row) = q.get(ev.entity) else {
         return;
     };
+    // #112: one of several selected: the selection's menu.
+    let selection = details_state.selection.clone();
+    if selection.len() > 1 && selection.contains(&Pick::Doc(row.0)) {
+        let trash = state.filter == Filter::Trash;
+        organize::open_multi_menu(
+            &mut commands,
+            &theme,
+            &lib.lib,
+            selection,
+            trash,
+            ev.position,
+        );
+        return;
+    }
     // P3E.1: a right-click selects the row too (the Details panel follows if open).
     let id = row.0;
     commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), false));
@@ -1956,24 +2034,11 @@ fn on_row_context_menu(
             .item(MenuItem::new("ctx-copy", "Copy…").icon("copy"))
             .item({
                 // P3G.1 (ER1.2, ER X8): a folder of the library (the Other documents browser's
-                // locations), or back to the top level.
-                let current = lib.lib.get(row.0).and_then(|e| e.meta.folder);
-                let mut entries: Vec<MenuEntry> = vec![
-                    MenuItem::new("ctx-move-top", "Documents (no folder)")
-                        .checked(current.is_none())
-                        .into(),
-                ];
-                for (i, f) in lib.lib.folders.iter().enumerate() {
-                    entries.push(
-                        MenuItem::new(format!("ctx-move-folder-{i}"), f.name.clone())
-                            .icon("folder")
-                            .checked(current == Some(f.id))
-                            .into(),
-                    );
-                }
+                // locations, by path since #112), or back to the top level.
+                let current = lib.lib.get(row.0).map(|e| e.meta.folder);
                 MenuItem::new("ctx-move", "Move to…")
                     .icon("move-to-folder")
-                    .submenu(entries)
+                    .submenu(organize::move_entries(&lib.lib, current, &[]))
             })
             .item({
                 // P3E.1: the labels as checkable items, and "Create new label…".
@@ -2054,17 +2119,11 @@ fn on_context_action(
         }
         // P3G.1: Move to ▸ a folder (undoable, like the other library commands).
         m if m == "ctx-move-top" || m.starts_with("ctx-move-folder-") => {
-            let folder = m
-                .strip_prefix("ctx-move-folder-")
-                .and_then(|i| i.parse::<usize>().ok())
-                .and_then(|i| lib.lib.folders.get(i))
-                .map(|f| f.id);
-            let store = store.0.clone();
-            commands.queue(move |world: &mut World| {
-                world
-                    .resource_mut::<DocLibrary>()
-                    .execute(&store, &cadrs_core::library::MoveToFolder { id, folder });
-            });
+            let Some(to) = organize::move_target(&lib.lib, m) else {
+                return;
+            };
+            commands
+                .queue(move |world: &mut World| organize::move_items(world, &[Pick::Doc(id)], to));
         }
         "ctx-restore" => {
             let store = store.0.clone();
@@ -2150,6 +2209,8 @@ fn confirm_dialog(world: &mut World) {
             }
             close_dialogs(world);
             let id = cadrs_core::FolderId::new();
+            // In the folder open, if one is.
+            let parent = world.resource::<LandingState>().folder;
             world.resource_mut::<DocLibrary>().execute(
                 &store,
                 &CreateFolder {
@@ -2157,6 +2218,7 @@ fn confirm_dialog(world: &mut World) {
                     name,
                     user,
                     now,
+                    parent,
                 },
             );
             // Show the new folder.
@@ -2224,6 +2286,9 @@ fn confirm_dialog(world: &mut World) {
         | LandingDialog::RenameLabel(_)
         | LandingDialog::DeleteLabel(_)
         | LandingDialog::SampleCopy(_) => details::confirm(world, dialog),
+        LandingDialog::RenameFolder(_)
+        | LandingDialog::CopyFolder(_)
+        | LandingDialog::PurgeFolder(_) => organize::confirm(world, dialog),
     }
 }
 
@@ -2263,6 +2328,8 @@ fn on_text_submit(ev: On<TextSubmit>, q: Query<&Name>, mut commands: Commands) {
             | "new-label-name-field"
             | "rename-label-name-field"
             | "sample-copy-name-field"
+            | "rename-folder-name-field"
+            | "copy-folder-name-field"
     ) {
         commands.queue(confirm_dialog);
     }

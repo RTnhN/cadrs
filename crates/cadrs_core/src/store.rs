@@ -1276,6 +1276,7 @@ mod tests {
                 name: "Jigs".into(),
                 user: "me".into(),
                 now: 6,
+                parent: None,
             },
         );
         let (on_disk, _) = store.list();

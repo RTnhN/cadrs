@@ -863,6 +863,7 @@ fn documents_move_into_folders() {
             name: "Linked".into(),
             user: "me".into(),
             now: 1,
+            parent: None,
         },
     )
     .unwrap();

@@ -875,7 +875,12 @@ pub fn browser_list(world: &mut World, b: &Browse) -> BrowserList {
         };
     };
     let lib = &data.lib;
-    let folders = lib.folders.iter().map(|f| (f.id, f.name.clone())).collect();
+    let folders = lib
+        .folders
+        .iter()
+        .filter(|f| !lib.folder_hidden(f.id))
+        .map(|f| (f.id, f.name.clone()))
+        .collect();
     let labels = lib
         .labels_by_name()
         .into_iter()
