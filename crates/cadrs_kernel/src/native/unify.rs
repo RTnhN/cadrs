@@ -157,6 +157,50 @@ fn boundary_on(b: &Body, f: usize, s: &Surface) -> bool {
     })
 }
 
+/// Line edges between the same two vertices, the same way: a boolean leaves two where a
+/// surface touches another along the other's seam (holes tangent to each other, one's seam
+/// where they touch), one each side of the seam. As one edge, the pieces of the surface it
+/// splits there have an edge in common to merge across. Per edge, the edge it is the same as
+/// (`usize::MAX`: none); `None` when there are none.
+fn coincident_lines(b: &Body) -> Option<Vec<usize>> {
+    let mut first: std::collections::HashMap<[usize; 2], usize> = Default::default();
+    let mut to = vec![usize::MAX; b.edges.len()];
+    for (i, e) in b.edges.iter().enumerate() {
+        if e.degenerate || e.v[0] == e.v[1] || !matches!(e.curve, Curve::Line { .. }) {
+            continue;
+        }
+        match first.get(&e.v) {
+            None => {
+                first.insert(e.v, i);
+            }
+            Some(&j) => {
+                let f = &b.edges[j];
+                let same = (0..=2).all(|k| {
+                    let t = e.t[0] + (e.t[1] - e.t[0]) * k as f64 / 2.0;
+                    (f.point(t) - e.point(t)).norm() <= tol::POINT
+                }) && (f.t[0] - e.t[0]).abs() <= tol::POINT
+                    && (f.t[1] - e.t[1]).abs() <= tol::POINT;
+                if same {
+                    to[i] = j;
+                }
+            }
+        }
+    }
+    to.iter().any(|&j| j != usize::MAX).then_some(to)
+}
+
+/// `b` with the edges `to` maps ([`coincident_lines`]) replaced.
+fn join_edges(b: &mut Body, to: &[usize]) {
+    for f in &mut b.faces {
+        for c in f.loops.iter_mut().flatten() {
+            if to[c.edge] != usize::MAX {
+                c.edge = to[c.edge];
+            }
+        }
+    }
+    compact(b);
+}
+
 /// Merges groups of faces; `can_merge(f, g)` says whether two faces may be merged (faces of
 /// different inputs). `from` (per face) is concatenated for merged faces, the group's first face
 /// first. Returns the new `from`.
@@ -165,16 +209,33 @@ pub fn unify_faces(
     from: Vec<Vec<(usize, usize)>>,
     can_merge: &dyn Fn(usize, usize) -> bool,
 ) -> Vec<Vec<(usize, usize)>> {
+    // Coincident line edges joined, if the faces then merge so that no edge has more than two
+    // uses; else as they were.
+    if let Some(to) = coincident_lines(b) {
+        let mut joined = b.clone();
+        join_edges(&mut joined, &to);
+        let out = merge_faces(&mut joined, from.clone(), can_merge);
+        if joined.edge_faces().iter().all(|fs| fs.len() <= 2) {
+            *b = joined;
+            return out;
+        }
+    }
+    merge_faces(b, from, can_merge)
+}
+
+/// [`unify_faces`] once coincident edges are joined.
+fn merge_faces(
+    b: &mut Body,
+    from: Vec<Vec<(usize, usize)>>,
+    can_merge: &dyn Fn(usize, usize) -> bool,
+) -> Vec<Vec<(usize, usize)>> {
     let nf = b.faces.len();
     let ef = b.edge_faces();
     let mut dsu = Dsu((0..nf).collect());
-    for (e, fs) in ef.iter().enumerate() {
-        if fs.len() != 2 || fs[0] == fs[1] {
-            continue;
-        }
-        let (f, g) = (fs[0], fs[1]);
-        if !can_merge(f, g) {
-            continue;
+    // Whether faces `f` and `g`, either side of edge `e`, lie on one surface and may merge.
+    let mergeable = |f: usize, g: usize, e: usize| -> bool {
+        if f == g || !can_merge(f, g) {
+            return false;
         }
         let (a, c) = (&b.faces[f], &b.faces[g]);
         // B-splines and extrusions: the merged face takes the first's surface and
@@ -188,20 +249,41 @@ pub fn unify_faces(
             && (sampled(&a.surf) || sampled(&c.surf))
             && !(edge_mid_on(b, f, e, &c.surf) && edge_mid_on(b, g, e, &a.surf))
         {
-            continue;
+            return false;
         }
         let same = if a.surf == c.surf {
             Some(true)
         } else {
             a.surf.same_domain(&c.surf, tol::POINT)
         };
-        if let Some(same) = same
-            && same == (a.sense == c.sense)
+        same.is_some_and(|same| same == (a.sense == c.sense))
             && (!(sampled(&a.surf) || sampled(&c.surf))
                 || a.surf == c.surf
                 || (boundary_on(b, f, &c.surf) && boundary_on(b, g, &a.surf)))
-        {
-            dsu.join(f, g);
+    };
+    for (e, fs) in ef.iter().enumerate() {
+        match fs.len() {
+            2 => {
+                if mergeable(fs[0], fs[1], e) {
+                    dsu.join(fs[0], fs[1]);
+                }
+            }
+            // Two surfaces touching along the edge (holes tangent to each other, the wall
+            // between them worn to nothing), each split there: each surface's two pieces
+            // merge, and the surfaces just touch, as OCCT leaves them (issue #104).
+            // (Or one surface's seam, a face on both sides, that another touches along.)
+            4 => {
+                let fits = |f: usize, g: usize| f == g || mergeable(f, g, e);
+                let pairs = (1..4).find_map(|k| {
+                    let o: Vec<usize> = (1..4).filter(|&i| i != k).collect();
+                    let pairs = [(fs[0], fs[k]), (fs[o[0]], fs[o[1]])];
+                    pairs.iter().all(|&(f, g)| fits(f, g)).then_some(pairs)
+                });
+                for (f, g) in pairs.into_iter().flatten() {
+                    dsu.join(f, g);
+                }
+            }
+            _ => {}
         }
     }
     let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();

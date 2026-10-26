@@ -201,6 +201,48 @@ fn a_cube_with_a_round_hole_through() {
     );
 }
 
+#[test]
+fn a_cube_with_two_round_holes_touching() {
+    // Holes of radius r at (A/2 ∓ r, A/2), tangent where the first one's seam is, and a slot
+    // 2r wide from the second one's centre out through the side: drilled in the order a
+    // feature list would (slot, first hole, then the second, its bore opened by the slot and
+    // split where it touches the first), each bore stays one face, the two just touching
+    // (issue #104). The section loses the first disc πr², half the second, πr²/2, and the
+    // slot (A/2 − r)·2r; the sides lose the slot's mouth 2r·A and gain its walls 2·(A/2 − r)·A
+    // and the bores 2πr·A and πr·A. Faces: the cube's six, the side the slot cuts in two, the
+    // two bores and the slot's two walls.
+    let r = 2.0;
+    let mut k = NativeKernel::new();
+    let c = cube(&mut k);
+    let slot = extrude(
+        &mut k,
+        rect(A / 2.0 + r, A / 2.0 - r, A, A / 2.0 + r),
+        vec![],
+        A,
+    );
+    let first = extrude(&mut k, circle(A / 2.0 - r, A / 2.0, r), vec![], A);
+    let second = extrude(&mut k, circle(A / 2.0 + r, A / 2.0, r), vec![], A);
+    let mut b = c;
+    for tool in [slot, first, second] {
+        b = k.boolean(BoolOp::Subtract, b, &[tool]).unwrap().bodies[0];
+    }
+    let section = PI * r * r * 1.5 + (A / 2.0 - r) * 2.0 * r;
+    check(
+        &k,
+        b,
+        Want {
+            volume: (A * A - section) * A,
+            area: 2.0 * (A * A - section) + 4.0 * A * A - 2.0 * r * A
+                + 2.0 * (A / 2.0 - r) * A
+                + 3.0 * PI * r * A,
+            faces: 11,
+            min: LO,
+            max: HI,
+            centroid: None,
+        },
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fillets
 

@@ -36,6 +36,7 @@
 39-tee-pipe
 40-box-sphere-torus
 41-tube-radial-holes
+42-overlapping-patterns
 43-cut-splits-body
 46-shell-two-open-faces
 47-draft-curved-pocket
