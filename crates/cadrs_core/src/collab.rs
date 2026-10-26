@@ -11,6 +11,7 @@
 //!   the kernel process's messages), deflated.
 //! - [`sync`]: editing a document together, the owner putting everyone's edits in one order.
 
+pub mod comments;
 pub mod sync;
 
 use std::io::{Read, Write};

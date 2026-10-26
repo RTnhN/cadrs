@@ -322,6 +322,11 @@ pub struct ActiveDocument {
     /// Who made the last change that came from someone else ([`Self::apply_remote`]), until
     /// the History panel records it as theirs.
     pub remote_author: Option<String>,
+    /// Tabs someone else has open for themselves (`collab::locks`), with their name: commands
+    /// on them are refused.
+    pub locked_tabs: Vec<(ElementId, String)>,
+    /// Set when a command was refused for that, to say so.
+    pub lock_refused: Option<String>,
 }
 
 /// P3E.4: a workspace's undo and redo stacks, kept while another workspace is open.
@@ -357,6 +362,8 @@ impl ActiveDocument {
             read_only: None,
             refused: 0,
             remote_author: None,
+            locked_tabs: Vec::new(),
+            lock_refused: None,
         }
     }
 
@@ -375,6 +382,15 @@ impl ActiveDocument {
         if self.read_only.is_some() {
             self.refused += 1;
             return Err(cadrs_core::CommandError::Invalid(READ_ONLY.into()));
+        }
+        // A tab someone else has open for themselves (`collab::locks`).
+        if let cadrs_core::Scope::Element(id) | cadrs_core::Scope::ElementName(id) = cmd.scope()
+            && let Some((_, name)) = self.locked_tabs.iter().find(|(e, _)| *e == id)
+        {
+            self.lock_refused = Some(name.clone());
+            return Err(cadrs_core::CommandError::Invalid(format!(
+                "{name} has this tab open"
+            )));
         }
         self.remember_active_index();
         let before = self.active;

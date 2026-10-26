@@ -929,6 +929,11 @@ pub fn create_version(world: &mut World, name: &str, description: &str) {
     if editing(world) {
         return;
     }
+    // A shared document's versions are made by its owner's cadrs (`crate::collab`).
+    if crate::collab::versions::intercept(world, name, description) {
+        world.resource_mut::<HistoryPanel>().open = true;
+        return;
+    }
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
     let user = world
         .get_resource::<UserProfile>()

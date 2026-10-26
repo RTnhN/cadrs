@@ -673,3 +673,110 @@ fn on_checkbox(ev: On<CheckboxChange>, q: Query<&Name>, mut commands: Commands) 
         }
     });
 }
+
+// ---------------------------------------------------------------------------------------------
+// Transfer ownership
+
+/// The Transfer ownership dialog's root: which document.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TransferDialog(pub DocumentId);
+
+/// Transfer ownership… (the documents page's menu): to whom, among the people it is shared
+/// with. It takes effect at once, as Onshape's does; the old owner keeps Can edit.
+pub fn open_transfer(world: &mut World, id: DocumentId) {
+    let Some((doc, meta)) = sharing::read(world, id) else {
+        return;
+    };
+    let members: Vec<(String, String)> = meta
+        .sharing
+        .iter()
+        .flat_map(|s| s.members.iter())
+        .map(|m| (m.id.clone(), m.name.clone()))
+        .collect();
+    if members.is_empty() {
+        crate::linked::toast(
+            world,
+            "Share it with someone first: they can become its owner",
+        );
+        return;
+    }
+    let theme = world.resource::<Theme>().clone();
+    let (tb, tf) = (theme.clone(), theme.clone());
+    world.commands().spawn((
+        Dialog::new("transfer-dialog")
+            .title(format!(
+                "Transfer ownership of \u{201c}{}\u{201d}",
+                doc.name
+            ))
+            .width(460.0)
+            .body(move |b| {
+                let t = &tb;
+                let mut select = Select::new("transfer-to").width(Val::Px(260.0));
+                for (id, name) in &members {
+                    let short: String = id.chars().take(10).collect();
+                    select = select.option(format!("{name} · {short}"), true);
+                }
+                b.spawn(form_row(t, "transfer-to-row", "New owner", 110.0))
+                    .with_child(select.selected(0).build(t));
+                b.spawn((
+                    t.text(
+                        "Their cadrs must be running. You keep the document, with Can edit.",
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Node {
+                        width: Val::Px(420.0),
+                        margin: UiRect::top(Val::Px(8.0)),
+                        ..default()
+                    },
+                ))
+                .insert(TextLayout::default());
+            })
+            .footer(move |f| {
+                let t = &tf;
+                f.spawn((
+                    Button::new("transfer-confirm")
+                        .label("Transfer ownership")
+                        .primary()
+                        .build(t),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(confirm_transfer);
+                    }),
+                ));
+                f.spawn((
+                    Button::new("transfer-cancel").label("Cancel").build(t),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(close_transfer);
+                    }),
+                ));
+            })
+            .build(&theme),
+        TransferDialog(id),
+    ));
+    world.flush();
+}
+
+fn close_transfer(world: &mut World) {
+    let mut q = world.query_filtered::<Entity, With<TransferDialog>>();
+    let roots: Vec<Entity> = q.iter(world).collect();
+    for e in roots {
+        world.trigger(DialogClose { entity: e });
+    }
+}
+
+fn confirm_transfer(world: &mut World) {
+    let mut q = world.query::<&TransferDialog>();
+    let Some(TransferDialog(id)) = q.iter(world).next().copied() else {
+        return;
+    };
+    let i = selected(world, "transfer-to");
+    let to =
+        sharing::read(world, id).and_then(|(_, m)| m.sharing?.members.get(i).map(|m| m.id.clone()));
+    close_transfer(world);
+    let Some(to) = to else { return };
+    match sharing::transfer(world, id, &to) {
+        Ok(()) => crate::linked::toast(world, "Transferring…"),
+        Err(why) => crate::linked::toast(world, why),
+    }
+}
