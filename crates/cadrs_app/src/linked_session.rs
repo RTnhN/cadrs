@@ -680,7 +680,11 @@ fn notify_refused(
             s.label(),
             s.back.doc.name
         ),
-        None => crate::READ_ONLY.to_string(),
+        // A shared document (`crate::collab`): the reason it is read-only.
+        None => doc
+            .read_only
+            .clone()
+            .unwrap_or_else(|| crate::READ_ONLY.into()),
     };
     cadrs_ui::show_notification(
         &mut commands,

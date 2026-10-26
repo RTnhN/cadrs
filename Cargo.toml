@@ -92,12 +92,19 @@ rmcp = { version = "3.5", default-features = false, features = ["server", "macro
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
 tokio-util = "0.7"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# Sharing and collaboration (cadrs_net): peers over iroh, no server. Only the transport, rooms
+# and typed messages; the voice and video features stay off (MIT/Apache-2.0).
+bevy_iroh = { version = "0.4.5", default-features = false }
+# Share links (cadrs_net): postcard, then base32 so a link survives a chat client.
+postcard = { version = "1.1", features = ["alloc"] }
+data-encoding = "2"
 
 cadrs_core = { path = "crates/cadrs_core" }
 cadrs_cam = { path = "crates/cadrs_cam" }
 cadrs_sketch = { path = "crates/cadrs_sketch" }
 cadrs_vars = { path = "crates/cadrs_vars" }
 cadrs_ui = { path = "crates/cadrs_ui" }
+cadrs_net = { path = "crates/cadrs_net" }
 cadrs_app = { path = "crates/cadrs_app" }
 cadrs_harness = { path = "crates/cadrs_harness" }
 cadrs_kernel = { path = "crates/cadrs_kernel" }

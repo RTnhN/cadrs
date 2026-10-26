@@ -1,0 +1,22 @@
+[package]
+name = "cadrs_net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bevy.workspace = true
+bevy_iroh.workspace = true
+cadrs_core.workspace = true
+data-encoding.workspace = true
+postcard.workspace = true
+serde.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+
+[features]
+# Voice while editing together: bevy_iroh's media (cpal, libopus and openh264, built from
+# source with cmake). Off by default; `cargo build -r -F voice` on the app.
+voice = ["bevy_iroh/media"]

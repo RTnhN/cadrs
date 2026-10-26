@@ -11,6 +11,7 @@ bevy.workspace = true
 cadrs_app.workspace = true
 cadrs_core.workspace = true
 cadrs_harness.workspace = true
+cadrs_net.workspace = true
 cadrs_ui.workspace = true
 
 [features]
@@ -22,6 +23,9 @@ gpu = ["cadrs_core/gpu"]
 profiler = ["bevy/trace", "bevy/debug"]
 # Faster dev builds: Bevy as a shared library (`cargo run -F dev`). Not for shipped builds.
 dev = ["bevy/dynamic_linking"]
+# Voice while editing together: bevy_iroh's media (libopus and openh264 built with cmake, the
+# microphone through cpal). Off by default.
+voice = ["cadrs_app/voice"]
 # The app's tests (they build the whole app): a plain `cargo test` leaves them out.
 app-tests = []
 

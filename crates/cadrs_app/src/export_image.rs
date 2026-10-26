@@ -97,6 +97,9 @@ struct PendingCapture {
 /// Opens the dialog for the active 3D tab; `name` is the file name to start with (the tab's
 /// name by default).
 pub fn open(world: &mut World, name: Option<String>) {
+    if crate::collab::lacks(world, |r| r.export, "export") {
+        return;
+    }
     let Some(tab) = world
         .get_resource::<ActiveDocument>()
         .and_then(|d| d.active_element().map(|e| e.name.clone()))

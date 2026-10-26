@@ -32,6 +32,7 @@ cadrs_router.workspace = true
 cadrs_kicad = { workspace = true, optional = true }
 cadrs_easyeda = { workspace = true, optional = true }
 cadrs_mcp.workspace = true
+cadrs_net.workspace = true
 serde_json.workspace = true
 directories.workspace = true
 winit.workspace = true
@@ -51,3 +52,5 @@ default = ["kicad", "easyeda"]
 kicad = ["dep:cadrs_kicad"]
 # The online part search (JLCPCB/LCSC, EasyEDA parts) in the library browser.
 easyeda = ["dep:cadrs_easyeda"]
+# Voice while editing together (`collab::voice`; cadrs_net's `voice`).
+voice = ["cadrs_net/voice"]

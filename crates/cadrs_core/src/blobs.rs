@@ -123,6 +123,28 @@ pub fn file_name(hash: &str, ext: &str) -> String {
     }
 }
 
+/// A blob's bytes, from the cache or else from its stored file in `dir` (a stored source file
+/// can outlive the in-memory cache, under a different extension), checked against the hash.
+pub fn bytes_for(hash: &str, dir: &Path) -> Result<Vec<u8>, String> {
+    let bytes = if let Some(bytes) = get(hash) {
+        bytes.to_vec()
+    } else {
+        let path = std::fs::read_dir(dir)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(hash))
+            .ok_or_else(|| format!("Missing required asset {hash}"))?;
+        std::fs::read(path).map_err(|e| e.to_string())?
+    };
+    if hash_of(&bytes) != hash {
+        return Err(format!("Asset {hash} failed validation"));
+    }
+    Ok(bytes)
+}
+
 /// The blobs a document's features use: (hash, extension), each once. A linked copy's features
 /// count too (P3G.1): the copy rebuilds in this document, from this document's files; so do a
 /// Derived feature's source studio's (it rebuilds here too).
