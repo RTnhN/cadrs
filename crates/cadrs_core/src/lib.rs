@@ -15,6 +15,7 @@ pub mod blobs;
 pub mod brep;
 pub mod cam;
 pub mod check;
+pub mod collab;
 pub mod command;
 pub mod commands;
 pub mod derived;

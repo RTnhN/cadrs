@@ -102,6 +102,8 @@
 //! - `sim-hold <on|off>` (P3F.5 judge): a simulation solve pauses once meshed until `off`.
 //! - `render-hold <N|off>` (P3F.6): a final render pauses after N samples until `off`, for a
 //!   screenshot of its progress.
+//! - `share`: Share on the open document (`crate::collab`; the link is logged as well as
+//!   copied). `join <link>`: Join shared document with that link.
 //! - `selection-readout`: shows the selection readout (off by default, see
 //!   [`crate::selection_readout`]).
 //! - `linked-block …` (P3G.1, [`cadrs_core::samples::linked_block`]): `linked-block` writes
@@ -148,6 +150,16 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
         if let Some(rest) = m.0.strip_prefix("sketch ") {
             let spec = rest.to_string();
             commands.queue(move |world: &mut World| add_sketch(world, &spec));
+            continue;
+        }
+        // Sharing (`crate::collab`): Share, and Join shared document with a link.
+        if m.0.trim() == "share" {
+            commands.queue(crate::collab::share_current);
+            continue;
+        }
+        if let Some(link) = m.0.trim().strip_prefix("join ") {
+            let link = link.to_string();
+            commands.queue(move |world: &mut World| crate::collab::start_join(world, &link));
             continue;
         }
         // P3E.1: the documents page reads the store again.

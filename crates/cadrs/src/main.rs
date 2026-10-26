@@ -179,6 +179,7 @@ fn main() -> AppExit {
                 .or_else(Store::default_root)
                 .map(|d| d.join(cadrs_net::IDENTITY_FILE)),
             display_name: UserProfile::system().display_name,
+            relays: Default::default(),
         });
     }
     if scripted || opts.headless {

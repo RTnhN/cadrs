@@ -2273,6 +2273,7 @@ dependencies = [
  "cadrs_sketch",
  "cadrs_vars",
  "directories",
+ "flate2",
  "image",
  "nalgebra",
  "resvg",
@@ -2426,6 +2427,11 @@ version = "0.1.8"
 dependencies = [
  "bevy",
  "bevy_iroh",
+ "cadrs_core",
+ "data-encoding",
+ "postcard",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

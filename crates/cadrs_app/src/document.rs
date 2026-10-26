@@ -607,8 +607,21 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             r.spawn(cadrs_ui::scheme_toggle(t))
                 .entry::<Node>()
                 .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // (Explore, notifications, apps, help and Share are left out until they do
-            // something: issue #13.)
+            // Share (Onshape's blue button; `crate::collab`). (Explore, notifications, apps
+            // and help are left out until they do something: issue #13.)
+            r.spawn((
+                Button::new("document-share")
+                    .label("Share")
+                    .primary()
+                    .small()
+                    .tooltip("Share this document: copies a link to it")
+                    .build(t),
+                observe(|_: On<Activate>, mut commands: Commands| {
+                    commands.queue(crate::collab::share_current);
+                }),
+            ))
+            .entry::<Node>()
+            .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
             crate::preferences_ui::spawn_settings_button(r, t);
         });
     });

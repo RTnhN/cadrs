@@ -19,6 +19,7 @@ pub mod boolean;
 pub mod cam;
 pub mod camera;
 pub mod change_preview;
+pub mod collab;
 pub mod composite_ui;
 pub mod create_selection;
 pub mod cursor;
@@ -658,6 +659,7 @@ impl Plugin for CadrsAppPlugin {
                 frame_stats::FrameStatsPlugin,
                 frame_profile::FrameProfilePlugin,
                 debug_tools::DebugToolsPlugin,
+                collab::CollabPlugin,
                 update::UpdatePlugin,
             ))
             .add_plugins((
