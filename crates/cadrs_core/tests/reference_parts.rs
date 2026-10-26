@@ -160,6 +160,8 @@ struct Recipe {
     offsets: Vec<(usize, f64, PlaneRef)>,
     params: HashMap<String, f64>,
     notes: Vec<String>,
+    /// Sketches of a fitted spline through points on a helix, made a Helix feature instead.
+    helices: HashMap<String, FeatureId>,
 }
 
 impl Recipe {
@@ -177,6 +179,7 @@ impl Recipe {
             offsets: Vec::new(),
             params: HashMap::new(),
             notes: Vec::new(),
+            helices: HashMap::new(),
         }
     }
 
@@ -363,6 +366,24 @@ impl Recipe {
 
     fn sketch(&mut self, f: &Value) -> R<()> {
         let name = f["name"].as_str().unwrap_or("").to_string();
+        // A spline fitted through points on a helix about the world Z axis (as SolidCraft
+        // replays it): the true helix, a Helix feature.
+        if let [e] = f["entities"].as_array().map_or(&[][..], Vec::as_slice)
+            && e["type"] == "fitted_spline"
+        {
+            let pts: Vec<V3> = e["fit_points"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(v3)
+                .collect();
+            let Some(h) = helix_through(&pts) else {
+                return unsupported("a fitted spline that isn't a helix");
+            };
+            let id = self.add("Helix", FeatureKind::Helix(h))?;
+            self.helices.insert(name, id);
+            return Ok(());
+        }
         let rf = self.recipe_frame(&f["plane"])?;
         let (pr, cf) = self.cadrs_plane(rf.o, rf.n)?;
         let id = FeatureId::new();
@@ -1320,6 +1341,27 @@ impl Recipe {
                         profiles,
                         op: Self::op_of(f)?,
                         ..LoftFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            "sweep"
+                if f["path"]["sketch"]
+                    .as_str()
+                    .is_some_and(|s| self.helices.contains_key(s)) =>
+            {
+                let helix = self.helices[f["path"]["sketch"].as_str().unwrap()];
+                let profiles = self.profiles(f)?;
+                let regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+                let before = self.ids();
+                let id = self.add(
+                    "Sweep",
+                    FeatureKind::Sweep(SweepFeature {
+                        regions,
+                        path: vec![PathRef::Curve(helix)],
+                        op: Self::op_of(f)?,
+                        ..SweepFeature::default()
                     }),
                 )?;
                 self.name_bodies(f, id, &before)?;
@@ -2357,4 +2399,59 @@ fn bspline(cps: &[f64], knots: &[f64], p: usize, u: f64) -> f64 {
         }
     }
     d[p]
+}
+
+/// The helix about the world Z axis through `pts` in order, if they lie on one (a constant
+/// radius, the height rising evenly with the angle): a Helix feature of that radius, pitch,
+/// turns and start, turning the way the points do.
+fn helix_through(pts: &[V3]) -> Option<cadrs_core::surfacing::HelixFeature> {
+    use cadrs_core::surfacing::{HelixFeature, HelixPath, HelixType};
+    if pts.len() < 4 {
+        return None;
+    }
+    let r = pts[0][0].hypot(pts[0][1]);
+    // The angles unwrapped along the points.
+    let mut a = vec![pts[0][1].atan2(pts[0][0])];
+    for w in pts.windows(2) {
+        let d = (w[1][1].atan2(w[1][0]) - w[0][1].atan2(w[0][0]) + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        a.push(a.last().unwrap() + d);
+    }
+    let (a0, a1) = (a[0], *a.last().unwrap());
+    let (z0, z1) = (pts[0][2], pts.last().unwrap()[2]);
+    if r < 1e-9 || (a1 - a0).abs() < 1e-9 || (z1 - z0).abs() < 1e-9 {
+        return None;
+    }
+    let rise = (z1 - z0) / (a1 - a0);
+    let on = pts.iter().zip(&a).all(|(p, t)| {
+        (p[0].hypot(p[1]) - r).abs() < 1e-6 * r
+            && (p[2] - (z0 + rise * (t - a0))).abs() < 1e-6 * (1.0 + r)
+    });
+    if !on || z1 < z0 {
+        return None;
+    }
+    let turns = (a1 - a0).abs() / std::f64::consts::TAU;
+    let height = z1 - z0;
+    let pitch = height / turns;
+    Some(HelixFeature {
+        helix_type: HelixType::Axis,
+        axis: Some(AxisRef::Connector(ConnectorRef::Implicit(
+            ConnectorOrigin::Origin,
+        ))),
+        path: HelixPath::TurnsAndPitch,
+        revolutions: turns,
+        revolutions_expr: format!("{turns}"),
+        pitch,
+        pitch_expr: format!("{pitch} mm"),
+        height,
+        height_expr: format!("{height} mm"),
+        radius: r,
+        radius_expr: format!("{r} mm"),
+        start_angle: a0.to_degrees(),
+        start_angle_expr: format!("{} deg", a0.to_degrees()),
+        // Seen from its start looking up the axis, counter-clockwise from above is clockwise.
+        clockwise: a1 > a0,
+        ..HelixFeature::default()
+    })
 }

@@ -45,6 +45,7 @@
 46-shell-two-open-faces
 47-draft-curved-pocket
 48-pulley
+49-helical-sweep
 50-sweep-tight-bend
 51-loft-rect-circle-offset
 52-circular-pattern-fillet
