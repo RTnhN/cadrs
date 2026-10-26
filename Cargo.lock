@@ -2432,6 +2432,7 @@ dependencies = [
  "postcard",
  "serde",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
