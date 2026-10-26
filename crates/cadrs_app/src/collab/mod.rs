@@ -27,6 +27,8 @@ pub mod presence;
 pub mod share_dialog;
 pub mod sharing;
 pub mod versions;
+#[cfg(feature = "voice")]
+pub mod voice;
 
 pub struct CollabPlugin;
 
@@ -41,6 +43,8 @@ impl Plugin for CollabPlugin {
         sharing::plugin(app);
         share_dialog::plugin(app);
         versions::plugin(app);
+        #[cfg(feature = "voice")]
+        voice::plugin(app);
     }
 }
 

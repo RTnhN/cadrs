@@ -106,7 +106,8 @@
 //!   copied). `join <link>`: Join shared document with that link. `share-dialog` opens the
 //!   share dialog; `share-with <cadrs ID> <name> edit|view`, `unshare <cadrs ID>` and
 //!   `share-link off|view|edit` do what it does; `follow <cadrs ID prefix>` follows a
-//!   collaborator; `transfer <cadrs ID prefix>` transfers ownership to a member. `branch <version index> <name>` branches from a version (and opens the
+//!   collaborator; `transfer <cadrs ID prefix>` transfers ownership to a member;
+//!   `voice join|mute|leave` as the voice buttons (with the `voice` feature). `branch <version index> <name>` branches from a version (and opens the
 //!   branch); `workspace main` opens Main again.
 //! - `selection-readout`: shows the selection readout (off by default, see
 //!   [`crate::selection_readout`]).
@@ -215,6 +216,20 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
                     world,
                     cadrs_core::history_log::WorkspaceId::MAIN,
                 )
+            });
+            continue;
+        }
+        // Voice (`crate::collab::voice`, the `voice` feature): as the top bar's buttons.
+        if let Some(what) = m.0.trim().strip_prefix("voice ") {
+            let what = what.trim().to_string();
+            commands.queue(move |world: &mut World| {
+                let mut ui = world.resource_mut::<crate::collab::presence::VoiceUi>();
+                match what.as_str() {
+                    "join" => ui.want_join = Some(true),
+                    "leave" => ui.want_join = Some(false),
+                    "mute" => ui.toggle_mute = true,
+                    _ => warn!("voice {what}: join, leave or mute"),
+                }
             });
             continue;
         }
