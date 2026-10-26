@@ -137,11 +137,38 @@ impl CommentChanged {
     }
 }
 
+/// A version the owner made of the shared document (on its own, or asked by someone it is
+/// shared with): at edit `seq` of session `epoch`. Everyone makes the same version, with the
+/// same id, of their copy at that edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VersionCreated {
+    pub document: DocumentId,
+    pub epoch: u64,
+    pub seq: u64,
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub description: String,
+    pub time: i64,
+    /// Who asked for it.
+    pub user: String,
+}
+
+/// The tabs someone has open for themselves ("Open tab, close it for other users", Onshape's
+/// focus lock for tabs that can't be edited together): each tab with its holder's cadrs ID and
+/// name. From the owner, whenever it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocksChanged {
+    pub document: DocumentId,
+    pub locks: Vec<(ElementId, String, String)>,
+}
+
 pub(crate) fn register(app: &mut App) {
     app.add_net_message::<Sequenced>()
         .add_net_message::<AccessChanged>()
         .add_net_message::<Presence>()
-        .add_net_message::<CommentChanged>();
+        .add_net_message::<CommentChanged>()
+        .add_net_message::<VersionCreated>()
+        .add_net_message::<LocksChanged>();
 }
 
 /// The owner's room for a document shared in `topic`: always the same topic, so links keep
