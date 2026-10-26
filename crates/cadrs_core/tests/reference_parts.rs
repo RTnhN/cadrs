@@ -1216,6 +1216,54 @@ impl Recipe {
                 p.features = feats;
                 self.add("Pattern", FeatureKind::Pattern(p))?
             }
+            // A cosmetic thread is the hole's callout, no geometry (in cadrs a tapped Hole's).
+            "thread" if f["modeled"].as_bool() == Some(false) => {
+                self.notes
+                    .push("cosmetic thread: no geometry, not built".into());
+                return Ok(());
+            }
+            "path_pattern" => {
+                if f["pattern_of"].as_str().unwrap_or("features") != "features" {
+                    return unsupported(format!("path_pattern of {}", f["pattern_of"]));
+                }
+                let sname = f["path"]["sketch"].as_str().unwrap_or("");
+                let Some(info) = self.sketches.get(sname) else {
+                    return unsupported(format!("path of unknown sketch `{sname}`"));
+                };
+                let sketch = info.id;
+                let path = f["path"]["curves"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|c| {
+                        Ok(PathRef::SketchCurve {
+                            sketch,
+                            curve: curve_ref(info, c)?,
+                        })
+                    })
+                    .collect::<R<Vec<_>>>()?;
+                let mut p = PatternFeature::new(PatternKind::Curve);
+                p.pattern_type = PatternType::Feature;
+                p.features = self.feature_list(&f["features"])?;
+                p.path = path;
+                p.first.count = f["count"].as_u64().unwrap_or(1) as u32;
+                // The instances `spacing` apart along the path from the seed (at its start), or
+                // spread evenly over it.
+                match f.get("spacing") {
+                    Some(d) => {
+                        let d = self.num(Some(d))?;
+                        p.equal_spacing = false;
+                        p.first.distance = d;
+                        p.first.distance_expr = format!("{d} mm");
+                    }
+                    None => p.equal_spacing = true,
+                }
+                p.tangent_to_curve = !f["orientation"]
+                    .as_str()
+                    .is_some_and(|o| o.starts_with("identical"));
+                self.add("Pattern", FeatureKind::Pattern(p))?
+            }
             "mirror" => {
                 let plane = MirrorPlane::Plane(self.plane_ref(&f["plane"])?);
                 let mut m = MirrorFeature {
@@ -1411,20 +1459,31 @@ impl Recipe {
             );
         }
         let face = &f["face"];
-        if face["type"].as_str().unwrap_or("plane") != "plane" {
-            return unsupported("a hole on a curved face");
-        }
-        let (Some(pos), Some(n)) = (
-            f.get("position").and_then(v3),
-            face.get("plane_normal_outward").and_then(v3),
-        ) else {
-            return unsupported("a hole without a position and face normal");
+        let Some(pos) = f.get("position").and_then(v3) else {
+            return unsupported("a hole without a position");
+        };
+        // The face's outward normal at the hole: a plane's, or a cylinder's radial direction
+        // there (the hole's sketch then lies on the plane touching the cylinder there).
+        let n = match face["type"].as_str().unwrap_or("plane") {
+            "plane" => face.get("plane_normal_outward").and_then(v3),
+            "cylinder" => match (
+                face.get("axis_origin").and_then(v3),
+                face.get("axis").and_then(v3),
+            ) {
+                (Some(o), Some(a)) => {
+                    let (a, d) = (unit(a), sub(pos, o));
+                    Some(sub(d, scale(a, dot(d, a))))
+                }
+                _ => None,
+            },
+            other => return unsupported(format!("a hole on a {other} face")),
+        };
+        let Some(n) = n else {
+            return unsupported("a hole without its face's normal");
         };
         let (pr, cf) = self.cadrs_plane(pos, n)?;
-        // cadrs drills against its sketch plane's normal: the face's outward normal must be it.
-        if dot(cf.n, unit(n)) < 0.0 {
-            return unsupported("a hole drilled along a default plane's normal");
-        }
+        // cadrs drills against its sketch plane's normal, or along it flipped: into the material.
+        let flip = dot(cf.n, unit(n)) < 0.0;
         let s = FeatureId::new();
         self.exec(&AddSketch {
             element: self.el,
@@ -1455,6 +1514,7 @@ impl Recipe {
             FeatureKind::Hole(HoleFeature {
                 points: vec![HolePoint { sketch: s, point }],
                 spec,
+                flip,
                 ..HoleFeature::default()
             }),
         )

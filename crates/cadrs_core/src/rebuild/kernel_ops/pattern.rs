@@ -447,10 +447,12 @@ impl Rebuilder {
                 let (p0, t0) = path_at(&path, 0.0);
                 let normal = path_plane(&path);
                 for (i, o) in grid.into_iter().skip(1) {
+                    // (An instance a hair past the end, a distance typed rounded, is at the end.)
                     let s = spacing * o[0];
-                    if s < -1e-9 || s > total + 1e-6 {
+                    if s < -1e-9 || s > total + 1e-4 {
                         return Err("Instances run past the end of the path; reduce the count or the distance".into());
                     }
+                    let s = s.min(total);
                     let (p, t) = path_at(&path, s);
                     let mut motion = Motion::translation(p - p0);
                     if x.tangent_to_curve {
