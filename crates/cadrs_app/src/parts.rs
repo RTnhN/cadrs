@@ -1342,10 +1342,10 @@ fn update_part_cache(
         return;
     }
     // A CAM Studio builds its components (Derived features of their Part Studios).
-    let features = if el.cam().is_some() {
+    let features: std::borrow::Cow<[cadrs_core::Feature]> = if el.cam().is_some() {
         el.part_features()
     } else {
-        el.features()
+        el.features().into()
     };
     // Renames and hidden parts (and a change of element ends an isolation).
     if cache.props.as_slice() != el.part_props() {
@@ -1388,7 +1388,7 @@ fn update_part_cache(
                 log.0.push((features.len(), build.computed, build.elapsed));
                 cache.apply(
                     &build,
-                    stage_feature(features, &over),
+                    stage_feature(&features, &over),
                     over.staged.is_some(),
                     over.over_result,
                 );
@@ -1404,7 +1404,7 @@ fn update_part_cache(
                 log.0.push((features.len(), build.computed, build.elapsed));
                 cache.apply(
                     &build,
-                    stage_feature(features, &over),
+                    stage_feature(&features, &over),
                     over.staged.is_some(),
                     over.over_result,
                 );
@@ -1447,7 +1447,7 @@ fn update_part_cache(
             }
             cache.apply(
                 &build,
-                stage_feature(features, &over),
+                stage_feature(&features, &over),
                 over.staged.is_some(),
                 over.over_result,
             );

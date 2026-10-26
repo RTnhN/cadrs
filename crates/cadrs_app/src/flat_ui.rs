@@ -47,13 +47,14 @@ fn region_of(cache: &PartCache, sketch: FeatureId, index: u32) -> Option<RegionR
     Some(RegionRef::new(sketch, &r))
 }
 
+/// The active Part Studio's features as a rebuild takes them (the Variable Studios' variables
+/// they name first).
 fn features(world: &World) -> Option<Vec<Feature>> {
     Some(
         world
             .get_resource::<ActiveDocument>()?
             .active_element()?
-            .features()
-            .to_vec(),
+            .features_to_build(),
     )
 }
 

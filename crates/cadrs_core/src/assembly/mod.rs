@@ -861,7 +861,7 @@ pub fn document_occurrence_solids(
         }
         let el = doc.element(e)?;
         el.assembly_model().is_none().then_some(())?;
-        let b = crate::rebuild::build(el.part_features());
+        let b = crate::rebuild::build(&el.part_features());
         builds.insert(e, b.clone());
         Some(b)
     })

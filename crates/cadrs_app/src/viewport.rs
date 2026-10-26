@@ -269,12 +269,17 @@ pub enum ActiveKind {
     Render,
     /// A CAM Studio tab: its components' parts, stock and toolpaths (`crate::cam`), no planes.
     CamStudio,
+    /// A Variable Studio tab: its table (`crate::variable_studio_ui`) replaces the 3D view.
+    VariableStudio,
 }
 
 impl ActiveKind {
     /// True for a tab with no 3D view (a drawing's sheet, a render).
     pub fn is_flat(self) -> bool {
-        matches!(self, ActiveKind::Drawing | ActiveKind::Render)
+        matches!(
+            self,
+            ActiveKind::Drawing | ActiveKind::Render | ActiveKind::VariableStudio
+        )
     }
 }
 
@@ -920,6 +925,7 @@ fn track_active_element(
         cadrs_core::ElementKind::PcbStudio(_) => ActiveKind::PcbStudio,
         cadrs_core::ElementKind::Render(_) => ActiveKind::Render,
         cadrs_core::ElementKind::CamStudio(_) => ActiveKind::CamStudio,
+        cadrs_core::ElementKind::VariableStudio(_) => ActiveKind::VariableStudio,
     };
     kind.set_if_neq(k);
     if view.element != Some(el.id) {

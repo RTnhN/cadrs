@@ -399,7 +399,7 @@ pub fn live_bom(
         if let Some(b) = cache.get(&e) {
             return Some(b.clone());
         }
-        let b = crate::rebuild::build(doc.element(e)?.features());
+        let b = crate::rebuild::build(&doc.element(e)?.part_features());
         cache.insert(e, b.clone());
         Some(b)
     })

@@ -314,7 +314,7 @@ pub fn open_insert_view(world: &mut World) {
     for el in &doc.doc.elements {
         match &el.kind {
             ElementKind::PartStudio { .. } => {
-                let build = cadrs_core::rebuild::build(el.features());
+                let build = cadrs_core::rebuild::build(&el.part_features());
                 let props = el.part_props();
                 // P3I.7: every sheet metal part's flat pattern.
                 for p in cadrs_core::flat_drawing::flat_parts(&build.sheet_metal) {

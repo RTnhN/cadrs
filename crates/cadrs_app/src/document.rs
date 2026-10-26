@@ -1076,11 +1076,7 @@ fn insert_menu(paste: Option<String>) -> Menu {
         .separator()
         .item(MenuItem::new("create-part-studio", "Create Part Studio").icon("part-studio"))
         .item(MenuItem::new("create-assembly", "Create Assembly").icon("assembly"))
-        .item(
-            MenuItem::new("create-variable-studio", "Create Variable Studio")
-                .icon("variables")
-                .planned(),
-        )
+        .item(MenuItem::new("create-variable-studio", "Create Variable Studio").icon("variables"))
         // P3C.1: drawings.
         .item(MenuItem::new("create-drawing", "Create Drawing…").icon("details"))
         .item(MenuItem::new("create-folder", "Create folder").icon("folder"))
@@ -1196,6 +1192,7 @@ enum TabKind {
     PcbStudio,
     Render,
     CamStudio,
+    VariableStudio,
 }
 
 impl TabKind {
@@ -1207,6 +1204,7 @@ impl TabKind {
             cadrs_core::ElementKind::PcbStudio(_) => TabKind::PcbStudio,
             cadrs_core::ElementKind::Render(_) => TabKind::Render,
             cadrs_core::ElementKind::CamStudio(_) => TabKind::CamStudio,
+            cadrs_core::ElementKind::VariableStudio(_) => TabKind::VariableStudio,
         }
     }
 
@@ -1219,6 +1217,7 @@ impl TabKind {
             TabKind::PcbStudio => "pcb-studio",
             TabKind::Render => "render-studio",
             TabKind::CamStudio => "cam-studio",
+            TabKind::VariableStudio => "variable-studio",
         }
     }
 
@@ -1231,6 +1230,7 @@ impl TabKind {
             TabKind::PcbStudio => "pcb-studio",
             TabKind::Render => "render-studio",
             TabKind::CamStudio => "cam-studio",
+            TabKind::VariableStudio => "variables",
         }
     }
 }
@@ -1423,6 +1423,11 @@ fn rebuild_element_ui(
                     .entity(toolbar)
                     .with_children(|tb| crate::cam::toolbar(tb, &t));
             }
+            Some((_, TabKind::VariableStudio, _)) => {
+                commands
+                    .entity(toolbar)
+                    .with_children(|tb| crate::variable_studio_ui::toolbar(tb, &t));
+            }
             Some((_, TabKind::PartStudio, true)) => {
                 commands
                     .entity(toolbar)
@@ -1444,8 +1449,9 @@ fn rebuild_element_ui(
         return;
     };
     commands.entity(panel).despawn_children();
-    if kind == TabKind::Drawing {
-        // The feature panel is hidden on a drawing (the Sheets flyout takes its place).
+    if kind == TabKind::Drawing || kind == TabKind::VariableStudio {
+        // The feature panel is hidden on a drawing (the Sheets flyout takes its place) and on
+        // a Variable Studio (its table fills the tab).
     } else if kind == TabKind::PcbStudio {
         commands
             .entity(panel)
@@ -3058,6 +3064,7 @@ fn open_properties_dialog(
         cadrs_core::ElementKind::PcbStudio(_) => "PCB Studio",
         cadrs_core::ElementKind::Render(_) => "Render Studio",
         cadrs_core::ElementKind::CamStudio(_) => "CAM Studio",
+        cadrs_core::ElementKind::VariableStudio(_) => "Variable Studio",
     };
     commands.spawn((
         Dialog::new("tab-properties-dialog")
@@ -3155,6 +3162,7 @@ fn on_insert_menu_action(
         "create-assembly" => NewElementKind::Assembly,
         "create-pcb-studio" => NewElementKind::PcbStudio,
         "create-cam-studio" => NewElementKind::CamStudio,
+        "create-variable-studio" => NewElementKind::VariableStudio,
         "create-render-studio" => {
             NewElementKind::RenderStudio(crate::render_ui::default_source(&doc))
         }

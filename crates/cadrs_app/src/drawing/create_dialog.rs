@@ -943,7 +943,7 @@ pub(crate) fn four_views_of(
             let Some(studio) = super::views::studio(doc, &r) else {
                 return Vec::new();
             };
-            let build = cadrs_core::rebuild::build(studio.features);
+            let build = cadrs_core::rebuild::build(&studio.features);
             cadrs_core::views::view_parts(&build.parts, super::views::part_of(&r))
                 .into_iter()
                 .cloned()

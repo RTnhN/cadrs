@@ -24,6 +24,7 @@ default-members = [
     "crates/cadrs_router_kernels",
     "crates/cadrs_sheetmetal",
     "crates/cadrs_sketch",
+    "crates/cadrs_vars",
 ]
 
 [workspace.package]
@@ -95,6 +96,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 cadrs_core = { path = "crates/cadrs_core" }
 cadrs_cam = { path = "crates/cadrs_cam" }
 cadrs_sketch = { path = "crates/cadrs_sketch" }
+cadrs_vars = { path = "crates/cadrs_vars" }
 cadrs_ui = { path = "crates/cadrs_ui" }
 cadrs_app = { path = "crates/cadrs_app" }
 cadrs_harness = { path = "crates/cadrs_harness" }

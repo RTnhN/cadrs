@@ -116,6 +116,7 @@ pub mod tool_input;
 pub mod transform_ui;
 pub mod units_dialog;
 pub mod update;
+pub mod variable_studio_ui;
 pub mod variables_ui;
 pub mod view_cube;
 pub mod view_options;
@@ -333,7 +334,10 @@ pub const READ_ONLY: &str = "This version is open read-only: it can't be edited"
 impl ActiveDocument {
     /// A scratch document that is not saved.
     pub fn new(mut doc: Document) -> Self {
-        // Derived features take their sources' snapshots (not an edit).
+        // The Variable Studios' values, in case the file's copies in its Part Studios and
+        // Assemblies are stale (a tab pasted from another document, an older file), then
+        // Derived features take their sources' snapshots (neither is an edit).
+        cadrs_core::variable_studio::propagate(&mut doc, None);
         cadrs_core::derived::resolve_document(&mut doc);
         Self {
             saved: doc.clone(),
@@ -740,6 +744,7 @@ impl Plugin for CadrsAppPlugin {
             ))
             .add_plugins((
                 variables_ui::VariablesPlugin,
+                variable_studio_ui::VariableStudioUiPlugin,
                 scale_ui::ScalePlugin,
                 threads_ui::ThreadsPlugin,
                 simulation_ui::SimulationPlugin,

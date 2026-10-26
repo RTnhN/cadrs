@@ -176,6 +176,9 @@ impl History {
             before.restore(doc);
             return Err(e);
         }
+        // The Variable Studios' variables reach every Part Studio and Assembly first, so the
+        // Derived features below copy their sources with the new values.
+        crate::variable_studio::propagate(doc, Some(scope));
         // P3G.4: Derived features that follow a tab of this document live.
         crate::derived::refresh(doc);
         let after = Snapshot::take(doc, scope)?;
@@ -199,6 +202,7 @@ impl History {
     pub fn undo(&mut self, doc: &mut Document) -> Option<String> {
         let entry = self.undo.pop()?;
         entry.before.restore(doc);
+        crate::variable_studio::propagate(doc, None);
         crate::derived::refresh(doc);
         let label = entry.label.clone();
         self.redo.push(entry);
@@ -209,6 +213,7 @@ impl History {
     pub fn redo(&mut self, doc: &mut Document) -> Option<String> {
         let entry = self.redo.pop()?;
         entry.after.restore(doc);
+        crate::variable_studio::propagate(doc, None);
         crate::derived::refresh(doc);
         let label = entry.label.clone();
         self.undo.push(entry);

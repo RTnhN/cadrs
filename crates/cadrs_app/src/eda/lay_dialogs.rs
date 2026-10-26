@@ -810,7 +810,7 @@ fn mechanical_context(w: &World) -> Vec<String> {
         if deriving.is_empty() {
             continue;
         }
-        let build = cadrs_core::rebuild::build(el.features());
+        let build = cadrs_core::rebuild::build(&el.part_features());
         let name = |p: cadrs_core::PartId| {
             build
                 .part(p)

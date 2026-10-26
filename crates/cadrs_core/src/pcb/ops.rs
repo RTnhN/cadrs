@@ -185,7 +185,7 @@ pub fn board_report(doc: &Document, el: ElementId, board: BoardId) -> Result<Boa
             continue;
         }
         // (One rebuild per Part Studio.)
-        let build = crate::rebuild::build(ps.features());
+        let build = crate::rebuild::build(&ps.part_features());
         derived_in.extend(deriving.iter().map(|f| DerivedReport {
             part_studio: ps.name.clone(),
             feature: f.name.clone(),
@@ -367,7 +367,7 @@ pub fn axes_of_part(
     copy: usize,
 ) -> Result<Vec<([f64; 2], f64)>, String> {
     let el = doc.element(studio).ok_or("no such Part Studio")?;
-    let build = crate::rebuild::build(el.features());
+    let build = crate::rebuild::build(&el.part_features());
     let out = build
         .derived
         .get(&feature)
@@ -410,7 +410,7 @@ pub fn connector_on_board(
         .find(|f| f.name == connector && matches!(f.kind, FeatureKind::MateConnector(_)))
         .map(|f| f.id)
         .ok_or_else(|| format!("no mate connector {connector:?} in {}", el.name))?;
-    let build = crate::rebuild::build(el.features());
+    let build = crate::rebuild::build(&el.part_features());
     let c = build
         .connectors
         .get(&id)

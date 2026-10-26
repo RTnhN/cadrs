@@ -2090,6 +2090,7 @@ dependencies = [
  "cadrs_sheetmetal",
  "cadrs_sketch",
  "cadrs_ui",
+ "cadrs_vars",
  "chrono",
  "directories",
  "flate2",
@@ -2136,6 +2137,7 @@ dependencies = [
  "cadrs_render",
  "cadrs_sheetmetal",
  "cadrs_sketch",
+ "cadrs_vars",
  "directories",
  "image",
  "nalgebra",
@@ -2376,6 +2378,16 @@ dependencies = [
  "bevy",
  "icon-rs",
  "resvg",
+]
+
+[[package]]
+name = "cadrs_vars"
+version = "0.1.8"
+dependencies = [
+ "cadrs_sketch",
+ "ron",
+ "serde",
+ "uuid",
 ]
 
 [[package]]

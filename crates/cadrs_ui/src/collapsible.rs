@@ -64,6 +64,9 @@ pub struct Collapsible {
     section: bool,
     error: bool,
     content: Option<SpawnFn>,
+    trailing: Option<SpawnFn>,
+    flush: bool,
+    header_background: Option<Color>,
 }
 
 impl Collapsible {
@@ -79,6 +82,9 @@ impl Collapsible {
             section: false,
             error: false,
             content: None,
+            trailing: None,
+            flush: false,
+            header_background: None,
         }
     }
 
@@ -130,6 +136,25 @@ impl Collapsible {
         self
     }
 
+    /// More of the header after the label, filling the rest of the row: counts, tags, and
+    /// buttons (a button there acts without toggling the section).
+    pub fn trailing(mut self, f: impl FnOnce(&mut ChildSpawner) + Send + Sync + 'static) -> Self {
+        self.trailing = Some(Box::new(f));
+        self
+    }
+
+    /// The content edge to edge, without indent or gaps (a table under the header).
+    pub fn flush(mut self) -> Self {
+        self.flush = true;
+        self
+    }
+
+    /// Fills the header (a table section's band).
+    pub fn header_background(mut self, c: Color) -> Self {
+        self.header_background = Some(c);
+        self
+    }
+
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let theme = theme.clone();
         let Collapsible {
@@ -143,6 +168,9 @@ impl Collapsible {
             section,
             error,
             content,
+            trailing,
+            flush,
+            header_background,
         } = self;
         let header_name = format!("{name}-header");
         let content_name = format!("{name}-content");
@@ -161,10 +189,10 @@ impl Collapsible {
                 } else {
                     theme.foreground
                 };
-                let base_bg = if highlight {
-                    theme.list_hover
-                } else {
-                    Color::NONE
+                let base_bg = match (header_background, highlight) {
+                    (Some(c), _) => c,
+                    (None, true) => theme.list_hover,
+                    (None, false) => Color::NONE,
                 };
                 p.spawn((
                     Name::new(header_name),
@@ -243,8 +271,23 @@ impl Collapsible {
                         InheritFg,
                         Pickable::IGNORE,
                     ));
+                    if let Some(f) = trailing {
+                        h.spawn(Node {
+                            flex_grow: 1.0,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(theme.space[4]),
+                            ..default()
+                        })
+                        .with_children(|t| f(t));
+                    }
                 });
-                let node = if section {
+                let node = if flush {
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        display: if open { Display::Flex } else { Display::None },
+                        ..default()
+                    }
+                } else if section {
                     // The guide line under the chevron's middle, the rows a little past it.
                     Node {
                         flex_direction: FlexDirection::Column,

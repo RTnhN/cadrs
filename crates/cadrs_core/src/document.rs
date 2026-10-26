@@ -150,6 +150,10 @@ pub struct Element {
     /// [`crate::named_views`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<crate::named_views::NamedView>,
+    /// A Part Studio's or Assembly's view of the document's Variable Studios: their variables
+    /// with their values, kept up to date by [`crate::variable_studio::propagate`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub studio_variables: Vec<crate::variable_studio::ImportedVariable>,
 }
 
 impl Element {
@@ -172,7 +176,32 @@ impl Element {
             open_context: None,
             simulation: Default::default(),
             named_views: Vec::new(),
+            studio_variables: Vec::new(),
         }
+    }
+
+    /// A Variable Studio tab, with an empty table.
+    pub fn variable_studio(name: impl Into<String>) -> Self {
+        Self {
+            id: ElementId::new(),
+            name: name.into(),
+            kind: ElementKind::VariableStudio(Box::default()),
+            assembly: Default::default(),
+            contexts: Vec::new(),
+            open_context: None,
+            simulation: Default::default(),
+            named_views: Vec::new(),
+            studio_variables: Vec::new(),
+        }
+    }
+
+    /// The Variable Studios' variables as this Part Studio's or Assembly's expressions see
+    /// them (defined above its own list), see [`crate::variable_studio`].
+    pub fn variable_base(&self) -> Vec<(String, cadrs_sketch::units::VarValue)> {
+        self.studio_variables
+            .iter()
+            .map(|v| (v.name.clone(), v.var_value()))
+            .collect()
     }
 
     /// A Render Studio tab of `source` (P3F.6).
@@ -186,6 +215,7 @@ impl Element {
             open_context: None,
             simulation: Default::default(),
             named_views: Vec::new(),
+            studio_variables: Vec::new(),
         }
     }
 
@@ -199,6 +229,7 @@ impl Element {
             open_context: None,
             simulation: Default::default(),
             named_views: Vec::new(),
+            studio_variables: Vec::new(),
         }
     }
 
@@ -213,6 +244,7 @@ impl Element {
             open_context: None,
             simulation: Default::default(),
             named_views: Vec::new(),
+            studio_variables: Vec::new(),
         }
     }
 
@@ -233,6 +265,9 @@ impl Element {
         matches!(self.kind, ElementKind::Assembly).then_some(&mut self.assembly)
     }
 
+    /// The feature list as the user sees it. A rebuild takes [`Self::active_features`] or
+    /// `part_features` instead: they start with the Variable Studios' variables the list names
+    /// ([`Self::studio_features`]), without which those uses fail.
     pub fn features(&self) -> &[Feature] {
         match &self.kind {
             ElementKind::PartStudio { features, .. } => features,
@@ -271,7 +306,8 @@ impl Element {
             | ElementKind::Drawing(_)
             | ElementKind::PcbStudio(_)
             | ElementKind::Render(_)
-            | ElementKind::CamStudio(_) => &[],
+            | ElementKind::CamStudio(_)
+            | ElementKind::VariableStudio(_) => &[],
         }
     }
 
@@ -289,7 +325,11 @@ impl Element {
     /// The features their suppression variable suppresses (IR5.5), with the variables' values
     /// as last evaluated ([`crate::variables::suppressed_by_variables`]).
     pub fn suppressed_by_variable(&self) -> Vec<FeatureId> {
-        crate::variables::suppressed_by_variables(self.features(), self.suppressed())
+        crate::variables::suppressed_by_variables(
+            &self.variable_base(),
+            self.features(),
+            self.suppressed(),
+        )
     }
 
     /// Every suppressed feature, in list order: by Suppress or by a variable (IR5.5).
@@ -322,16 +362,46 @@ impl Element {
             .is_some_and(|i| i >= self.rollback_index())
     }
 
+    /// The Variable Studios' variables this Part Studio's features name, as the Variable
+    /// features a rebuild sees ahead of the list
+    /// ([`crate::variable_studio::ImportedVariable::feature`]). Every list handed to a rebuild
+    /// starts with them ([`Self::active_features`], [`Self::features_to_build`]).
+    pub fn studio_features(&self) -> Vec<Feature> {
+        match self.kind {
+            ElementKind::PartStudio { .. } => self
+                .studio_variables
+                .iter()
+                .filter(|v| v.used)
+                .map(|v| v.feature())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Every feature of the list (suppressed and rolled back ones too) after
+    /// [`Self::studio_features`]: for a rebuild of the whole list.
+    pub fn features_to_build(&self) -> Vec<Feature> {
+        let mut out = self.studio_features();
+        out.extend(self.features().iter().cloned());
+        out
+    }
+
     /// The features that are built (P3.9): the ones above the rollback bar, without the
-    /// suppressed ones (by Suppress or by a variable, IR5.5).
+    /// suppressed ones (by Suppress or by a variable, IR5.5). The Variable Studios' variables
+    /// the list names come first, as Variable features of their values
+    /// ([`crate::variable_studio::ImportedVariable::feature`]).
     pub fn active_features(&self) -> Vec<Feature> {
         let bar = self.rollback_index();
         let suppressed = self.suppressed();
         let by_var = self.suppressed_by_variable();
-        self.features()[..bar]
-            .iter()
-            .filter(|f| !suppressed.contains(&f.id) && !by_var.contains(&f.id))
-            .cloned()
+        self.studio_features()
+            .into_iter()
+            .chain(
+                self.features()[..bar]
+                    .iter()
+                    .filter(|f| !suppressed.contains(&f.id) && !by_var.contains(&f.id))
+                    .cloned(),
+            )
             .collect()
     }
 
@@ -462,6 +532,9 @@ pub enum ElementKind {
     /// A CAM Studio: jobs, setups, tools and toolpaths machining parts of this document's Part
     /// Studios, see [`crate::cam`].
     CamStudio(Box<crate::cam::CamStudio>),
+    /// A Variable Studio: a table of variables the document's Part Studios and Assemblies can
+    /// name, see [`crate::variable_studio`].
+    VariableStudio(Box<crate::variable_studio::VariableStudio>),
 }
 
 /// A folder in the feature list (P3.6): a name and the features in it, which follow each other

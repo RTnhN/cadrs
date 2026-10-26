@@ -40,11 +40,16 @@ impl StudioState {
         }
         let off = el.all_suppressed();
         Some(Self {
+            // The Variable Studios' variables it names first, as every rebuild's list.
             features: el
-                .features()
-                .iter()
-                .filter(|f| !off.contains(&f.id))
-                .cloned()
+                .studio_features()
+                .into_iter()
+                .chain(
+                    el.features()
+                        .iter()
+                        .filter(|f| !off.contains(&f.id))
+                        .cloned(),
+                )
                 .collect(),
             props: el.part_props().to_vec(),
             appearances: el.feature_appearances().to_vec(),

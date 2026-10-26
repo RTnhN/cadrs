@@ -215,6 +215,12 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
             commands.queue(move |world: &mut World| crate::board_in_studio::script(world, &arg));
             continue;
         }
+        // The Variable Studio's table (see [`crate::variable_studio_ui::script`]).
+        if let Some(rest) = m.0.strip_prefix("variable-studio ") {
+            let arg = rest.trim().to_string();
+            commands.queue(move |world: &mut World| crate::variable_studio_ui::script(world, &arg));
+            continue;
+        }
         // P3G.4: the Derived feature's set-ups (see [`crate::derived_ui::script`]).
         if let Some(rest) = m.0.strip_prefix("derived ") {
             let arg = rest.trim().to_string();
@@ -1502,7 +1508,7 @@ pub(crate) fn studio_thumbnail(doc: &cadrs_core::Document) -> Option<image::Rgba
         .elements
         .iter()
         .find(|e| matches!(e.kind, cadrs_core::ElementKind::PartStudio { .. }))?;
-    let build = cadrs_core::rebuild::build(el.features());
+    let build = cadrs_core::rebuild::build(&el.part_features());
     let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
         .parts
         .iter()

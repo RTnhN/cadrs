@@ -214,7 +214,8 @@ pub struct ViewCache {
 /// A Part Studio's features, part settings and feature appearances.
 pub struct StudioRef<'a> {
     pub id: ElementId,
-    pub features: &'a [cadrs_core::Feature],
+    /// With the Variable Studios' variables it names first (what a rebuild of it needs).
+    pub features: std::borrow::Cow<'a, [cadrs_core::Feature]>,
     pub props: &'a [cadrs_core::document::PartProps],
     pub appearances: &'a [(cadrs_core::FeatureId, cadrs_core::Appearance)],
 }
@@ -228,7 +229,7 @@ pub fn studio<'a>(
     match &el.kind {
         ElementKind::PartStudio { .. } => Some(StudioRef {
             id: el.id,
-            features: el.features(),
+            features: el.part_features(),
             props: el.part_props(),
             appearances: el.feature_appearances(),
         }),
@@ -702,7 +703,7 @@ fn sketch_polylines(doc: &cadrs_core::Document, v: &View) -> Vec<Vec<[f64; 3]>> 
         return Vec::new();
     };
     let mut out = Vec::new();
-    for f in s.features {
+    for f in s.features.iter() {
         if !v.sketches.contains(&f.id.0) {
             continue;
         }
