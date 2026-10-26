@@ -9,7 +9,8 @@
 //!   keeps it in the store marked as shared ([`cadrs_core::collab::SharedInfo`]: it is listed
 //!   under **Shared with me**) and opens it. Someone shared with by name gets it there
 //!   without asking.
-//! - Opened, a shared document is edited together ([`live`]).
+//! - Opened, a shared document is edited together ([`live`]), with everyone's avatars, where
+//!   they are, and Follow mode ([`presence`]).
 
 use bevy::prelude::*;
 use cadrs_core::DocumentMeta;
@@ -20,6 +21,7 @@ use cadrs_net::{Answer, ShareLink, Welcome, transfer};
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore};
 
 pub mod live;
+pub mod presence;
 pub mod share_dialog;
 pub mod sharing;
 
@@ -30,6 +32,7 @@ impl Plugin for CollabPlugin {
         app.init_resource::<Joins>()
             .add_systems(Update, poll_joins.run_if(resource_exists::<Iroh>));
         live::plugin(app);
+        presence::plugin(app);
         sharing::plugin(app);
         share_dialog::plugin(app);
     }

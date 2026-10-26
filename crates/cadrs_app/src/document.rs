@@ -607,8 +607,20 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             r.spawn(cadrs_ui::scheme_toggle(t))
                 .entry::<Node>()
                 .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // Share (Onshape's blue button; `crate::collab`). (Explore, notifications, apps
-            // and help are left out until they do something: issue #13.)
+            // The collaborators' avatars (`crate::collab::presence`), then Share (Onshape's blue
+            // button; `crate::collab`).
+            r.spawn((
+                Name::new("collab-people"),
+                crate::collab::presence::PeopleBar,
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(2.0),
+                    margin: UiRect::right(Val::Px(6.0)),
+                    ..default()
+                },
+            ));
+            // (Explore, notifications, apps and help are left out until they do something:
+            // issue #13.)
             r.spawn((
                 Button::new("document-share")
                     .label("Share")

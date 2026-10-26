@@ -24,7 +24,7 @@ use bevy_iroh::{Identity, Iroh, IrohPlugin, Relays};
 
 pub use bevy_iroh;
 pub use link::ShareLink;
-pub use session::{AccessChanged, Sequenced};
+pub use session::{AccessChanged, Presence, Sequenced, View};
 
 /// A question to another peer on its way: polled from a system until the answer (or why
 /// there is none) arrives.

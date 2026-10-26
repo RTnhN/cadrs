@@ -105,7 +105,8 @@
 //! - `share`: Share on the open document (`crate::collab`; the link is logged as well as
 //!   copied). `join <link>`: Join shared document with that link. `share-dialog` opens the
 //!   share dialog; `share-with <cadrs ID> <name> edit|view`, `unshare <cadrs ID>` and
-//!   `share-link off|view|edit` do what it does.
+//!   `share-link off|view|edit` do what it does; `follow <cadrs ID prefix>` follows a
+//!   collaborator.
 //! - `selection-readout`: shows the selection readout (off by default, see
 //!   [`crate::selection_readout`]).
 //! - `linked-block …` (P3G.1, [`cadrs_core::samples::linked_block`]): `linked-block` writes
@@ -174,6 +175,13 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
             let rest = rest.to_string();
             commands
                 .queue(move |world: &mut World| crate::collab::script(world, "share-link", &rest));
+            continue;
+        }
+        if let Some(prefix) = m.0.trim().strip_prefix("follow ") {
+            let prefix = prefix.trim().to_string();
+            commands.queue(move |world: &mut World| {
+                crate::collab::presence::follow_prefix(world, &prefix)
+            });
             continue;
         }
         if m.0.trim() == "share-dialog" {

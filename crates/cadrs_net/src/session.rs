@@ -6,8 +6,8 @@ use bevy_iroh::RoomTicket;
 use bevy_iroh::TopicId;
 use bevy_iroh::message::MessageAppExt;
 use bevy_iroh::prelude::Room;
-use cadrs_core::DocumentId;
 use cadrs_core::collab::{self, Access, sync::Change};
+use cadrs_core::{DocumentId, ElementId, FeatureId};
 use serde::{Deserialize, Serialize};
 
 use crate::link::ShareLink;
@@ -83,9 +83,39 @@ impl AccessChanged {
     }
 }
 
+/// Where someone is in a shared document and what they look at, a few times a second while
+/// it changes (and every few seconds regardless): Onshape's social cues and Follow mode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Presence {
+    pub document: DocumentId,
+    pub name: String,
+    /// The tab they are in.
+    pub tab: Option<ElementId>,
+    /// The feature whose dialog (or sketch) they have open.
+    pub editing: Option<(ElementId, FeatureId)>,
+    /// Their 3D view, for whoever follows them.
+    pub view: Option<View>,
+    /// Who they follow (a cadrs ID).
+    pub following: Option<String>,
+}
+
+/// A 3D view as it travels: orientation, centre, zoom, projection and render mode.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct View {
+    pub azimuth: f32,
+    pub elevation: f32,
+    pub roll: f32,
+    pub focus: [f32; 3],
+    pub scale: f32,
+    pub perspective: bool,
+    /// The render mode's slug ("shaded", …).
+    pub render: u8,
+}
+
 pub(crate) fn register(app: &mut App) {
     app.add_net_message::<Sequenced>()
-        .add_net_message::<AccessChanged>();
+        .add_net_message::<AccessChanged>()
+        .add_net_message::<Presence>();
 }
 
 /// The owner's room for a document shared in `topic`: always the same topic, so links keep

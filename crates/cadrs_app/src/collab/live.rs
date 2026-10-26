@@ -131,6 +131,26 @@ impl Live {
         self.room
     }
 
+    /// A word for the top bar on how this copy stands, when it isn't simply live (the
+    /// read-only reason says the rest).
+    pub fn status(&self) -> Option<String> {
+        let Role::Guest(g) = &self.role else {
+            return None;
+        };
+        Some(
+            match &g.state {
+                GuestState::Connecting { .. } => "Connecting…",
+                GuestState::Away { .. } => "Owner away · last copy",
+                GuestState::Removed => "No longer shared",
+                GuestState::Following { .. } if g.access.permission == Permission::View => {
+                    "View only"
+                }
+                GuestState::Following { .. } => return None,
+            }
+            .to_string(),
+        )
+    }
+
     /// This user's access: everything for the owner.
     pub fn access(&self) -> Access {
         match &self.role {
