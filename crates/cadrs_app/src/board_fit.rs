@@ -1,5 +1,5 @@
 //! Fitting a board into the parts around it while its layout is edited in a Part Studio
-//! (`docs/PCB_IN_PART_STUDIO.md` §7.3; the geometry is [`cadrs_core::pcb::fit`]):
+//! (the geometry is [`cadrs_core::pcb::fit`]):
 //!
 //! - **The parts around** (on by default, the bar's "Parts around"): what of the Part Studio's
 //!   other parts lies within the heights the board's components take, outlined in cyan on the

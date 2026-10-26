@@ -8,7 +8,7 @@
 //!   feature list or the view) or a planar face (the view).
 //! - **File name**: the tab's name to start with; a file holding one part gets " - <part>".
 //! - **Format**: for 3D models **STEP** (AP214, exact B-rep with product names), **IGES**
-//!   (5.3, solids), experimental OpenCASCADE **BREP**, **STL** and **OBJ** (meshes); for a sketch or a face **DXF** and **DWG**.
+//!   (5.3, solids), experimental OpenCASCADE **BREP** (geometry only), **STL** and **OBJ** (meshes); for a sketch or a face **DXF** and **DWG**.
 //!   Parasolid is not offered (a proprietary format). DWG goes through the drawings' external
 //!   converter and is disabled, saying what to install, without one.
 //! - **STL**: Binary or Text. **STL and OBJ**: the **Units** (Millimeter … Foot) and the
@@ -376,7 +376,7 @@ pub fn open(world: &mut World, source: ExportSource) {
                             let tip = match f {
                                 Fmt::Step => "STEP AP214: exact solids with part names".to_string(),
                                 Fmt::Iges => "IGES 5.3: exact solids".to_string(),
-                                Fmt::Brep => "Experimental OpenCASCADE BREP geometry".to_string(),
+                                Fmt::Brep => "OpenCASCADE BREP (experimental): exact geometry only".to_string(),
                                 Fmt::Stl => "STL mesh, for 3D printing".to_string(),
                                 Fmt::Obj => "Wavefront OBJ mesh".to_string(),
                                 Fmt::Dxf => "DXF in millimetres at full size, for cutting machines".to_string(),
@@ -413,7 +413,7 @@ pub fn open(world: &mut World, source: ExportSource) {
                     });
                 });
                 b.spawn(row("export-brep-warning")).with_children(|g| {
-                    g.spawn((Name::new("export-brep-warning-text"), t.text("Experimental: OpenCASCADE BREP export will be removed if cadrs switches to a different geometry kernel. This format contains geometry only, without editable features, part names, or assembly structure. Use STEP for portable geometry or .cadrs to keep your editable document.", t.font_sm, FontWeight::NORMAL, t.feature_error), Node { width: full(), ..default() })).insert(TextLayout::default());
+                    g.spawn((Name::new("export-brep-warning-text"), t.text("BREP is OpenCASCADE's own format (FreeCAD, CadQuery and other OpenCASCADE applications read it), written by cadrs' kernel. It holds the exact geometry only: no part names, colours or assembly structure. Use STEP to keep those, or .cadrs to keep the editable document.", t.font_sm, FontWeight::NORMAL, t.muted_foreground), Node { width: full(), ..default() })).insert(TextLayout::default());
                 });
                 b.spawn(row("export-version-row")).with_children(|g| {
                     label(g, t, "Version");

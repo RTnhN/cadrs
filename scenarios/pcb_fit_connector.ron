@@ -1,4 +1,4 @@
-// docs/PCB_IN_PART_STUDIO.md P4: fitting the mains-sensor board into its enclosure while its
+// Fitting the mains-sensor board into its enclosure while its
 // layout is edited in the Part Studio. The board derived onto Board location (`board derive`),
 // the tube, end plate and plug see-through. Board coordinates: its outline centre (15.5, 19.5)
 // is on (0, 0, 12), so a layout point (x, y) is at (x − 15.5, y − 19.5) in the Part Studio.

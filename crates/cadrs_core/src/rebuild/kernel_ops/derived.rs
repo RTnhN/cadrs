@@ -422,7 +422,7 @@ impl Rebuilder {
         })
     }
 
-    /// A Derived feature of a PCB Studio board (`docs/PCB_IN_PART_STUDIO.md` §5): the board's
+    /// A Derived feature of a PCB Studio board: the board's
     /// solid and a mesh part per component, made in the board frame once and copied onto each
     /// location, the board's chosen point ([`board3d::BoardAnchor`]) and face on it.
     fn derived_board(
@@ -678,8 +678,8 @@ impl Rebuilder {
     }
 
     /// The board's solid in the board frame, made once per outline, holes and thickness: a
-    /// footprint moved on the layout doesn't make the kernel extrude the board again
-    /// (`docs/PCB_IN_PART_STUDIO.md` decision 8). The body stays the cache's: callers copy it.
+    /// footprint moved on the layout doesn't make the kernel extrude the board again.
+    /// The body stays the cache's: callers copy it.
     fn board_body_cached(
         &mut self,
         layout: &cadrs_eda::board::Board,

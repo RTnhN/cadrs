@@ -103,8 +103,8 @@ impl Rebuilder {
             b.iter().for_each(|(b, _)| k.release(*b))
         };
         match x.format {
-            // IGES, and STEP with its assembly structure: the XDE reader (`import.rs`).
-            ImportFormat::Iges => {
+            // IGES, BREP, and STEP with its assembly structure: the XDE reader (`import.rs`).
+            ImportFormat::Iges | ImportFormat::Brep => {
                 bodies =
                     self.read_structured(x, &bytes, x.structure.unwrap_or(ImportMode::Flatten))?
             }

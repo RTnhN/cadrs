@@ -65,6 +65,8 @@ impl Plugin for FrameProfilePlugin {
 pub enum Kind {
     Schedule,
     System,
+    /// Applying a system's commands (and the observers they trigger).
+    Commands,
 }
 
 /// What the layer adds up between two frames: per span, the total time (ns) and the runs.
@@ -112,6 +114,7 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for ProfilerLayer {
         let kind = match attrs.metadata().name() {
             "system" => Kind::System,
             "schedule" => Kind::Schedule,
+            "system_commands" => Kind::Commands,
             _ => return,
         };
         let mut name = NameField::default();

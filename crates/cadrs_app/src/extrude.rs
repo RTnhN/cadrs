@@ -1999,8 +1999,9 @@ fn place_arrow(
     };
     let base = rect.to_screen(view.view.project(anchor));
     let d = view.view.project_vector(dir);
-    if d.length() < 0.05 {
-        // Looking straight along the extrusion: no arrow to grab.
+    if d.length() * view.view.scale < 0.05 {
+        // Looking straight along the extrusion: no arrow to grab. (Its on-screen share, not px
+        // per mm, which hid the arrow on large parts zoomed out.)
         arrow.base_tip = None;
         for (_, _, _, mut vis, _) in &mut q {
             vis.set_if_neq(Visibility::Hidden);

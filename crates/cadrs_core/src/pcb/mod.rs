@@ -301,7 +301,7 @@ pub fn board_feature(board: BoardId) -> crate::ids::FeatureId {
 }
 
 impl PcbStudio {
-    /// The studio as a Part Studio for assemblies (`docs/PCB_IN_PART_STUDIO.md` §9, direct
+    /// The studio as a Part Studio for assemblies (direct
     /// insert): one Derived feature per board (an IDF one as its outline and package boxes), the
     /// board and its components as the layout has them (its origin on the origin), named after
     /// the board. An assembly's rigid

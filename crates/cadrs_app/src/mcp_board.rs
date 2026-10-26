@@ -1,4 +1,4 @@
-//! The MCP server's PCB board tools (`docs/PCB_IN_PART_STUDIO.md` P7): read a board, derive it
+//! The MCP server's PCB board tools: read a board, derive it
 //! into a Part Studio, make one from a sketch, and move, add or remove its footprints, the
 //! fitting done by name and number ([`cadrs_core::pcb::ops`]). Each change is one undo step of
 //! the open document.

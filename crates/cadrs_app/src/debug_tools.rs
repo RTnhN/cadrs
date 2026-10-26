@@ -2,8 +2,8 @@
 //! otherwise):
 //!
 //! - `CADRS_SLOW_FRAMES=<ms>`: prints every frame that took longer than this (wall clock, so
-//!   scripted runs' fixed time steps don't hide it) with the systems that took over a tenth of
-//!   it, slowest first, from the frame profile ([`crate::frame_profile`]; needs the default
+//!   scripted runs' fixed time steps don't hide it) with its slowest schedules, systems and
+//!   systems' commands (observers included; those over 1 ms), from the frame profile ([`crate::frame_profile`]; needs the default
 //!   `profiler` feature for the system times). `CADRS_SLOW_FRAMES=1` (or any value that isn't a
 //!   number) uses 50 ms.
 
@@ -52,19 +52,29 @@ fn report_slow_frames(
     if ms < slow.ms {
         return;
     }
-    let mut systems: Vec<_> = profile
-        .last()
-        .map(|f| {
-            f.cpu
-                .iter()
-                .filter(|(kind, _, t, _)| *kind == Kind::System && *t >= ms / 10.0)
-                .collect()
-        })
-        .unwrap_or_default();
-    systems.sort_by(|a, b| b.2.total_cmp(&a.2));
+    let spans = |kind: Kind| {
+        let mut v: Vec<_> = profile
+            .last()
+            .map(|f| {
+                f.cpu
+                    .iter()
+                    .filter(|(k, _, t, _)| *k == kind && *t >= 1.0)
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort_by(|a, b| b.2.total_cmp(&a.2));
+        v
+    };
     let mut out = format!("slow frame: {ms:.0} ms");
-    for (_, name, t, runs) in systems.iter().take(12) {
-        out.push_str(&format!("\n  {t:8.1} ms  x{runs}  {name}"));
+    // The schedules show where time outside any system went (applying commands, waiting).
+    for (label, kind, n) in [
+        ("schedule", Kind::Schedule, 6),
+        ("system", Kind::System, 12),
+        ("commands of", Kind::Commands, 6),
+    ] {
+        for (_, name, t, runs) in spans(kind).iter().take(n) {
+            out.push_str(&format!("\n  {t:8.1} ms  x{runs}  {label} {name}"));
+        }
     }
     warn!("{out}");
 }

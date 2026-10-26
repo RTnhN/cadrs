@@ -1,4 +1,4 @@
-// docs/PCB_IN_PART_STUDIO.md P6: a PCB Studio board inserted straight into an assembly. The
+// A PCB Studio board inserted straight into an assembly. The
 // mains-sensor document (`board setup`): a new assembly, the Enclosure's parts inserted, then
 // the board "AC sensor" from the Insert dialog's Boards tab.
 // 01 the Insert dialog's Boards tab: "AC sensor" (PCB Studio 1's board designed in cadrs), its

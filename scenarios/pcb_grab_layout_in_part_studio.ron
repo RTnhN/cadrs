@@ -1,4 +1,4 @@
-// docs/PCB_IN_PART_STUDIO.md: grab to edit. The mains-sensor enclosure's board derived and
+// Grab to edit. The mains-sensor enclosure's board derived and
 // shown as its layout (no Edit layout first): J4 (layout (14, 3.5), at (−1.5, −16, 13.6)) pressed
 // and dragged to the Live pin (0, 8) moves it, the edit started by the press.
 // 01 the board as its layout; 02 J4 dragging (the edit bar up); 03 dropped: J4 at (15.5, 27.5);

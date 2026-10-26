@@ -122,7 +122,7 @@ pub enum DerivedPlacement {
     BaseConnector(Option<ConnectorRef>),
 }
 
-/// A PCB Studio board as a Derived feature's source (`docs/PCB_IN_PART_STUDIO.md`): which
+/// A PCB Studio board as a Derived feature's source: which
 /// board, its layout as at the reference (the schematic is left out: the 3D model, the skins and
 /// the layout view need only the layout) and how it comes in ([`BoardOptions`]). The rebuild
 /// makes the board's solid and a mesh part per component ([`crate::pcb::board3d`]).
@@ -602,7 +602,7 @@ pub struct DerivedOutput {
     pub sketches: Vec<(FeatureId, String)>,
     pub planes: Vec<(FeatureId, String)>,
     pub connectors: Vec<(FeatureId, String)>,
-    /// A derived board's copies (`docs/PCB_IN_PART_STUDIO.md`): each copy's board part and
+    /// A derived board's copies: each copy's board part and
     /// where its board frame is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub boards: Vec<BoardCopy>,
@@ -1034,7 +1034,7 @@ pub fn refresh(doc: &mut Document) {
 }
 
 /// Brings every same-document workspace board reference up to date with its board's layout
-/// and names (`docs/PCB_IN_PART_STUDIO.md` decision 2: a layout edit anywhere is one
+/// and names (a layout edit anywhere is one
 /// `SetDesign` on the PCB Studio, and every Part Studio deriving the board follows).
 fn refresh_boards(doc: &mut Document) {
     let this = doc.id;

@@ -13,6 +13,9 @@
 //!   ([`ImportMode::Parts`], for *Keep assembly structure*, which also adds an Assembly tab).
 //!   Invalid shapes are healed on the way in. The files flow that makes new tabs or a new
 //!   document from a file (P3F.2, T8.1: *Import as*) is [`structure`].
+//! - **BREP** (OpenCASCADE's text format, `.brep`/`.brp`): read through the same reader as IGES,
+//!   one part per solid; the format has no units (read as mm), names, colours or assemblies, so
+//!   the parts are named after the file.
 //! - **STL**: the triangles of each connected piece of the mesh are sewn into a closed solid, one
 //!   part per piece, named after the file. STL has no units: Onshape reads them as millimetres
 //!   unless *Specify units* picks another unit ([`ImportFeature::units`]); cadrs does the same.
@@ -44,6 +47,8 @@ pub enum ImportFormat {
     Stl,
     /// IGES (P3F.2): read through the kernel's XDE reader, as STEP with its structure.
     Iges,
+    /// OpenCASCADE's BRep text format: read through the same reader, one part per solid.
+    Brep,
 }
 
 impl ImportFormat {
@@ -57,6 +62,7 @@ impl ImportFormat {
             "step" | "stp" | "p21" => Some(Self::Step),
             "stl" => Some(Self::Stl),
             "iges" | "igs" => Some(Self::Iges),
+            "brep" | "brp" => Some(Self::Brep),
             _ => None,
         }
     }
@@ -71,24 +77,28 @@ impl ImportFormat {
             Self::Step => "STEP",
             Self::Stl => "STL",
             Self::Iges => "IGES",
+            Self::Brep => "BREP",
         }
     }
 
-    /// The kernel's B-rep exchange format (the XDE reader), for STEP and IGES.
+    /// The kernel's B-rep exchange format (the XDE reader), for STEP, IGES and BREP.
     pub fn kernel(self) -> Option<cadrs_kernel::exchange::ExchangeFormat> {
         match self {
             Self::Step => Some(cadrs_kernel::exchange::ExchangeFormat::Step),
             Self::Iges => Some(cadrs_kernel::exchange::ExchangeFormat::Iges),
+            Self::Brep => Some(cadrs_kernel::exchange::ExchangeFormat::Brep),
             Self::Stl => None,
         }
     }
 
     /// The extensions of the B-rep files the kernel's XDE reader takes (the files flow's
     /// picker, [`structure`]).
-    pub const EXCHANGE_EXTENSIONS: [&'static str; 4] = ["step", "stp", "iges", "igs"];
+    pub const EXCHANGE_EXTENSIONS: [&'static str; 6] =
+        ["step", "stp", "iges", "igs", "brep", "brp"];
 
     /// The extensions of every file the Import feature reads.
-    pub const EXTENSIONS: [&'static str; 6] = ["step", "stp", "iges", "igs", "stl", "p21"];
+    pub const EXTENSIONS: [&'static str; 8] =
+        ["step", "stp", "iges", "igs", "brep", "brp", "stl", "p21"];
 }
 
 /// A length unit for unitless mesh files (*Specify units*).
@@ -223,14 +233,16 @@ impl ImportFeature {
                 ImportFormat::Step => "step".into(),
                 ImportFormat::Stl => "stl".into(),
                 ImportFormat::Iges => "igs".into(),
+                ImportFormat::Brep => "brep".into(),
             })
     }
 
-    /// The factor from the file's numbers to mm (STL; STEP files carry their own units).
+    /// The factor from the file's numbers to mm (STL; STEP files carry their own units, and
+    /// BREP files are taken as mm, as OpenCASCADE applications write them).
     pub fn scale(&self) -> f64 {
         match self.format {
             ImportFormat::Stl => self.units.unwrap_or_default().mm(),
-            ImportFormat::Step | ImportFormat::Iges => 1.0,
+            ImportFormat::Step | ImportFormat::Iges | ImportFormat::Brep => 1.0,
         }
     }
 }
@@ -240,6 +252,10 @@ fn sniff(bytes: &[u8]) -> Option<ImportFormat> {
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]).to_ascii_uppercase();
     if head.contains("ISO-10303-21") {
         return Some(ImportFormat::Step);
+    }
+    // BREP: the topology header (after DRAW's `DBRep_DrawableShape` line in its files).
+    if head.contains("CASCADE TOPOLOGY V") {
+        return Some(ImportFormat::Brep);
     }
     // IGES: 80-column records, the first a Start ('S') line.
     if head
@@ -885,6 +901,14 @@ ENDSEC;\nEND-ISO-10303-21;\n";
         assert_eq!(
             ImportFormat::of_file_name("x.IGS"),
             Some(ImportFormat::Iges)
+        );
+        assert_eq!(
+            ImportFormat::of_file_name("x.brep"),
+            Some(ImportFormat::Brep)
+        );
+        assert_eq!(
+            ImportFormat::of_file_name("x.BRP"),
+            Some(ImportFormat::Brep)
         );
     }
 }

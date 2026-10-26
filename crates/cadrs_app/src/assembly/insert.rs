@@ -118,7 +118,7 @@ pub struct InsertSession {
     pub surfaces: bool,
     /// The Assemblies tab is chosen (A17.2).
     pub assemblies: bool,
-    /// The Boards tab is chosen (`docs/PCB_IN_PART_STUDIO.md` §9): the PCB Studios' boards,
+    /// The Boards tab is chosen: the PCB Studios' boards,
     /// each inserted as one rigid instance (the board and its components).
     pub boards: bool,
     /// **Insert as rigid** (P3B.8, A2.4): a Part Studio row inserts one rigid instance.

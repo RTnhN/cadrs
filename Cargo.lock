@@ -2145,6 +2145,7 @@ dependencies = [
  "rmp-serde",
  "ron",
  "serde",
+ "serde_json",
  "slotmap",
  "tempfile",
  "tiny-skia",

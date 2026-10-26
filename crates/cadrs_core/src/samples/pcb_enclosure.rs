@@ -1,4 +1,4 @@
-//! An enclosure to fit a board into (`docs/PCB_IN_PART_STUDIO.md` scenarios and tests): a
+//! An enclosure to fit a board into (for the `pcb_*` scenarios and the board tests): a
 //! stand-in for a mains device housing. In mm; every id is fixed.
 //!
 //! - Part Studio **Enclosure**: a rectangular **Tube** standing on Top (outer 44 × 44, walls

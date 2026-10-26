@@ -1705,7 +1705,7 @@ fn part_studio_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 "import",
                 "file-import",
                 false,
-                "Import (a STEP or STL file)",
+                "Import (a STEP, IGES, BREP or STL file)",
             ),
             (
                 "derived",
@@ -4589,7 +4589,7 @@ fn on_feature_context_menu(
             }
             None => {}
         }
-        // A PCB Studio board (`docs/PCB_IN_PART_STUDIO.md` §6): its 3D model or its layout.
+        // A PCB Studio board: its 3D model or its layout.
         if let Some(b) = &d.board {
             let layout = b.options.view == cadrs_core::pcb::board3d::BoardView::Layout;
             let workspace = d.source.is_some_and(|r| {
@@ -4625,7 +4625,7 @@ fn on_feature_context_menu(
         }
     }
     if is_sketch {
-        // `docs/PCB_IN_PART_STUDIO.md` §8: a board from the sketch's regions.
+        // A board from the sketch's regions.
         menu = menu.item(
             MenuItem::new("feature-create-board", "Create PCB board…")
                 .icon("pcb-studio")

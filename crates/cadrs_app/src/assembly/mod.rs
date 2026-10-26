@@ -112,6 +112,12 @@ impl Plugin for AssemblyPlugin {
                     .after(crate::parts::PartsSet)
                     .run_if(in_state(AppState::Document)),
             )
+            .add_systems(
+                Update,
+                mark_live
+                    .before(crate::parts::PartsSet)
+                    .run_if(in_state(AppState::Document)),
+            )
             // P3H.6: box select in the view.
             .init_resource::<box_select::AssemblyBox>()
             .add_systems(
@@ -313,6 +319,37 @@ pub struct AssemblyParts {
     /// P3G.1: the copies of the linked source the Insert dialog shows (another document, or this
     /// one at a version), for its tree, thumbnails and ghosts before they are inserted.
     pub linked_extra: Vec<cadrs_core::external::LinkedElement>,
+    /// The instances' solids as last placed: a drag makes new ones only for what it moves.
+    placed_solids: cadrs_core::assembly::PlacedSolids,
+    /// The preview changes every frame (an instance or triad drag, an animation playing,
+    /// [`mark_live`]): it is drawn by moving the parts' meshes and edges
+    /// ([`PartCache::moved`]), not by placing their solids again. Picking meanwhile sees them
+    /// where they were, so the view doesn't pre-highlight.
+    pub live: bool,
+}
+
+/// Whether the preview is live ([`AssemblyParts::live`]).
+fn mark_live(
+    drag: Res<drag::InstanceDrag>,
+    triad: Res<triad::Triad>,
+    playback: Option<Res<animate::Playback>>,
+    mut asm: ResMut<AssemblyParts>,
+) {
+    let live = drag.dragging() || triad.dragging() || playback.is_some();
+    if asm.live != live {
+        asm.live = live;
+    }
+}
+
+/// A pose as a matrix.
+fn pose_matrix(p: &Pose) -> Mat4 {
+    let col = |v: [f64; 3]| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32);
+    Mat4::from_cols(
+        col(p.rotate([1.0, 0.0, 0.0])).extend(0.0),
+        col(p.rotate([0.0, 1.0, 0.0])).extend(0.0),
+        col(p.rotate([0.0, 0.0, 1.0])).extend(0.0),
+        col(p.translation).extend(1.0),
+    )
 }
 
 type AssemblyKey = (
@@ -482,8 +519,10 @@ pub fn update_assembly_parts(
             i.pose = *p;
         }
     }
-    if !asm.preview.is_empty() {
-        let poses: Vec<(InstanceId, Pose)> = asm.preview.iter().map(|(i, p)| (*i, *p)).collect();
+    let poses: Vec<(InstanceId, Pose)> = asm.preview.iter().map(|(i, p)| (*i, *p)).collect();
+    // A live preview moves the parts as drawn (below); another places them.
+    let live = asm.live && !poses.is_empty();
+    if !poses.is_empty() && !live {
         let _ = cadrs_core::assembly::structure::place_in(&doc.doc, &mut view, &poses);
     }
     view.instances.extend(asm.ghosts.iter().cloned());
@@ -497,6 +536,26 @@ pub fn update_assembly_parts(
         &with_links
     };
     let occ = cadrs_core::assembly::structure::occurrences(d, &view);
+    // Live: each moved part's move from where its solid is to where the preview puts it.
+    let mut moved = HashMap::new();
+    if live {
+        let mut to = view.clone();
+        let _ = cadrs_core::assembly::structure::place_in(&doc.doc, &mut to, &poses);
+        let at: HashMap<PartId, Pose> = cadrs_core::assembly::structure::occurrences(d, &to)
+            .into_iter()
+            .map(|o| (o.view_part, o.pose))
+            .collect();
+        for o in &occ {
+            if let Some(p) = at.get(&o.view_part)
+                && *p != o.pose
+            {
+                moved.insert(o.view_part, pose_matrix(&o.pose.inverse().then(p)));
+            }
+        }
+    }
+    if cache.moved != moved {
+        cache.moved = moved;
+    }
     let mut sources: Vec<ElementId> = occ.iter().map(|o| o.element).collect();
     sources.sort();
     sources.dedup();
@@ -538,8 +597,12 @@ pub fn update_assembly_parts(
     let (parts, props) = match asm.placed.get(&el.id) {
         Some((k, parts, props)) if *k == key => (parts.clone(), props.clone()),
         _ => {
-            let (parts, props) =
-                cadrs_core::assembly::instance_parts(d, &view, |e| builds.get(&e).cloned());
+            let (parts, props) = cadrs_core::assembly::instance_parts_placed(
+                d,
+                &view,
+                |e| builds.get(&e).cloned(),
+                &mut asm.placed_solids,
+            );
             asm.placed.retain(|e, _| doc.doc.element(*e).is_some());
             asm.placed
                 .insert(el.id, (key.clone(), parts.clone(), props.clone()));
@@ -1207,6 +1270,67 @@ mod deletion_tests {
             let active = app.world().resource::<ActiveDocument>();
             assert_eq!(active.doc, before, "guard {guard}");
             assert_eq!(active.history.undo_len(), 0, "guard {guard}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use cadrs_core::samples::step_stool as ss;
+
+    fn v3(p: [f64; 3]) -> Vec3 {
+        Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
+    }
+
+    /// A live preview leaves the solids where they are and moves the parts as drawn, exactly
+    /// where placing them would put them; once it isn't live, they are placed as before.
+    #[test]
+    fn a_live_preview_moves_the_parts_as_drawn_not_their_solids() {
+        let mut doc = ActiveDocument::new(ss::document().unwrap());
+        doc.active = Some(ss::ASSEMBLY);
+        let el = doc.active_element().unwrap().clone();
+        let (mut cache, mut asm) = (PartCache::default(), AssemblyParts::default());
+        update_assembly_parts(&doc, &el, &mut cache, &mut asm, None);
+        let before: Vec<_> = cache.parts.iter().map(|p| p.solid.clone()).collect();
+        let generation = cache.generation;
+        let model = el.assembly_model().unwrap();
+        let inst = model.instances.iter().find(|i| !i.fixed).unwrap();
+        let to = inst
+            .pose
+            .then(&Pose::rotation_about([0.0; 3], [0.0, 0.0, 1.0], 0.5))
+            .then(&Pose::translation([30.0, -10.0, 5.0]));
+        asm.preview.insert(inst.id, to);
+        asm.live = true;
+        update_assembly_parts(&doc, &el, &mut cache, &mut asm, None);
+        assert_eq!(
+            cache.generation, generation,
+            "a live drag regenerates nothing"
+        );
+        for (p, s) in cache.parts.iter().zip(&before) {
+            assert!(Arc::ptr_eq(&p.solid, s), "{}", p.name);
+        }
+        let part = inst.id.part_id();
+        assert_eq!(cache.moved.keys().collect::<Vec<_>>(), vec![&part]);
+        // Not live: the solids placed at the preview are where the move draws them.
+        let m = cache.moved[&part];
+        let drawn: Vec<Vec3> = cache
+            .parts
+            .iter()
+            .find(|p| p.id == part)
+            .unwrap()
+            .solid
+            .positions
+            .iter()
+            .map(|q| m.transform_point3(v3(*q)))
+            .collect();
+        asm.live = false;
+        update_assembly_parts(&doc, &el, &mut cache, &mut asm, None);
+        assert!(cache.moved.is_empty());
+        let placed = &cache.parts.iter().find(|p| p.id == part).unwrap().solid;
+        assert_eq!(placed.positions.len(), drawn.len());
+        for (a, b) in placed.positions.iter().zip(&drawn) {
+            assert!(v3(*a).distance(*b) < 1e-3, "{a:?} drawn at {b:?}");
         }
     }
 }

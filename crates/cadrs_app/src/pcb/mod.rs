@@ -1026,7 +1026,7 @@ struct BoardMenuFor(ElementId, BoardId);
 struct OutlineTargets(Vec<(ElementId, cadrs_core::FeatureId)>);
 
 /// Right-click a board → Delete this board (PCB3.6); for a board designed here, Link outline to
-/// a Part Studio sketch (each sketch with a closed region, `docs/PCB_IN_PART_STUDIO.md` §8.2), or
+/// a Part Studio sketch (each sketch with a closed region), or
 /// Break outline link. The menu opens below the row, at the pointer's x, so it never covers the
 /// row (P3H.3 judge).
 fn on_board_menu(

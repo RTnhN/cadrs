@@ -1,8 +1,8 @@
 //! The **Import** feature's dialog (Onshape import, [`cadrs_core::import`]): parts from a STEP,
-//! IGES or STL file stored with the document. (Importing a file as new tabs or a new document,
+//! IGES, BREP or STL file stored with the document. (Importing a file as new tabs or a new document,
 //! with the choice of its assembly structure, is [`crate::import_file`].)
 //!
-//! - The toolbar's Import button opens the file picker (STEP, IGES and STL files); the file picked
+//! - The toolbar's Import button opens the file picker (STEP, IGES, BREP and STL files); the file picked
 //!   is stored with the document and inserted as "Import N" ([`cadrs_core::import::AddImport`]),
 //!   and its dialog opens. Double-clicking the feature in the list edits it.
 //! - The dialog shows the file, **Choose file** to replace it, **Y axis is up**, and for STL
@@ -110,7 +110,7 @@ pub fn begin_import(world: &mut World) {
     open_picker(world);
 }
 
-/// A STEP, IGES or STL file dropped on the Part Studio ([`crate::drop_import`]): inserted as
+/// A STEP, IGES, BREP or STL file dropped on the Part Studio ([`crate::drop_import`]): inserted as
 /// the toolbar's Import is once its file is picked, with its dialog open.
 pub fn import_dropped(world: &mut World, path: &std::path::Path) {
     if world.contains_resource::<ImportSession>() {
@@ -133,7 +133,7 @@ fn open_picker(world: &mut World) {
         "Import",
         PICK_TAG,
         start_dir(),
-        &["step", "stp", "iges", "igs", "stl"],
+        &["step", "stp", "iges", "igs", "brep", "brp", "stl"],
     );
     world.flush();
 }
