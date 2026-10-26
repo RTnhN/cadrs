@@ -1,11 +1,13 @@
 name: Release
 
 # Pushing a version tag (`git tag v0.1.6 && git push origin v0.1.6`) builds the Linux and Windows
-# archives, as tools/release/build.sh does locally, and publishes them as a GitHub release with
-# SHA256SUMS.txt. The release notes are tools/release/notes/<tag>.md (GitHub's generated notes
-# when there is none); a tag with a `-` in it (v0.1.7-beta.1) is a pre-release. Then the site is
-# redeployed so its download links point at the new release. Running it by hand with a tag
-# (Actions › Release › Run workflow) releases the chosen branch's head and creates the tag.
+# archives, as tools/release/build.sh does locally, and the macOS disk image (#103), and publishes
+# them as a GitHub release with SHA256SUMS.txt. The release notes are
+# tools/release/notes/<tag>.md (GitHub's generated notes when there is none); a tag with a `-` in
+# it (v0.1.7-beta.1) is a pre-release. Then the site is redeployed so its download links point at
+# the new release. Running it by hand with a tag (Actions › Release › Run workflow) releases the
+# chosen branch's head and creates the tag; with "Only build" ticked it publishes nothing, and the
+# archives are the run's artifacts (to try a build before releasing it).
 on:
   push:
     tags: ["v*"]
@@ -14,6 +16,10 @@ on:
       tag:
         description: "The tag to create and release, such as v0.1.6"
         required: true
+      dry_run:
+        description: "Only build: no tag and no release (the archives are the run's artifacts)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -113,9 +119,58 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
+  # On Apple silicon, for Apple silicon and Intel: both built (Apple's toolchain cross-builds
+  # Intel) on the nightly pinned in rust-toolchain.toml, joined into one universal executable, and
+  # packed as cadrs.app in a disk image, for macOS 11 and later. Signed ad hoc (no Apple
+  # Developer ID yet), so macOS asks once before it opens it (the release notes say how).
+  macos:
+    name: Build (macOS)
+    runs-on: macos-14
+    timeout-minutes: 180
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: brew install cmake
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustc -V
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-macos
+
+      - name: Build (Apple silicon)
+        run: cargo build --release --locked -p cadrs --target aarch64-apple-darwin
+
+      - name: Build (Intel)
+        run: cargo build --release --locked -p cadrs --target x86_64-apple-darwin
+
+      - name: Universal executable
+        run: |
+          mkdir -p target/universal
+          lipo -create -output target/universal/cadrs \
+            target/aarch64-apple-darwin/release/cadrs target/x86_64-apple-darwin/release/cadrs
+          lipo -info target/universal/cadrs
+
+      - name: Package
+        run: tools/release/package.sh macos target/universal/cadrs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
   publish:
     name: Publish the release
-    needs: [linux, windows]
+    needs: [linux, windows, macos]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -138,7 +193,7 @@ jobs:
           merge-multiple: true
 
       - name: Checksums
-        run: cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: cd dist && sha256sum *.tar.gz *.zip *.dmg > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - name: Create the release
         run: |
@@ -149,7 +204,7 @@ jobs:
           notes="tools/release/notes/$TAG.md"
           if [[ -f "$notes" ]]; then args+=(--notes-file "$notes"); else args+=(--generate-notes); fi
           if [[ "$TAG" == *-* ]]; then args+=(--prerelease); fi
-          gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/SHA256SUMS.txt "${args[@]}"
+          gh release create "$TAG" dist/*.tar.gz dist/*.zip dist/*.dmg dist/SHA256SUMS.txt "${args[@]}"
 
       # A release made with the workflow's token doesn't trigger other workflows' `release`
       # events, but a dispatch does.

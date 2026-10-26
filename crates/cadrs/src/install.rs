@@ -17,6 +17,9 @@
 //! - **Windows**: `%LOCALAPPDATA%\Programs\cadrs\` and a Start Menu shortcut (made through
 //!   PowerShell's `WScript.Shell`); the shortcut takes its icon from the executable's own icon
 //!   resource (`crates/cadrs/build.rs`).
+//!
+//! `cadrs --bundle <dir>` (macOS) assembles the same app bundle at `<dir>` without installing
+//! it: the macOS release packs it (`tools/release/package.sh macos`).
 
 use std::path::{Path, PathBuf};
 
@@ -50,15 +53,7 @@ pub fn run() -> Result<PathBuf, String> {
             std::fs::remove_dir_all(d).map_err(|e| err("remove", d, e))?;
         }
     }
-    let bin = staging.join(bin_dir());
-    std::fs::create_dir_all(&bin).map_err(|e| err("create", &bin, e))?;
-    let installed = bin.join(format!("cadrs{}", std::env::consts::EXE_SUFFIX));
-    std::fs::copy(&exe, &installed).map_err(|e| err("copy", &exe, e))?;
-    #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("strip").arg(&installed).status();
-    copy_dir(&libraries, &bin.join("libraries")).map_err(|e| err("copy", &libraries, e))?;
-    #[cfg(target_os = "macos")]
-    write_bundle(&staging)?;
+    assemble(&staging, &exe, &libraries)?;
     if root.exists() {
         std::fs::rename(&root, &old).map_err(|e| err("move", &root, e))?;
     }
@@ -72,6 +67,36 @@ pub fn run() -> Result<PathBuf, String> {
             .join(format!("cadrs{}", std::env::consts::EXE_SUFFIX)),
     )?;
     Ok(root)
+}
+
+/// The install's files in `dir`: the executable `exe` and `libraries/` (macOS: the bundle).
+fn assemble(dir: &Path, exe: &Path, libraries: &Path) -> Result<(), String> {
+    let bin = dir.join(bin_dir());
+    std::fs::create_dir_all(&bin).map_err(|e| err("create", &bin, e))?;
+    let installed = bin.join(format!("cadrs{}", std::env::consts::EXE_SUFFIX));
+    std::fs::copy(exe, &installed).map_err(|e| err("copy", exe, e))?;
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("strip").arg(&installed).status();
+    copy_dir(libraries, &bin.join("libraries")).map_err(|e| err("copy", libraries, e))?;
+    #[cfg(target_os = "macos")]
+    write_bundle(dir)?;
+    Ok(())
+}
+
+/// `cadrs --bundle <app>`: the macOS app bundle `<app>` (`cadrs.app`) of this executable and
+/// the built-in `libraries/` (`libraries`, else the checkout's), as `--install` makes it, without
+/// installing it.
+pub fn bundle(app: &Path, libraries: Option<&Path>) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        return Err("--bundle makes a macOS app bundle: run it on macOS".into());
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("cannot find this executable: {e}"))?;
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../libraries");
+    let libraries = libraries.unwrap_or(&checkout);
+    if app.exists() {
+        std::fs::remove_dir_all(app).map_err(|e| err("remove", app, e))?;
+    }
+    assemble(app, &exe, libraries)
 }
 
 /// The folder the install replaces as a whole.

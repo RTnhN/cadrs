@@ -28,14 +28,16 @@ struct Release {
 /// loads, so a release published, replaced or deleted since the export shows without a redeploy
 /// (kept for ten minutes per browser session, as unauthenticated calls are rate-limited). With no
 /// release left the links go to the releases page; a platform the release has no archive for
-/// goes to the release's own page.
+/// goes where its link's `data-release-fallback` says (macOS, before a release has its disk
+/// image: the build notes), else to the release's own page.
 pub const RELEASE_SCRIPT: &str = "<script>(function(){\
 var key=\"cadrs-release\",releases=\"https://github.com/rvdende/cadrs/releases\";\
-var suffix={windows:\"-x86_64-windows.zip\",linux:\"-x86_64-linux.tar.gz\"};\
+var suffix={windows:\"-x86_64-windows.zip\",linux:\"-x86_64-linux.tar.gz\",macos:\"-universal-macos.dmg\"};\
 function show(r){var l=document.querySelectorAll(\"[data-release-label]\");for(var i=0;i<l.length;i++)\
 l[i].textContent=r?\"Latest release: \"+r.tag:\"Latest release\";\
-var a=document.querySelectorAll(\"[data-release-asset]\");for(var i=0;i<a.length;i++)\
-a[i].href=r?r.assets[a[i].getAttribute(\"data-release-asset\")]||r.page:releases}\
+var a=document.querySelectorAll(\"[data-release-asset]\");for(var i=0;i<a.length;i++){\
+var f=a[i].getAttribute(\"data-release-fallback\");\
+a[i].href=r?r.assets[a[i].getAttribute(\"data-release-asset\")]||f||r.page:f||releases}}\
 function ready(f){if(document.readyState===\"loading\")document.addEventListener(\"DOMContentLoaded\",f);else f()}\
 try{var c=JSON.parse(sessionStorage.getItem(key));if(c&&Date.now()-c.t<6e5){ready(function(){show(c.r)});return}}catch(e){}\
 fetch(\"https://api.github.com/repos/rvdende/cadrs/releases/latest\").then(function(res){\
@@ -205,8 +207,8 @@ fn link_button(size: ButtonSize, variant: ButtonVariant) -> ButtonStyle {
     })
 }
 
-/// One button per desktop platform: the latest release for Windows and Linux, and the build
-/// notes for macOS, which has no release build.
+/// One button per desktop platform: the latest release's archive for Windows and Linux, and its
+/// disk image for macOS (the page's script finds it; the build notes until a release has one).
 struct PlatformButtons;
 
 impl<L: DataLoader> WebRenderSync<L> for PlatformButtons {
@@ -239,7 +241,12 @@ impl<L: DataLoader> WebRenderSync<L> for PlatformButtons {
                     }}
                     "Linux"
                 </a>
-                <a href="#build" class={link_button(ButtonSize::Lg, ButtonVariant::Outline)}>
+                <a
+                    href="#build"
+                    data-release-asset="macos"
+                    data-release-fallback="#build"
+                    class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}
+                >
                     {Icon {
                         icon: IconRs(icon_rs::PLATFORM_MACOS),
                         size: Some(IconSize::Sm),
@@ -286,7 +293,7 @@ impl<L: DataLoader> WebRenderSync<L> for Downloads {
                                 >
                                     "GitHub Releases"
                                 </a>
-                                ". On macOS, build from source: it runs natively on Apple Silicon."
+                                ". macOS builds run on Apple silicon and Intel; they aren't signed yet, so open cadrs the first time with right-click › Open. Or build from source."
                             </p>
                         }),
                     }}
@@ -589,7 +596,7 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for Downloads {
 
             [Linux (x86_64)]({linux}) · [Windows (x86_64)]({windows})
 
-            Every release, with SHA\-256 checksums, is on [GitHub Releases](https://github.com/rvdende/cadrs/releases)\. On macOS, build from source: it runs natively on Apple Silicon\.
+            Every release, with SHA\-256 checksums, is on [GitHub Releases](https://github.com/rvdende/cadrs/releases)\. macOS builds run on Apple silicon and Intel; they aren't signed yet, so open cadrs the first time with right\-click › Open\. Or build from source\.
             "###
         }
         .render_md(cx)
