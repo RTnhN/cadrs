@@ -192,6 +192,15 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # Each file again under its name without the version (cadrs-x86_64-linux.tar.gz), so a link
+      # to releases/latest/download/<name> always fetches the latest release's (the README's
+      # download buttons).
+      - name: Names without the version
+        run: |
+          cd dist
+          for f in cadrs-"$TAG"-*; do cp "$f" "${f/-$TAG/}"; done
+          ls -l
+
       - name: Checksums
         run: cd dist && sha256sum *.tar.gz *.zip *.dmg > SHA256SUMS.txt && cat SHA256SUMS.txt
 
