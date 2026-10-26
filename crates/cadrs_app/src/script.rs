@@ -106,7 +106,9 @@
 //!   copied). `join <link>`: Join shared document with that link. `share-dialog` opens the
 //!   share dialog; `share-with <cadrs ID> <name> edit|view`, `unshare <cadrs ID>` and
 //!   `share-link off|view|edit` do what it does; `follow <cadrs ID prefix>` follows a
-//!   collaborator.
+//!   collaborator; `transfer <cadrs ID prefix>` transfers ownership to a member;
+//!   `voice join|mute|leave` as the voice buttons (with the `voice` feature). `branch <version index> <name>` branches from a version (and opens the
+//!   branch); `workspace main` opens Main again.
 //! - `selection-readout`: shows the selection readout (off by default, see
 //!   [`crate::selection_readout`]).
 //! - `linked-block …` (P3G.1, [`cadrs_core::samples::linked_block`]): `linked-block` writes
@@ -166,6 +168,12 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
                 .queue(move |world: &mut World| crate::collab::script(world, "share-with", &rest));
             continue;
         }
+        if let Some(rest) = m.0.trim().strip_prefix("transfer ") {
+            let rest = rest.to_string();
+            commands
+                .queue(move |world: &mut World| crate::collab::script(world, "transfer", &rest));
+            continue;
+        }
         if let Some(rest) = m.0.trim().strip_prefix("unshare ") {
             let rest = rest.to_string();
             commands.queue(move |world: &mut World| crate::collab::script(world, "unshare", &rest));
@@ -181,6 +189,47 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
             let prefix = prefix.trim().to_string();
             commands.queue(move |world: &mut World| {
                 crate::collab::presence::follow_prefix(world, &prefix)
+            });
+            continue;
+        }
+        // Branch from version <i> as <name>; `workspace main` opens Main again.
+        if let Some(rest) = m.0.trim().strip_prefix("branch ") {
+            let mut words = rest.split_whitespace();
+            if let Some(v) = words.next().and_then(|v| v.parse::<usize>().ok()) {
+                let name = words.collect::<Vec<_>>().join(" ");
+                commands.queue(move |world: &mut World| {
+                    let id = world
+                        .resource::<crate::history_panel::DocLog>()
+                        .log
+                        .as_ref()
+                        .and_then(|l| l.versions().get(v).map(|v| v.id()));
+                    if let Some(id) = id {
+                        crate::workspaces::create_branch(world, id, &name, "")
+                    }
+                });
+            }
+            continue;
+        }
+        if m.0.trim() == "workspace main" {
+            commands.queue(|world: &mut World| {
+                crate::workspaces::switch_workspace(
+                    world,
+                    cadrs_core::history_log::WorkspaceId::MAIN,
+                )
+            });
+            continue;
+        }
+        // Voice (`crate::collab::voice`, the `voice` feature): as the top bar's buttons.
+        if let Some(what) = m.0.trim().strip_prefix("voice ") {
+            let what = what.trim().to_string();
+            commands.queue(move |world: &mut World| {
+                let mut ui = world.resource_mut::<crate::collab::presence::VoiceUi>();
+                match what.as_str() {
+                    "join" => ui.want_join = Some(true),
+                    "leave" => ui.want_join = Some(false),
+                    "mute" => ui.toggle_mute = true,
+                    _ => warn!("voice {what}: join, leave or mute"),
+                }
             });
             continue;
         }

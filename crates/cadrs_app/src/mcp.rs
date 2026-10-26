@@ -1613,6 +1613,13 @@ fn create_version(world: &mut World, p: &tools::CreateVersion) -> Result<Value, 
     }
     let before = versions(world).len();
     crate::history_panel::create_version(world, &p.name, p.description.as_deref().unwrap_or(""));
+    // Someone else's shared document: its owner's cadrs makes the version, which arrives here
+    // a moment later.
+    if crate::collab::live::is_guest(world) {
+        return Ok(
+            json!({ "asked": "the owner's cadrs makes the version; list_versions shows it once it arrives" }),
+        );
+    }
     if versions(world).len() == before {
         return Err("no version was made: finish the open dialog or edit first".into());
     }

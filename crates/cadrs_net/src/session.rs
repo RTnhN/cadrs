@@ -6,6 +6,7 @@ use bevy_iroh::RoomTicket;
 use bevy_iroh::TopicId;
 use bevy_iroh::message::MessageAppExt;
 use bevy_iroh::prelude::Room;
+use cadrs_core::collab::comments::CommentOp;
 use cadrs_core::collab::{self, Access, sync::Change};
 use cadrs_core::{DocumentId, ElementId, FeatureId};
 use serde::{Deserialize, Serialize};
@@ -112,10 +113,62 @@ pub struct View {
     pub render: u8,
 }
 
+/// A change to the comments, as the owner applied it: everyone applies it the same.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CommentChanged {
+    pub document: DocumentId,
+    /// Who made it (a cadrs ID).
+    pub by: String,
+    /// The packed [`CommentOp`] (postcard can't carry its optional fields).
+    op: Vec<u8>,
+}
+
+impl CommentChanged {
+    pub fn new(document: DocumentId, by: &str, op: &CommentOp) -> Option<Self> {
+        Some(Self {
+            document,
+            by: by.to_string(),
+            op: collab::pack(op).ok()?,
+        })
+    }
+
+    pub fn op(&self) -> Option<CommentOp> {
+        collab::unpack(&self.op).ok()
+    }
+}
+
+/// A version the owner made of the shared document (on its own, or asked by someone it is
+/// shared with): at edit `seq` of session `epoch`. Everyone makes the same version, with the
+/// same id, of their copy at that edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VersionCreated {
+    pub document: DocumentId,
+    pub epoch: u64,
+    pub seq: u64,
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub description: String,
+    pub time: i64,
+    /// Who asked for it.
+    pub user: String,
+}
+
+/// The tabs someone has open for themselves ("Open tab, close it for other users", Onshape's
+/// focus lock for tabs that can't be edited together): each tab with its holder's cadrs ID and
+/// name. From the owner, whenever it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocksChanged {
+    pub document: DocumentId,
+    pub locks: Vec<(ElementId, String, String)>,
+}
+
 pub(crate) fn register(app: &mut App) {
     app.add_net_message::<Sequenced>()
         .add_net_message::<AccessChanged>()
-        .add_net_message::<Presence>();
+        .add_net_message::<Presence>()
+        .add_net_message::<CommentChanged>()
+        .add_net_message::<VersionCreated>()
+        .add_net_message::<LocksChanged>();
 }
 
 /// The owner's room for a document shared in `topic`: always the same topic, so links keep
@@ -133,4 +186,70 @@ pub fn join_room(commands: &mut Commands, link: &ShareLink) -> Entity {
         vec![link.owner.clone()],
     );
     commands.spawn(Room::join(ticket)).id()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadrs_core::collab::comments::{Comment, Tag};
+    use cadrs_core::collab::{Permission, Rights};
+
+    /// bevy_iroh carries room messages as postcard, which can't skip a field: every message
+    /// must come back whole, optional fields set or not.
+    #[test]
+    fn room_messages_survive_postcard() {
+        let document = DocumentId::new();
+        let comment = Comment {
+            id: uuid::Uuid::new_v4(),
+            parent: None,
+            author: "a".into(),
+            author_name: "Ann".into(),
+            time: 5,
+            text: "hi".into(),
+            tag: Some(Tag::Element(ElementId::new())),
+            assignee: None,
+            resolved: false,
+            edited: None,
+        };
+        let c = CommentChanged::new(document, "a", &CommentOp::Add(comment.clone())).unwrap();
+        let back: CommentChanged = postcard::from_bytes(&postcard::to_stdvec(&c).unwrap()).unwrap();
+        assert_eq!(back.op(), Some(CommentOp::Add(comment)));
+
+        let p = Presence {
+            document,
+            name: "Ann".into(),
+            tab: Some(ElementId::new()),
+            editing: None,
+            view: Some(View {
+                azimuth: 1.0,
+                elevation: 2.0,
+                roll: 0.0,
+                focus: [1.0, 2.0, 3.0],
+                scale: 0.5,
+                perspective: true,
+                render: 2,
+            }),
+            following: None,
+        };
+        let back: Presence = postcard::from_bytes(&postcard::to_stdvec(&p).unwrap()).unwrap();
+        assert_eq!(back, p);
+
+        let a = AccessChanged {
+            document,
+            members: vec![(
+                "b".into(),
+                Access {
+                    permission: Permission::View,
+                    rights: Rights::of(Permission::View),
+                },
+            )],
+            link: None,
+        };
+        let back: AccessChanged = postcard::from_bytes(&postcard::to_stdvec(&a).unwrap()).unwrap();
+        assert_eq!(back, a);
+
+        let s = Sequenced::new(document, 3, 4, ("a", "Ann"), 1, &Change::default(), 9);
+        let back: Sequenced = postcard::from_bytes(&postcard::to_stdvec(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+    }
 }

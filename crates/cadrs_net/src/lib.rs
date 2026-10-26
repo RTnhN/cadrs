@@ -24,12 +24,14 @@ use bevy_iroh::{Identity, Iroh, IrohPlugin, Relays};
 
 pub use bevy_iroh;
 pub use link::ShareLink;
-pub use session::{AccessChanged, Presence, Sequenced, View};
+pub use session::{
+    AccessChanged, CommentChanged, LocksChanged, Presence, Sequenced, VersionCreated, View,
+};
 
 /// A question to another peer on its way: polled from a system until the answer (or why
 /// there is none) arrives.
 pub type Answer<T> = bevy_iroh::IrohTask<Result<T, String>>;
-pub use transfer::{Ask, Invite, Request, Requests, Verdict, Welcome};
+pub use transfer::{Ask, Invite, Ownership, Request, Requests, Verdict, Welcome};
 
 /// The node's secret key, in the documents folder (32 raw bytes, mode 0600). Each data
 /// directory is a peer of its own, so two instances with their own `--data-dir` can share
