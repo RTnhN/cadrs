@@ -28,6 +28,7 @@ use bevy_iroh::{
     },
 };
 use cadrs_core::DocumentId;
+use cadrs_core::collab::comments::{CommentOp, Comments};
 use cadrs_core::collab::sync::Change;
 use cadrs_core::collab::{self, Access, Snapshot};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -67,6 +68,8 @@ enum WireAsk {
         access: Access,
     },
     Leave,
+    /// The packed [`CommentOp`] (postcard can't carry its optional fields).
+    Comment(Vec<u8>),
 }
 
 /// The owner telling someone a document is shared with them.
@@ -91,6 +94,9 @@ pub struct Welcome {
     pub epoch: u64,
     /// The document after edit `snapshot.seq`.
     pub snapshot: Snapshot,
+    /// Its comments.
+    #[serde(default)]
+    pub comments: Comments,
 }
 
 /// The owner's answer to a proposed edit.
@@ -124,6 +130,8 @@ pub enum Ask {
         access: Access,
     },
     Leave,
+    /// A change to the comments (for someone who may comment).
+    Comment(CommentOp),
 }
 
 /// A peer's request. The app checks the topic and the peer against the document's sharing and
@@ -198,6 +206,7 @@ impl Handler {
             WireAsk::Invite(i) => Ask::Invite(i),
             WireAsk::AddMember { id, name, access } => Ask::AddMember { id, name, access },
             WireAsk::Leave => Ask::Leave,
+            WireAsk::Comment(op) => Ask::Comment(collab::unpack(&op)?),
         };
         let (reply, answer) = oneshot::channel();
         self.tx
@@ -353,4 +362,19 @@ pub fn start_leave(iroh: &Iroh, link: &ShareLink) -> IrohTask<Result<Verdict, St
         ask: WireAsk::Leave,
     };
     iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Sends a change to the comments to the link's owner.
+pub fn start_comment(
+    iroh: &Iroh,
+    link: &ShareLink,
+    op: CommentOp,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = collab::pack(&op).map(|op| Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Comment(op),
+    });
+    let (endpoint, owner) = (iroh.endpoint(), link.owner.clone());
+    iroh.spawn(async move { ask(endpoint, owner, wire?).await })
 }

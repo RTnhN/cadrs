@@ -20,6 +20,7 @@ use cadrs_net::{Answer, ShareLink, Welcome, transfer};
 
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore};
 
+pub mod comments;
 pub mod live;
 pub mod presence;
 pub mod share_dialog;
@@ -31,6 +32,7 @@ impl Plugin for CollabPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Joins>()
             .add_systems(Update, poll_joins.run_if(resource_exists::<Iroh>));
+        comments::plugin(app);
         live::plugin(app);
         presence::plugin(app);
         sharing::plugin(app);

@@ -475,6 +475,7 @@ fn serve(world: &mut World) {
         match r.ask {
             Ask::Join => join(world, r),
             Ask::Propose { .. } => propose(world, r),
+            Ask::Comment(_) => super::comments::answer(world, r),
             _ => super::sharing::answer(world, r),
         }
     }
@@ -522,7 +523,9 @@ fn join(world: &mut World, r: Request) {
             _ => (0, 0, doc),
         };
         let snapshot = Snapshot::of(&doc, seq, &store)?;
+        let comments = super::comments::for_document(world, r.document);
         Ok(Welcome {
+            comments,
             access,
             owner_name,
             epoch,
@@ -734,12 +737,14 @@ fn step(world: &mut World, g: &mut Guest, document: DocumentId, room: &mut Entit
 /// The owner's copy arrived: it replaces this peer's, which starts following.
 fn welcome(world: &mut World, g: &mut Guest, w: Welcome) -> Result<(), String> {
     let seq = w.snapshot.seq;
+    let comments = w.comments.clone();
     let doc = w.snapshot.install()?;
     if doc.id != g.link.document {
         return Err("The owner sent another document".into());
     }
     g.owner_name = w.owner_name.clone();
     g.access = w.access;
+    super::comments::welcome(world, doc.id, comments);
     let lost = match &g.state {
         GuestState::Following { replica, .. } => {
             replica.in_flight() || world.resource::<ActiveDocument>().doc != *replica.confirmed()

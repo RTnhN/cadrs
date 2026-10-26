@@ -48,6 +48,7 @@ fn serve(mut requests: ResMut<Requests>, shared: Res<Shared>) {
                         document: doc,
                         blobs: Vec::new(),
                     },
+                    comments: Default::default(),
                 }))
             }
             // Numbered as 4 when it renames the document, refused otherwise.

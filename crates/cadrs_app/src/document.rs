@@ -4549,7 +4549,9 @@ fn on_feature_context_menu(
         .item_height(22.0)
         .icon_size(14.0)
         .item(MenuItem::new("feature-rename", "Rename"))
-        .item(MenuItem::new("feature-edit", "Edit…").disabled(editing || !can_edit));
+        .item(MenuItem::new("feature-edit", "Edit…").disabled(editing || !can_edit))
+        // Comments (`crate::collab::comments`): a comment tagged to the feature.
+        .item(MenuItem::new("feature-add-comment", "Add comment").icon("comments"));
     // P3D.4 (IR3.3): Repair on the feature's last healthy regeneration (not a Derived feature's:
     // its source is fixed by its own tab or version, P3G.4).
     let is_derived = el
@@ -4837,6 +4839,10 @@ fn on_feature_menu_action(
             .queue(move |world: &mut World| crate::section_view::open_for_feature(world, id)),
         "feature-rename" => {
             commands.queue(move |world: &mut World| rename_feature(world, id));
+        }
+        "feature-add-comment" => {
+            commands
+                .queue(move |world: &mut World| crate::collab::comments::start_tagged(world, id));
         }
         "feature-dependencies" => commands
             .queue(move |world: &mut World| crate::feature_list::show_dependencies(world, id)),
