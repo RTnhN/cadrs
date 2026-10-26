@@ -531,8 +531,418 @@ pub fn compact(b: &mut Body) {
     b.verts = verts;
 }
 
+/// Pieces of a band merged into one (#114: a partial torus revolved on, or mirrored; an
+/// ellipse's or a closed spline's surface of revolution): the group's outer boundary is two
+/// closed curves, each once round the surface the way its pieces' seams cross, and the pieces'
+/// seams join end to end from one to the other. The merged face runs round the first curve,
+/// along the seams to the second, round it, and back: as each piece did. `None` when the group
+/// isn't such a band (the loop must close in the base face's parameters).
+fn merge_band(b: &Body, g: &[usize]) -> Option<Face> {
+    let base = g[0];
+    let surf = b.faces[base].surf.clone();
+    let mut uses: std::collections::HashMap<usize, Vec<usize>> = Default::default();
+    for &f in g {
+        for c in b.faces[f].loops.iter().flatten() {
+            uses.entry(c.edge).or_default().push(f);
+        }
+    }
+    let internal = |e: usize| uses[&e].iter().any(|x| *x != uses[&e][0]);
+    let seam = |e: usize| uses[&e].len() == 2 && uses[&e][0] == uses[&e][1];
+    // The boundary's coedges, and the seams (each once).
+    let mut rest: Vec<Coedge> = Vec::new();
+    let mut seams: Vec<usize> = Vec::new();
+    for &f in g {
+        for c in b.faces[f].loops.iter().flatten() {
+            if b.edges[c.edge].degenerate || internal(c.edge) {
+                continue;
+            }
+            if seam(c.edge) {
+                if !seams.contains(&c.edge) {
+                    seams.push(c.edge);
+                }
+                continue;
+            }
+            rest.push(c.clone());
+        }
+    }
+    // Two closed chains of the boundary.
+    let mut used = vec![false; rest.len()];
+    let mut chains: Vec<Vec<Coedge>> = Vec::new();
+    for s in 0..rest.len() {
+        if used[s] {
+            continue;
+        }
+        used[s] = true;
+        let mut ch = vec![rest[s].clone()];
+        let (start, mut end) = (b.co_start(&rest[s]), b.co_end(&rest[s]));
+        while end != start {
+            let k = (0..rest.len()).find(|&k| !used[k] && b.co_start(&rest[k]) == end)?;
+            used[k] = true;
+            end = b.co_end(&rest[k]);
+            ch.push(rest[k].clone());
+        }
+        chains.push(ch);
+    }
+    if chains.len() != 2 || seams.is_empty() {
+        return None;
+    }
+    let on = |ch: &[Coedge], v: usize| ch.iter().any(|c| b.co_start(c) == v);
+    // The seams as one path from a vertex of the first chain to one of the second.
+    let ends = |e: usize| b.edges[e].v;
+    let start_v = seams
+        .iter()
+        .flat_map(|&e| ends(e))
+        .find(|&v| on(&chains[0], v))?;
+    let mut path: Vec<Coedge> = Vec::new();
+    let mut at = start_v;
+    let mut left = seams.clone();
+    while !on(&chains[1], at) {
+        let k = left.iter().position(|&e| ends(e).contains(&at))?;
+        let e = left.remove(k);
+        let fwd = ends(e)[0] == at;
+        path.push(Coedge {
+            edge: e,
+            fwd,
+            pc: b.faces[base].loops[0][0].pc.clone(),
+        });
+        at = if fwd { ends(e)[1] } else { ends(e)[0] };
+    }
+    if !left.is_empty() || path.is_empty() {
+        return None;
+    }
+    let end_v = at;
+    let rotate_to = |ch: &mut Vec<Coedge>, v: usize| -> Option<()> {
+        let k = ch.iter().position(|c| b.co_start(c) == v)?;
+        ch.rotate_left(k);
+        Some(())
+    };
+    let (mut c1, mut c2) = (chains[0].clone(), chains[1].clone());
+    rotate_to(&mut c1, start_v)?;
+    rotate_to(&mut c2, end_v)?;
+    let back: Vec<Coedge> = path
+        .iter()
+        .rev()
+        .map(|c| Coedge {
+            edge: c.edge,
+            fwd: !c.fwd,
+            pc: c.pc.clone(),
+        })
+        .collect();
+    let mut lp: Vec<Coedge> = c1;
+    lp.extend(path);
+    lp.extend(c2);
+    lp.extend(back);
+    // p-curves continuous along the loop, from the base face's chart; the loop must close
+    // there (the seam's two runs a period apart in v).
+    let center = {
+        let mut bb = Bbox::empty();
+        for c in b.faces[base].loops.iter().flatten() {
+            let q = co_uv(b, c, false);
+            bb.add(&P3::new(q.x, q.y, 0.0));
+        }
+        let c = bb.center();
+        P2::new(c.x, c.y)
+    };
+    let close = |p: P2, q: P2| (p - q).norm() <= tol::ROUNDOFF * (1.0 + p.coords.norm());
+    let mut at: Option<P2> = None;
+    for (k, c) in lp.iter_mut().enumerate() {
+        c.pc = if k == 0 {
+            let e = &b.edges[c.edge];
+            pcurve::pcurve(&surf, &e.curve, e.t[0], e.t[1], Some(center))
+        } else {
+            chain_pc(&surf, b, c, at)
+        };
+        // Across a seam the surface doesn't call periodic (a closed meridian's surface of
+        // revolution): the p-curve moved on to where the loop is, if the surface repeats there
+        // all along it.
+        if let Some(a) = at
+            && !close(co_uv(b, c, false), a)
+        {
+            c.pc = repeat_onto(&surf, &c.pc, &b.edges[c.edge], c.fwd, a)?;
+        }
+        at = Some(co_uv(b, c, true));
+    }
+    let (first, last) = (co_uv(b, &lp[0], false), at?);
+    if !close(first, last) {
+        return None;
+    }
+    Some(Face {
+        surf,
+        sense: b.faces[base].sense,
+        loops: vec![lp],
+    })
+}
+
+/// A coedge's p-curve `pc` (of edge `e`, run `fwd`) moved to start at `at`, where the surface
+/// repeats it: the same point at each of its samples moved so (across a seam of a surface that
+/// doesn't call itself periodic, as a closed meridian's surface of revolution). `None` when
+/// the surface doesn't repeat there.
+fn repeat_onto(surf: &Surface, pc: &Curve, e: &Edge, fwd: bool, at: P2) -> Option<Curve> {
+    let (t0, _) = co_range(e, fwd);
+    let s = pc.point(t0);
+    let d = at - P2::new(s.x, s.y);
+    let size = 1.0 + e.point(e.t[0]).coords.norm();
+    let same = (0..=8).all(|i| {
+        let q = pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
+        (surf.eval(q.x, q.y) - surf.eval(q.x + d.x, q.y + d.y)).norm() <= tol::REL_POINT * size
+    });
+    same.then(|| pc.transformed(&Affine::translation(V3::new(d.x, d.y, 0.0))))
+}
+
+/// One pole edge a whole turn at vertex `w`, in place of the pieces' `poles` there (its range
+/// the sum of theirs), added to `b`.
+fn pole_edge(b: &mut Body, poles: &[usize], w: usize) -> Option<usize> {
+    let here: Vec<usize> = poles
+        .iter()
+        .copied()
+        .filter(|&e| b.edges[e].v[0] == w)
+        .collect();
+    let first = *here.first()?;
+    let span: f64 = here
+        .iter()
+        .map(|&e| b.edges[e].t[1] - b.edges[e].t[0])
+        .sum();
+    let mut e = b.edges[first].clone();
+    e.t = [0.0, span];
+    b.edges.push(e);
+    Some(b.edges.len() - 1)
+}
+
+/// Pieces that close a whole surface merged into one (#114: a torus of two halves, or of a
+/// circular pattern's quarters; a sphere of two pieces): the group has no boundary left, only
+/// edges between its pieces, the pieces' own seams and poles. As one revolve makes it, the face
+/// runs along one of the edges between the pieces (its new seam `c`), then
+/// - a torus: along the pieces' seams round the other way back to where it started, back along
+///   `c` and back round the seams;
+/// - a sphere: round the pole at its end (one pole edge there, a whole turn), back along `c`
+///   and round the pole at its start;
+/// - a cone or a dome (a pole at one end, the group's boundary round the other): round the
+///   boundary, along `c` to the pole, round it and back.
+///
+/// Whichever way round gives the face a positive area. `None` when the group isn't such a
+/// closed surface.
+fn merge_closed(b: &mut Body, g: &[usize]) -> Option<Face> {
+    let base = g[0];
+    let surf = b.faces[base].surf.clone();
+    let sense = b.faces[base].sense;
+    let mut uses: std::collections::HashMap<usize, Vec<usize>> = Default::default();
+    for &f in g {
+        for c in b.faces[f].loops.iter().flatten() {
+            uses.entry(c.edge).or_default().push(f);
+        }
+    }
+    let internal = |e: usize| uses[&e].iter().any(|x| *x != uses[&e][0]);
+    let seam = |e: usize| uses[&e].len() == 2 && uses[&e][0] == uses[&e][1];
+    // The new seam: the base face's first edge shared with another piece; nothing else may
+    // bound the group.
+    let mut c: Option<Coedge> = None;
+    let (mut seams, mut poles): (Vec<usize>, Vec<usize>) = (Vec::new(), Vec::new());
+    let mut rest: Vec<Coedge> = Vec::new();
+    for &f in g {
+        for co in b.faces[f].loops.iter().flatten() {
+            let e = co.edge;
+            if b.edges[e].degenerate {
+                if !poles.contains(&e) {
+                    poles.push(e);
+                }
+            } else if internal(e) {
+                if c.is_none() && f == base {
+                    c = Some(co.clone());
+                }
+            } else if seam(e) {
+                if !seams.contains(&e) {
+                    seams.push(e);
+                }
+            } else {
+                rest.push(co.clone());
+            }
+        }
+    }
+    let c = c?;
+    let [cs, ce] = b.edges[c.edge].v;
+    let rev = |x: &Coedge| Coedge {
+        edge: x.edge,
+        fwd: !x.fwd,
+        pc: x.pc.clone(),
+    };
+    // The loops to try, the second the other way round.
+    let tries: Vec<Vec<Coedge>> =
+        if cs == ce && poles.is_empty() && !seams.is_empty() && rest.is_empty() {
+            // Round the pieces' seams from c's vertex back to it.
+            let mut path: Vec<Coedge> = Vec::new();
+            let mut at = cs;
+            let mut left = seams.clone();
+            loop {
+                let k = left.iter().position(|&e| b.edges[e].v.contains(&at))?;
+                let e = left.remove(k);
+                let fwd = b.edges[e].v[0] == at;
+                path.push(Coedge {
+                    edge: e,
+                    fwd,
+                    pc: c.pc.clone(),
+                });
+                at = if fwd {
+                    b.edges[e].v[1]
+                } else {
+                    b.edges[e].v[0]
+                };
+                if at == cs {
+                    break;
+                }
+            }
+            if !left.is_empty() {
+                return None;
+            }
+            let back: Vec<Coedge> = path.iter().rev().map(rev).collect();
+            let c_fwd = Coedge {
+                fwd: true,
+                ..c.clone()
+            };
+            let one = [
+                vec![c_fwd.clone()],
+                path.clone(),
+                vec![rev(&c_fwd)],
+                back.clone(),
+            ]
+            .concat();
+            let two = [vec![c_fwd.clone()], back, vec![rev(&c_fwd)], path].concat();
+            vec![one, two]
+        } else if cs != ce && seams.is_empty() && !poles.is_empty() {
+            // One pole edge a whole turn at each pole of c, in place of the pieces' (each the sum
+            // of their ranges).
+            let at_cs = poles.iter().any(|&e| b.edges[e].v[0] == cs);
+            let at_ce = poles.iter().any(|&e| b.edges[e].v[0] == ce);
+            if !rest.is_empty() {
+                // A cone or dome: the boundary one closed chain through c's other end.
+                let (pole_v, base_v) = match (at_cs, at_ce) {
+                    (true, false) => (cs, ce),
+                    (false, true) => (ce, cs),
+                    _ => return None,
+                };
+                let mut chain: Vec<Coedge> = Vec::new();
+                let mut used = vec![false; rest.len()];
+                let mut at = base_v;
+                loop {
+                    let k = (0..rest.len()).find(|&k| !used[k] && b.co_start(&rest[k]) == at)?;
+                    used[k] = true;
+                    at = b.co_end(&rest[k]);
+                    chain.push(rest[k].clone());
+                    if at == base_v {
+                        break;
+                    }
+                }
+                if used.iter().any(|u| !u) {
+                    return None;
+                }
+                let d = pole_edge(b, &poles, pole_v)?;
+                let up = Coedge {
+                    fwd: b.edges[c.edge].v[0] == base_v,
+                    ..c.clone()
+                };
+                let co = |fwd: bool| Coedge {
+                    edge: d,
+                    fwd,
+                    pc: c.pc.clone(),
+                };
+                let one = [chain.clone(), vec![up.clone(), co(true), rev(&up)]].concat();
+                let two = [chain, vec![up.clone(), co(false), rev(&up)]].concat();
+                vec![one, two]
+            } else {
+                if !(at_cs && at_ce) {
+                    return None;
+                }
+                let (ds, de) = (pole_edge(b, &poles, cs)?, pole_edge(b, &poles, ce)?);
+                let co = |e: usize, fwd: bool| Coedge {
+                    edge: e,
+                    fwd,
+                    pc: c.pc.clone(),
+                };
+                let c_fwd = Coedge {
+                    fwd: true,
+                    ..c.clone()
+                };
+                let one = vec![co(ds, true), c_fwd.clone(), co(de, false), rev(&c_fwd)];
+                let two = vec![co(ds, false), c_fwd.clone(), co(de, true), rev(&c_fwd)];
+                vec![one, two]
+            }
+        } else {
+            return None;
+        };
+    // The base face's chart: the loop starts there.
+    let center = {
+        let mut bb = Bbox::empty();
+        for co in b.faces[base].loops.iter().flatten() {
+            let q = co_uv(b, co, false);
+            bb.add(&P3::new(q.x, q.y, 0.0));
+        }
+        let m = bb.center();
+        P2::new(m.x, m.y)
+    };
+    let flip = if sense { 1.0 } else { -1.0 };
+    let (mu, mv) = surf.metric();
+    let close = |p: P2, q: P2| (p - q).norm() <= tol::ROUNDOFF * (1.0 + p.coords.norm());
+    'tries: for mut lp in tries {
+        // The p-curves: c in the base face's chart, the rest on from it; a pole's along the
+        // pole from where the edge before ends to where the one after starts (after it is
+        // placed, a period along).
+        let k0 = lp.iter().position(|x| !b.edges[x.edge].degenerate)?;
+        lp.rotate_left(k0);
+        let e0 = &b.edges[lp[0].edge];
+        lp[0].pc = pcurve::pcurve(&surf, &e0.curve, e0.t[0], e0.t[1], Some(center));
+        let n = lp.len();
+        let mut at = co_uv(b, &lp[0], true);
+        for k in 1..n {
+            let e = b.edges[lp[k].edge].clone();
+            if e.degenerate {
+                // Round the pole a whole turn in u, the way that gives a positive area (tried
+                // both ways by the two loops).
+                let (t0, t1) = co_range(&e, lp[k].fwd);
+                let turn = if lp[k].fwd { TAU } else { -TAU };
+                let d = V3::new(turn / (t1 - t0), 0.0, 0.0);
+                let o = P3::new(at.x - d.x * t0, at.y, 0.0);
+                lp[k].pc = Curve::Line { o, d };
+            } else {
+                lp[k].pc = chain_pc(&surf, b, &lp[k], Some(at));
+                if !close(co_uv(b, &lp[k], false), at) {
+                    match repeat_onto(&surf, &lp[k].pc, &e, lp[k].fwd, at) {
+                        Some(pc) => lp[k].pc = pc,
+                        None => continue 'tries,
+                    }
+                }
+            }
+            at = co_uv(b, &lp[k], true);
+        }
+        if !close(at, co_uv(b, &lp[0], false)) {
+            continue;
+        }
+        let mut pts = Vec::new();
+        for x in &lp {
+            let e = &b.edges[x.edge];
+            let (t0, t1) = co_range(e, x.fwd);
+            for i in 0..32 {
+                let q = x.pc.point(t0 + (t1 - t0) * i as f64 / 32.0);
+                pts.push(P2::new(q.x * mu, q.y * mv * flip));
+            }
+        }
+        if polygon_area(&pts) > 0.0 {
+            return Some(Face {
+                surf,
+                sense,
+                loops: vec![lp],
+            });
+        }
+    }
+    None
+}
+
 /// One merged face for the group, or None when the merge can't be made cleanly.
 fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
+    if let Some(f) = merge_band(b, g) {
+        return Some(f);
+    }
+    if let Some(f) = merge_closed(b, g) {
+        return Some(f);
+    }
     let base = g[0];
     let surf = b.faces[base].surf.clone();
     let sense = b.faces[base].sense;
@@ -939,52 +1349,65 @@ fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
         // Seam edge along the iso-u line from s1 to s2.
         let iso = surf.iso_u(us)?;
         let p2 = b.verts[s2v].p;
-        let (v1, v2) = (start1.y, {
+        let v1 = start1.y;
+        let v_near = {
             let (_, v) = surf.project(&p2, Some((us, start1.y)));
             v
-        });
-        let mut ch2 = chains[i2].clone();
-        realign(b, &mut ch2, P2::new(end1.x, v2));
-        let (lo, hi, vlo, vhi) = if v1 < v2 {
-            (s1, s2v, v1, v2)
-        } else {
-            (s2v, s1, v2, v1)
         };
-        b.edges.push(Edge {
-            curve: iso,
-            t: [vlo, vhi],
-            v: [lo, hi],
-            degenerate: false,
-            tol: super::topo::TOL_MIN,
-        });
-        let se = b.edges.len() - 1;
+        // Where v closes too (a torus), the seam can run either way round from s1 to s2: the
+        // nearer may cross what is cut away (an arc's band: through the arc's gap), so the other
+        // way is tried when the loop comes out clockwise.
+        let candidates: Vec<f64> = if surf.v_periodic() {
+            vec![v_near, v_near + if v_near > v1 { -TAU } else { TAU }]
+        } else {
+            vec![v_near]
+        };
         let line_at = |u: f64| Curve::Line {
             o: P3::new(u, 0.0, 0.0),
             d: V3::new(0.0, 1.0, 0.0),
         };
-        // From s1 (at u_s + 2πw) to s2, then chain 2, then from s2 (at u_s) back to s1.
-        let up_first = v1 < v2; // the seam edge runs s1 → s2
-        let mut lp = ch1;
-        lp.push(Coedge {
-            edge: se,
-            fwd: up_first,
-            pc: line_at(end1.x),
-        });
-        lp.extend(ch2);
-        lp.push(Coedge {
-            edge: se,
-            fwd: !up_first,
-            pc: line_at(start1.x),
-        });
-        loops.push(lp);
+        let mut found: Option<Vec<Coedge>> = None;
+        for v2 in candidates {
+            let mut ch2 = chains[i2].clone();
+            realign(b, &mut ch2, P2::new(end1.x, v2));
+            let (lo, hi, vlo, vhi) = if v1 < v2 {
+                (s1, s2v, v1, v2)
+            } else {
+                (s2v, s1, v2, v1)
+            };
+            b.edges.push(Edge {
+                curve: iso.clone(),
+                t: [vlo, vhi],
+                v: [lo, hi],
+                degenerate: false,
+                tol: super::topo::TOL_MIN,
+            });
+            let se = b.edges.len() - 1;
+            // From s1 (at u_s + 2πw) to s2, then chain 2, then from s2 (at u_s) back to s1.
+            let up_first = v1 < v2; // the seam edge runs s1 → s2
+            let mut lp = ch1.clone();
+            lp.push(Coedge {
+                edge: se,
+                fwd: up_first,
+                pc: line_at(end1.x),
+            });
+            lp.extend(ch2);
+            lp.push(Coedge {
+                edge: se,
+                fwd: !up_first,
+                pc: line_at(start1.x),
+            });
+            // The loop must be counter-clockwise in oriented uv.
+            if area(b, &lp) > 0.0 {
+                found = Some(lp);
+                break;
+            }
+        }
+        loops.push(found?);
         for (i, ch) in chains.into_iter().enumerate() {
             if i != i1 && i != i2 {
                 holes.push(ch);
             }
-        }
-        // The loop must be counter-clockwise in oriented uv; otherwise give up.
-        if area(b, &loops[0]) <= 0.0 {
-            return None;
         }
     }
     loops.extend(holes);
@@ -1143,7 +1566,16 @@ pub fn merge_edges(b: &mut Body) {
                             ne.curve.tangent(ne.t[0]).dot(&travel) > 0.0
                         };
                         let sp = first.pc.point(ot0);
-                        let pc = pc_from(&surf, &ne, fwd, Some(P2::new(sp.x, sp.y)));
+                        let sp = P2::new(sp.x, sp.y);
+                        let mut pc = pc_from(&surf, &ne, fwd, Some(sp));
+                        // (Across a seam the surface doesn't call periodic: moved on to `sp`.)
+                        let s0 = pc.point(co_range(&ne, fwd).0);
+                        if (P2::new(s0.x, s0.y) - sp).norm()
+                            > tol::ROUNDOFF * (1.0 + sp.coords.norm())
+                            && let Some(moved) = repeat_onto(&surf, &pc, &ne, fwd, sp)
+                        {
+                            pc = moved;
+                        }
                         let mut nl: Vec<Coedge> = Vec::with_capacity(n - 1);
                         for (j, co) in l.iter().enumerate() {
                             if j == k {

@@ -243,6 +243,258 @@ fn a_cube_with_two_round_holes_touching() {
     );
 }
 
+/// A torus band (minor radius r about a circle of radius R) made in two revolves, or one
+/// mirrored, joined: one torus face, as one revolve makes it (#114); and an ellipse's band.
+/// Pappus: the volume πr²·Rθ, the side 2πr·Rθ, and the two end discs.
+#[test]
+fn a_torus_band_in_two_pieces_is_one_face() {
+    let (big, r) = (20.0, 5.0);
+    let axis = Axis {
+        origin: Point3::origin(),
+        dir: nalgebra::Unit::new_normalize(nalgebra::Vector3::new(0.0, -1.0, 0.0)),
+    };
+    let disc = |plane: Plane| {
+        Profile::new(
+            plane,
+            vec![Region {
+                outer: circle(big, 0.0, r),
+                holes: vec![],
+                source: None,
+            }],
+        )
+    };
+    let turned = |deg: f64| {
+        let rot = nalgebra::Rotation3::from_axis_angle(&axis.dir, deg.to_radians());
+        let top = Plane::top();
+        Plane {
+            origin: top.origin,
+            x_dir: nalgebra::Unit::new_normalize(rot * top.x_dir.into_inner()),
+            normal: nalgebra::Unit::new_normalize(rot * top.normal.into_inner()),
+        }
+    };
+    let expect = |k: &NativeKernel, b: BodyId, deg: f64| {
+        let issues = k.get(b).unwrap().check_with(CheckLevel::Full);
+        assert!(issues.is_empty(), "invalid body: {issues:?}");
+        let theta = deg.to_radians();
+        let m = k.mass_properties(b).unwrap();
+        assert!((m.volume - PI * r * r * big * theta).abs() < 1e-6 * m.volume);
+        let area = 2.0 * PI * r * big * theta + 2.0 * PI * r * r;
+        assert!((m.surface_area - area).abs() < 1e-6 * area);
+        assert_eq!(k.faces(b).unwrap().len(), 3, "one torus face and two ends");
+    };
+    // Revolved 15°, then on another 45°.
+    let mut k = NativeKernel::new();
+    let a = k
+        .revolve(&disc(Plane::top()), axis, 15f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let b = k
+        .revolve(&disc(turned(15.0)), axis, 45f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let u = k.boolean(BoolOp::Union, a, &[b]).unwrap().bodies[0];
+    expect(&k, u, 60.0);
+    // Mirrored across the plane holding the axis and its start.
+    let m = k
+        .transform_motion(
+            a,
+            &Motion::reflection(
+                Point3::origin(),
+                nalgebra::Unit::new_normalize(nalgebra::Vector3::z()),
+            ),
+        )
+        .unwrap()
+        .bodies[0];
+    let u = k.boolean(BoolOp::Union, a, &[m]).unwrap().bodies[0];
+    expect(&k, u, 30.0);
+    // An ellipse (semi-axes 8 and 5) revolved on: a surface of revolution whose meridian
+    // closes, seamed where the surface doesn't call itself periodic. Pappus: πab·Rθ.
+    let ellipse = |plane: Plane| {
+        Profile::new(
+            plane,
+            vec![Region {
+                outer: Loop {
+                    curves: vec![Curve2::Ellipse {
+                        center: Point2::new(big, 0.0),
+                        major_radius: 8.0,
+                        minor_radius: 5.0,
+                        rotation: 0.3,
+                        source: None,
+                    }],
+                },
+                holes: vec![],
+                source: None,
+            }],
+        )
+    };
+    let a = k
+        .revolve(&ellipse(Plane::top()), axis, 15f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let b = k
+        .revolve(&ellipse(turned(15.0)), axis, 45f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let u = k.boolean(BoolOp::Union, a, &[b]).unwrap().bodies[0];
+    let issues = k.get(u).unwrap().check_with(CheckLevel::Full);
+    assert!(issues.is_empty(), "invalid body: {issues:?}");
+    let v = k.mass_properties(u).unwrap().volume;
+    let want = PI * 8.0 * 5.0 * big * 60f64.to_radians();
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    assert_eq!(k.faces(u).unwrap().len(), 3, "one side face and two ends");
+}
+
+/// Pieces that close a whole turn joined: one face as one revolve makes it (#114). A torus of
+/// two halves and of four quarters (a circular pattern), 2π²Rr²; a sphere of a quarter and
+/// three, 4/3 πr³ and 4πr²; a cone of two halves (a pole at its apex), πr²h/3 and its base
+/// and side, πr² + πr·√(r² + h²); and a circle with a piece cut off, revolved round.
+#[test]
+fn pieces_closing_a_whole_turn_are_one_face() {
+    let turned = |axis: &Axis, deg: f64| {
+        let rot = nalgebra::Rotation3::from_axis_angle(&axis.dir, deg.to_radians());
+        let top = Plane::top();
+        Plane {
+            origin: top.origin,
+            x_dir: nalgebra::Unit::new_normalize(rot * top.x_dir.into_inner()),
+            normal: nalgebra::Unit::new_normalize(rot * top.normal.into_inner()),
+        }
+    };
+    let region = |outer: Loop| Region {
+        outer,
+        holes: vec![],
+        source: None,
+    };
+    // Revolved in pieces of `degs` (in turn round the axis), joined.
+    let pieces = |k: &mut NativeKernel, outer: &Loop, axis: Axis, degs: &[f64]| -> BodyId {
+        let mut at = 0.0;
+        let bodies: Vec<BodyId> = degs
+            .iter()
+            .map(|d| {
+                let profile = Profile::new(turned(&axis, at), vec![region(outer.clone())]);
+                at += d;
+                k.revolve(&profile, axis, d.to_radians()).unwrap().bodies[0]
+            })
+            .collect();
+        k.boolean(BoolOp::Union, bodies[0], &bodies[1..])
+            .unwrap()
+            .bodies[0]
+    };
+    let expect = |k: &NativeKernel, b: BodyId, volume: f64, area: Option<f64>, faces: usize| {
+        let issues = k.get(b).unwrap().check_with(CheckLevel::Full);
+        assert!(issues.is_empty(), "invalid body: {issues:?}");
+        let m = k.mass_properties(b).unwrap();
+        assert!(
+            (m.volume - volume).abs() < 1e-6 * volume,
+            "{} vs {volume}",
+            m.volume
+        );
+        if let Some(a) = area {
+            assert!(
+                (m.surface_area - a).abs() < 1e-6 * a,
+                "{} vs {a}",
+                m.surface_area
+            );
+        }
+        assert_eq!(k.faces(b).unwrap().len(), faces);
+    };
+    let mut k = NativeKernel::new();
+    let down = Axis {
+        origin: Point3::origin(),
+        dir: nalgebra::Unit::new_normalize(nalgebra::Vector3::new(0.0, -1.0, 0.0)),
+    };
+    let up = Axis {
+        origin: Point3::origin(),
+        dir: nalgebra::Unit::new_normalize(nalgebra::Vector3::new(0.0, 1.0, 0.0)),
+    };
+    let (big, r) = (25.0, 6.0);
+    let torus = 2.0 * PI * PI * big * r * r;
+    let disc = circle(big, 0.0, r);
+    let u = pieces(&mut k, &disc, down, &[180.0, 180.0]);
+    expect(&k, u, torus, Some(4.0 * PI * PI * big * r), 1);
+    let u = pieces(&mut k, &disc, down, &[90.0, 90.0, 90.0, 90.0]);
+    expect(&k, u, torus, Some(4.0 * PI * PI * big * r), 1);
+    // A half disc of radius 10 on the axis.
+    let rs = 10.0;
+    let half = Loop {
+        curves: vec![
+            Curve2::Arc {
+                center: Point2::new(0.0, 0.0),
+                radius: rs,
+                start_angle: -PI / 2.0,
+                sweep: PI,
+                source: None,
+            },
+            Curve2::Line {
+                a: Point2::new(0.0, rs),
+                b: Point2::new(0.0, -rs),
+                source: None,
+            },
+        ],
+    };
+    let u = pieces(&mut k, &half, up, &[90.0, 270.0]);
+    expect(
+        &k,
+        u,
+        4.0 / 3.0 * PI * rs.powi(3),
+        Some(4.0 * PI * rs * rs),
+        1,
+    );
+    // A right triangle: base radius 8 on Top, apex 12 up the axis.
+    let (rc, h) = (8.0, 12.0);
+    let tri = Loop {
+        curves: vec![
+            Curve2::Line {
+                a: Point2::new(0.0, 0.0),
+                b: Point2::new(rc, 0.0),
+                source: None,
+            },
+            Curve2::Line {
+                a: Point2::new(rc, 0.0),
+                b: Point2::new(0.0, h),
+                source: None,
+            },
+            Curve2::Line {
+                a: Point2::new(0.0, h),
+                b: Point2::new(0.0, 0.0),
+                source: None,
+            },
+        ],
+    };
+    let u = pieces(&mut k, &tri, up, &[180.0, 180.0]);
+    let side = PI * rc * (rc * rc + h * h).sqrt();
+    expect(&k, u, PI * rc * rc * h / 3.0, Some(PI * rc * rc + side), 2);
+    // A circle with a piece cut off (r 6 about R 25, the 60° segment below a chord): its arc's
+    // torus wraps round the axis, bounded where the arc ends, so the new seam must run through
+    // the arc, not through the gap. The segment and the arc both have their centroids at R
+    // from the axis (Pappus): (πr² − r²/2·(θ − sin θ))·2πR; the arc's side r(2π − θ)·2πR and
+    // the chord's flat ring π((R + r/2)² − (R − r/2)²) = 2πRr.
+    let theta = PI / 3.0;
+    let q = |a: f64| Point2::new(big + r * a.cos(), r * a.sin());
+    let (a0, a1) = (-PI / 3.0, 4.0 * PI / 3.0);
+    let cut = Loop {
+        curves: vec![
+            Curve2::Arc {
+                center: Point2::new(big, 0.0),
+                radius: r,
+                start_angle: a0,
+                sweep: a1 - a0,
+                source: None,
+            },
+            Curve2::Line {
+                a: q(a1),
+                b: q(a0),
+                source: None,
+            },
+        ],
+    };
+    let volume = (PI * r * r - r * r / 2.0 * (theta - theta.sin())) * 2.0 * PI * big;
+    let area = r * (2.0 * PI - theta) * 2.0 * PI * big + 2.0 * PI * big * r;
+    for degs in [&[90.0, 270.0][..], &[180.0, 180.0]] {
+        let u = pieces(&mut k, &cut, down, degs);
+        expect(&k, u, volume, Some(area), 2);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fillets
 
