@@ -29,7 +29,7 @@ use bevy_iroh::{
 };
 use cadrs_core::collab::comments::{CommentOp, Comments};
 use cadrs_core::collab::sync::Change;
-use cadrs_core::collab::{self, Access, Snapshot};
+use cadrs_core::collab::{self, Access, Sharing, Snapshot};
 use cadrs_core::{DocumentId, ElementId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::{mpsc, oneshot};
@@ -82,6 +82,22 @@ enum WireAsk {
     Unlock {
         element: ElementId,
     },
+    /// The packed [`Snapshot`].
+    Handover(Vec<u8>),
+    /// The packed [`Ownership`].
+    TakeOwnership(Vec<u8>),
+    Status,
+}
+
+/// A document given to a new owner (Transfer ownership): as it is, with who it is shared with
+/// and its comments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Ownership {
+    pub snapshot: Snapshot,
+    pub sharing: Sharing,
+    pub comments: Comments,
+    /// The owner it came from.
+    pub from_name: String,
 }
 
 /// The owner telling someone a document is shared with them.
@@ -159,6 +175,13 @@ pub enum Ask {
     Unlock {
         element: ElementId,
     },
+    /// From whoever kept the edits in order while the owner was away: the document as it is
+    /// now, for the owner to take on.
+    Handover(Snapshot),
+    /// To a member, from the owner: the document is theirs now.
+    TakeOwnership(Box<Ownership>),
+    /// Whether the owner has the document open (answered `Accepted(1)`, or `Accepted(0)`).
+    Status,
 }
 
 /// A peer's request. The app checks the topic and the peer against the document's sharing and
@@ -245,6 +268,9 @@ impl Handler {
             },
             WireAsk::Lock { element, take } => Ask::Lock { element, take },
             WireAsk::Unlock { element } => Ask::Unlock { element },
+            WireAsk::Handover(s) => Ask::Handover(collab::unpack(&s)?),
+            WireAsk::TakeOwnership(o) => Ask::TakeOwnership(Box::new(collab::unpack(&o)?)),
+            WireAsk::Status => Ask::Status,
         };
         let (reply, answer) = oneshot::channel();
         self.tx
@@ -455,6 +481,49 @@ pub fn start_lock(
         document: link.document,
         topic: link.topic,
         ask: request,
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Gives the real owner (back from away) the document as it is now: from whoever kept the
+/// edits in order meanwhile.
+pub fn start_handover(
+    iroh: &Iroh,
+    link: &ShareLink,
+    snapshot: &Snapshot,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = collab::pack(snapshot).map(|s| Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Handover(s),
+    });
+    let (endpoint, owner) = (iroh.endpoint(), link.owner.clone());
+    iroh.spawn(async move { ask(endpoint, owner, wire?).await })
+}
+
+/// Makes `to` the document's owner (Transfer ownership).
+pub fn start_transfer(
+    iroh: &Iroh,
+    to: EndpointId,
+    link: &ShareLink,
+    ownership: &Ownership,
+) -> IrohTask<Result<Verdict, String>> {
+    let wire = collab::pack(ownership).map(|o| Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::TakeOwnership(o),
+    });
+    let endpoint = iroh.endpoint();
+    iroh.spawn(async move { ask(endpoint, EndpointAddr::new(to), wire?).await })
+}
+
+/// Asks the link's owner whether they have the document open (a few bytes, where fetching it
+/// would be the whole document).
+pub fn start_status(iroh: &Iroh, link: &ShareLink) -> IrohTask<Result<Verdict, String>> {
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: WireAsk::Status,
     };
     iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
 }

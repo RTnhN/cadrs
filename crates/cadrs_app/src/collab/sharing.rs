@@ -11,6 +11,9 @@
 //! - Someone who may share (the **Share** checkbox) asks the owner to add people.
 //!   **Unshare with me** tells the owner and moves the copy to the trash.
 //! - [`ContactBook`]: people shared with or by, to pick in the dialog.
+//! - **Transfer ownership** ([`transfer`]): the owner gives the document, who it is shared
+//!   with and its comments to a member, whose cadrs takes it on and sends everyone the new
+//!   link; the old owner keeps it shared with them, with Can edit.
 
 use std::collections::HashMap;
 
@@ -21,7 +24,9 @@ use cadrs_core::{Document, DocumentId, DocumentMeta};
 use cadrs_net::bevy_iroh::Iroh;
 use cadrs_net::bevy_iroh::iroh::EndpointId;
 use cadrs_net::bevy_iroh::prelude::NetSender;
-use cadrs_net::{AccessChanged, Answer, Ask, Invite, Request, ShareLink, Verdict, transfer};
+use cadrs_net::{
+    AccessChanged, Answer, Ask, Invite, Ownership, Request, ShareLink, Verdict, transfer,
+};
 
 use super::live::Live;
 use crate::{ActiveDocument, DocumentStore, UserProfile};
@@ -33,9 +38,10 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Invites>()
         .init_resource::<PendingAsks>()
         .add_systems(Update, load_contacts)
+        .init_resource::<Transfers>()
         .add_systems(
             Update,
-            (deliver_invites, poll_asks).run_if(resource_exists::<Iroh>),
+            (deliver_invites, poll_asks, poll_transfers).run_if(resource_exists::<Iroh>),
         );
 }
 
@@ -375,12 +381,18 @@ pub(super) fn answer(world: &mut World, r: Request) {
                 Err(why) => Verdict::Refused(why),
             })
         }
+        Ask::TakeOwnership(o) => {
+            let o = (**o).clone();
+            take_ownership(world, r, o)
+        }
         Ask::Join
         | Ask::Propose { .. }
         | Ask::Comment(_)
         | Ask::CreateVersion { .. }
         | Ask::Lock { .. }
-        | Ask::Unlock { .. } => {}
+        | Ask::Unlock { .. }
+        | Ask::Handover(_)
+        | Ask::Status => {}
     }
 }
 
@@ -538,4 +550,182 @@ fn poll_asks(world: &mut World) {
             _ => {}
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Transfer ownership
+
+/// A room that once had a member's link but no longer does: the new owner sends everyone
+/// the link again (as an update, not news).
+const OLD_ROOM: [u8; 32] = [0; 32];
+
+/// Transfers on their way: the document, the new owner's id and name, and the answer.
+#[derive(Resource, Default)]
+pub struct Transfers(Vec<(DocumentId, String, String, Answer<Verdict>)>);
+
+/// Transfer ownership of `id` to member `to` (their cadrs must be running).
+pub fn transfer(world: &mut World, id: DocumentId, to: &str) -> Result<(), String> {
+    let (doc, meta) = read(world, id).ok_or("The document is not in the store")?;
+    if let Some(s) = &meta.shared {
+        return Err(format!("Only {} can transfer this document", s.owner_name));
+    }
+    let sharing = meta
+        .sharing
+        .clone()
+        .ok_or("Share the document with them first")?;
+    let member = sharing
+        .members
+        .iter()
+        .find(|m| m.id == to)
+        .cloned()
+        .ok_or("Only someone it is shared with can become its owner")?;
+    let to_id = to.parse::<EndpointId>().map_err(|e| e.to_string())?;
+    let link = link_for(world, id).ok_or("Sharing needs the network")?;
+    // The document as everyone has it: its edits numbered first.
+    super::live::number_own(world);
+    let doc = world
+        .get_resource::<Live>()
+        .filter(|l| l.document == id)
+        .and_then(|l| match &l.role {
+            super::live::Role::Owner(o) => Some(o.confirmed().clone()),
+            _ => None,
+        })
+        .unwrap_or(doc);
+    let store = world.resource::<DocumentStore>().0.clone();
+    let ownership = Ownership {
+        snapshot: cadrs_core::collab::Snapshot::of(&doc, 0, &store)?,
+        sharing,
+        comments: super::comments::for_document(world, id),
+        from_name: world.resource::<UserProfile>().display_name.clone(),
+    };
+    let task = transfer::start_transfer(world.resource::<Iroh>(), to_id, &link, &ownership);
+    world
+        .get_resource_or_init::<Transfers>()
+        .0
+        .push((id, member.id, member.name, task));
+    Ok(())
+}
+
+/// The old owner's side: the new owner took it, so the document is shared with this user now.
+pub(super) fn poll_transfers(world: &mut World) {
+    let Some(mut transfers) = world.get_resource_mut::<Transfers>() else {
+        return;
+    };
+    let mut done = Vec::new();
+    transfers
+        .0
+        .retain_mut(|(doc, id, name, task)| match task.try_take() {
+            Some(r) => {
+                done.push((*doc, id.clone(), name.clone(), r));
+                false
+            }
+            None => true,
+        });
+    for (doc, id, name, r) in done {
+        match r {
+            Ok(Verdict::Accepted(_)) => {
+                let Some((d, mut meta)) = read(world, doc) else {
+                    continue;
+                };
+                let Some(sharing) = meta.sharing.take() else {
+                    continue;
+                };
+                let Ok(owner) = id.parse::<EndpointId>() else {
+                    continue;
+                };
+                let link = ShareLink {
+                    document: doc,
+                    name: d.name.clone(),
+                    topic: sharing.topic,
+                    owner: cadrs_net::bevy_iroh::iroh::EndpointAddr::new(owner),
+                };
+                meta.shared = Some(cadrs_core::collab::SharedInfo {
+                    owner: id.clone(),
+                    owner_name: name.clone(),
+                    link: link.to_string(),
+                    permission: cadrs_core::collab::Permission::Edit,
+                    rights: None,
+                });
+                meta.owned_by = name.clone();
+                if let Err(e) = write_meta(world, doc, meta) {
+                    warn!("cannot keep the transfer: {e}");
+                }
+                crate::linked::toast(
+                    world,
+                    format!("\u{201c}{}\u{201d} now belongs to {name}", d.name),
+                );
+            }
+            Ok(Verdict::Refused(why)) | Err(why) => {
+                crate::linked::toast(world, format!("Cannot transfer it to {name}: {why}"))
+            }
+            Ok(_) => {}
+        }
+    }
+}
+
+/// The new owner's side: the document is this user's now.
+fn take_ownership(world: &mut World, r: Request, o: Ownership) {
+    let from = r.from.to_string();
+    let mine =
+        read(world, r.document).filter(|(_, m)| m.shared.as_ref().is_some_and(|s| s.owner == from));
+    let Some((_, mut meta)) = mine else {
+        return r.verdict(Verdict::Refused("Not from this document's owner".into()));
+    };
+    let doc = match o.snapshot.install() {
+        Ok(d) if d.id == r.document => d,
+        _ => return r.verdict(Verdict::Refused("Not this document".into())),
+    };
+    let me = world
+        .get_resource::<Iroh>()
+        .map(|i| i.id().to_string())
+        .unwrap_or_default();
+    let mut sharing = o.sharing;
+    sharing.members.retain(|m| m.id != me);
+    for m in &mut sharing.members {
+        if m.delivered.is_some() {
+            m.delivered = Some(OLD_ROOM);
+        }
+    }
+    sharing.members.push(Member {
+        id: from.clone(),
+        name: o.from_name.clone(),
+        permission: cadrs_core::collab::Permission::Edit,
+        rights: None,
+        delivered: Some(OLD_ROOM),
+    });
+    meta.shared = None;
+    meta.sharing = Some(sharing);
+    meta.owned_by = world.resource::<UserProfile>().id.clone();
+    note_contact(world, &from, &o.from_name);
+    super::comments::welcome(world, doc.id, o.comments);
+    let name = doc.name.clone();
+    let open = world
+        .get_resource::<ActiveDocument>()
+        .is_some_and(|d| d.doc.id == doc.id);
+    let saved = if open {
+        let store = world.resource::<DocumentStore>().0.clone();
+        let mut d = world.resource_mut::<ActiveDocument>();
+        d.apply_remote(doc, &o.from_name);
+        d.meta = Some(meta);
+        d.read_only = None;
+        d.save_now(&store).map_err(|e| e.to_string())
+    } else {
+        world
+            .resource::<DocumentStore>()
+            .0
+            .save(&doc, &meta)
+            .map_err(|e| e.to_string())
+    };
+    if let Err(e) = saved {
+        return r.verdict(Verdict::Refused(format!("Cannot keep it: {e}")));
+    }
+    world.resource_mut::<Invites>().next = 0.0;
+    crate::linked::toast(
+        world,
+        format!(
+            "{} made you the owner of \u{201c}{name}\u{201d}",
+            o.from_name
+        ),
+    );
+    r.verdict(Verdict::Accepted(0));
 }

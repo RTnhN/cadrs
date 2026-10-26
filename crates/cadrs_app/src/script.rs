@@ -106,7 +106,7 @@
 //!   copied). `join <link>`: Join shared document with that link. `share-dialog` opens the
 //!   share dialog; `share-with <cadrs ID> <name> edit|view`, `unshare <cadrs ID>` and
 //!   `share-link off|view|edit` do what it does; `follow <cadrs ID prefix>` follows a
-//!   collaborator. `branch <version index> <name>` branches from a version (and opens the
+//!   collaborator; `transfer <cadrs ID prefix>` transfers ownership to a member. `branch <version index> <name>` branches from a version (and opens the
 //!   branch); `workspace main` opens Main again.
 //! - `selection-readout`: shows the selection readout (off by default, see
 //!   [`crate::selection_readout`]).
@@ -165,6 +165,12 @@ fn run_script_commands(mut msgs: MessageReader<ScriptCommand>, mut commands: Com
             let rest = rest.to_string();
             commands
                 .queue(move |world: &mut World| crate::collab::script(world, "share-with", &rest));
+            continue;
+        }
+        if let Some(rest) = m.0.trim().strip_prefix("transfer ") {
+            let rest = rest.to_string();
+            commands
+                .queue(move |world: &mut World| crate::collab::script(world, "transfer", &rest));
             continue;
         }
         if let Some(rest) = m.0.trim().strip_prefix("unshare ") {
