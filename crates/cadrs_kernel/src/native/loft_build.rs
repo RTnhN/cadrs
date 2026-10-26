@@ -1000,7 +1000,8 @@ fn loft_exact(
 
 /// A solid loft through sections given as loops of profile pieces in their planes, whose
 /// pieces already correspond in order and direction (the same shape at stations along an
-/// edge): no alignment, no re-chaining.
+/// edge): no alignment, no re-chaining. A section with no pieces is a point, its plane's
+/// origin (an apex: at the first or last section only).
 pub fn loft_pieces(
     k: &NativeKernel,
     sections: &[(Vec<super::profile::Piece>, Plane)],
@@ -1008,6 +1009,10 @@ pub fn loft_pieces(
 ) -> Result<Built> {
     let mut secs: Vec<Sec> = Vec::new();
     for (pieces, plane) in sections {
+        if pieces.is_empty() {
+            secs.push(Sec::Point(plane.origin));
+            continue;
+        }
         let m = super::build::plane_map(plane, &V3::zeros(), 0.0);
         let parts = pieces
             .iter()

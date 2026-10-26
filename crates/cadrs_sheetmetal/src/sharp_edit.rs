@@ -488,6 +488,9 @@ pub struct FlangeOpts {
     pub radius: Option<f64>,
     /// `None`: automatic miter; else the miter angle (radians) of flange ends at a corner.
     pub miter: Option<f64>,
+    /// The gap between flanges meeting at a corner (`None`: the model's minimal gap at an
+    /// automatic miter's rip, none at a miter angle's square ends).
+    pub gap: Option<f64>,
     /// Hold adjacent edges: a partial flange moves only its own stretch of the wall's edge
     /// (false: the whole edge).
     pub hold_adjacent: bool,
@@ -736,7 +739,7 @@ pub fn flange(
     }
 
     // Miters where two flanges of the feature meet at a corner of the walls' sharps.
-    let gap = p.minimal_gap;
+    let gap = o.gap.unwrap_or(p.minimal_gap);
     let mut rips: Vec<(usize, usize, (P3, P3))> = Vec::new();
     let size = pend
         .iter()
@@ -875,12 +878,24 @@ pub fn flange(
                     // flange (90° − alpha to the second). A wall's end is square, so each stops
                     // where its inside meets the plane: past the edge's end by `T·(1 − cot α)`
                     // (negative: short of it) for the first, `T·(1 − tan α)` for the second;
-                    // 45° stops both at the edge's end.
+                    // 45° stops both at the edge's end. A gap given moves the plane gap/2 off to
+                    // each side: each end stops (gap/2)/sin of its angle to the plane sooner,
+                    // the two walls' insides the gap apart (none given: they meet).
+                    // (That is with the flanges' insides on the edges, Inner; their outsides on
+                    // them, Outer, puts the corner's outside on the edges' corner and each end
+                    // t shorter: the edge `a` from the inside moves the outside to t − a past
+                    // the edge.)
+                    let gap = o.gap.unwrap_or(0.0);
+                    let a = match o.alignment {
+                        FlangeAlignment::Outer => t,
+                        FlangeAlignment::Middle => t / 2.0,
+                        FlangeAlignment::Inner | FlangeAlignment::HoldLine => 0.0,
+                    };
                     let alpha = alpha.clamp(1e-3, FRAC_PI_2 - 1e-3);
                     let lim = 4.0 * t;
                     let ext = [
-                        (t * (1.0 - 1.0 / alpha.tan())).clamp(-size, lim),
-                        (t * (1.0 - alpha.tan())).clamp(-size, lim),
+                        (t - a - t / alpha.tan() - gap / 2.0 / alpha.sin()).clamp(-size, lim),
+                        (t - a - t * alpha.tan() - gap / 2.0 / alpha.cos()).clamp(-size, lim),
                     ];
                     for ((i, e), x) in [(k, ek), (l, el)].into_iter().zip(ext) {
                         let s0 = if e == 0 {

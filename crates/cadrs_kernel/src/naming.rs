@@ -397,10 +397,25 @@ pub fn name_faces_aliased(
         }
     };
     let input = |body: BodyId| inputs.iter().find(|(b, _)| *b == body).map(|(_, n)| *n);
+    // The path piece each side face of a sweep along several was swept along (the first, for a
+    // face merged across pieces): its sides are numbered by it, as a split face's pieces are.
+    let mut segment: HashMap<FaceId, u32> = HashMap::new();
+    for (f, origin) in &history.generated {
+        if let Origin::PathSegment { segment: k } = *origin {
+            let s = segment.entry(*f).or_insert(k);
+            *s = (*s).min(k);
+        }
+    }
     for (f, origin) in &history.generated {
         let o =
             match *origin {
-                Origin::ProfileCurve { region, curve } => Some(FaceOrigin::Side { region, curve }),
+                Origin::ProfileCurve { region, curve } => {
+                    let name = FaceName::new(op, FaceOrigin::Side { region, curve });
+                    let split = segment.get(f).map_or(0, |k| k + 1);
+                    set(&mut names, *f, FaceName { split, ..name });
+                    None
+                }
+                Origin::PathSegment { .. } => None,
                 Origin::StartCap { region } => Some(FaceOrigin::Cap { region, end: false }),
                 Origin::EndCap { region } => Some(FaceOrigin::Cap { region, end: true }),
                 Origin::FromEdge { body, edge } => {

@@ -587,12 +587,15 @@ impl Rebuilder {
         let (t, outward, hollow) = (x.thickness, x.outward, x.hollow);
         let shelled: Vec<PartId> = groups.iter().map(|g| g.0).collect();
         self.per_part(id, "Shell", state, bodies, |this, i, body| {
+            // Inward, the cavity's corners are sharp, the walls' faces extended until they
+            // meet, as Onshape shells (issue #105); outward, the walls round the body's
+            // convex edges as before.
             let spec = ShellSpec {
                 remove: faces[i].clone(),
                 thickness: t,
                 outward,
                 hollow,
-                sharp: false,
+                sharp: !outward,
             };
             this.kernel.shell_with(body, &spec)
         })

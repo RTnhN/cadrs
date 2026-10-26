@@ -685,8 +685,14 @@ pub fn solid_of(
         }
     }
 
-    // Every kernel face's name: from the history, else from where it lies.
+    // Every kernel face's name: from the history, else from where it lies. (An unstable name
+    // the history gives several faces, its inputs' unnamed faces each the first of its own, is
+    // each face's own index instead: they are different faces.)
     let own = op.and_then(|o| Some((o, geoms.get(&o)?)));
+    let mut repeats: HashMap<FaceName, u32> = HashMap::new();
+    for n in names.faces.iter().filter(|n| !n.is_stable()) {
+        *repeats.entry(*n).or_default() += 1;
+    }
     let face_names: Vec<FaceName> = (0..face_count)
         .map(|fi| {
             let named = names.faces.get(fi).copied().filter(FaceName::is_stable);
@@ -697,10 +703,15 @@ pub fn solid_of(
                     class_name(o, g, c)
                 })
                 .unwrap_or_else(|| {
-                    names.faces.get(fi).copied().unwrap_or(FaceName::new(
-                        op.unwrap_or_default(),
-                        FaceOrigin::Unnamed { index: fi as u32 },
-                    ))
+                    names
+                        .faces
+                        .get(fi)
+                        .copied()
+                        .filter(|n| repeats.get(n).is_none_or(|&k| k < 2))
+                        .unwrap_or(FaceName::new(
+                            op.unwrap_or_default(),
+                            FaceOrigin::Unnamed { index: fi as u32 },
+                        ))
                 })
         })
         .collect();
