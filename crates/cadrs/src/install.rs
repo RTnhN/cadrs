@@ -10,9 +10,11 @@
 //!   it), `~/.local/bin/cadrs` linked to it, and `~/.local/share/applications/cadrs.desktop` with
 //!   the icon. The window's Wayland app id is `cadrs` (see `cadrs_harness::default_plugins`),
 //!   which ties the window to this entry.
-//! - **macOS**: an app bundle, `~/Applications/cadrs.app` (`Contents/MacOS/` the executable and
-//!   `libraries/`, `Contents/Resources/cadrs.icns`, `Contents/Info.plist`), so Launchpad and
-//!   Spotlight find it. Not stripped: that would break the linker's ad-hoc code signature, which
+//! - **macOS**: an app bundle, `~/Applications/cadrs.app` (`Contents/MacOS/` the executable,
+//!   `Contents/Resources/` `libraries/` and `cadrs.icns`, `Contents/Info.plist`), so Launchpad and
+//!   Spotlight find it. `libraries/` isn't in `Contents/MacOS/`, which is for code: `codesign`
+//!   takes a folder there with a dot in its name (`Connector_PinSocket_2.54mm`) for a bundle and
+//!   refuses the app. Not stripped: that would break the linker's ad-hoc code signature, which
 //!   Apple Silicon needs to run it.
 //! - **Windows**: `%LOCALAPPDATA%\Programs\cadrs\` and a Start Menu shortcut (made through
 //!   PowerShell's `WScript.Shell`); the shortcut takes its icon from the executable's own icon
@@ -77,7 +79,8 @@ fn assemble(dir: &Path, exe: &Path, libraries: &Path) -> Result<(), String> {
     std::fs::copy(exe, &installed).map_err(|e| err("copy", exe, e))?;
     #[cfg(target_os = "linux")]
     let _ = std::process::Command::new("strip").arg(&installed).status();
-    copy_dir(libraries, &bin.join("libraries")).map_err(|e| err("copy", libraries, e))?;
+    let resources = dir.join(resources_dir());
+    copy_dir(libraries, &resources.join("libraries")).map_err(|e| err("copy", libraries, e))?;
     #[cfg(target_os = "macos")]
     write_bundle(dir)?;
     Ok(())
@@ -111,10 +114,19 @@ fn install_root() -> Result<PathBuf, String> {
     return Err("--install supports Linux, macOS and Windows".into());
 }
 
-/// Where the executable and `libraries/` go inside the install.
+/// Where the executable goes inside the install.
 fn bin_dir() -> &'static str {
     if cfg!(target_os = "macos") {
         "Contents/MacOS"
+    } else {
+        ""
+    }
+}
+
+/// Where `libraries/` goes inside the install.
+fn resources_dir() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Contents/Resources"
     } else {
         ""
     }

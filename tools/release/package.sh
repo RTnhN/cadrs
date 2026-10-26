@@ -35,7 +35,9 @@ case "$platform" in
         codesign --force --sign - "$tmp"
         "$tmp" --bundle "$dir/cadrs.app" --libraries "$root/libraries"
         rm -f "$tmp"
-        codesign --force --deep --sign - "$dir/cadrs.app"
+        # The executable is the bundle's only code (`libraries/` is in Contents/Resources), so
+        # no --deep: that signs whatever looks like nested code.
+        codesign --force --sign - "$dir/cadrs.app"
         codesign --verify --deep --strict "$dir/cadrs.app"
         cp README.md LICENSE-APACHE LICENSE-MIT "$dir/"
         ln -s /Applications "$dir/Applications"
