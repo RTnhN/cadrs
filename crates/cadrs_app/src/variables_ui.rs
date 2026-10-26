@@ -24,7 +24,7 @@ use bevy::prelude::*;
 use bevy::text::FontWeight;
 use cadrs_core::assembly::commands::{AddMateFeature, SetMateFeature};
 use cadrs_core::assembly::mate::{MateFeature, MateId, MateKind};
-use cadrs_core::commands::{AddFeature, ReplaceFeature, SetFeature};
+use cadrs_core::commands::{AddFeature, MoveFeature, ReplaceFeature, SetFeature};
 use cadrs_core::variables::{self, VariableFeature, VariableType};
 use cadrs_core::{ElementId, ElementKind, Feature, FeatureId, FeatureKind};
 use cadrs_sketch::units::{Quantity, Units, VarValue};
@@ -130,6 +130,116 @@ pub fn eval_field(
         Some(v) => v.eval(&units, text, q),
         None => units.eval(text, q),
     }
+}
+
+/// The variables a feature of a Part Studio sees: the Variable Studios', then the Variables
+/// above it (P3F.4; the rebuild gives it no others). A name defined twice is listed once, with
+/// the value that wins.
+pub fn defined_before(
+    world: &World,
+    element: ElementId,
+    feature: FeatureId,
+) -> Vec<(String, VarValue)> {
+    let Some(el) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.doc.element(element))
+    else {
+        return Vec::new();
+    };
+    let units = world.resource::<crate::WorkspaceUnits>().0;
+    let features = el.active_features();
+    let at = features
+        .iter()
+        .position(|f| f.id == feature)
+        .unwrap_or(features.len());
+    let mut out: Vec<(String, VarValue)> = Vec::new();
+    for (name, v) in variables::defined_with(&el.variable_base(), &features[..at], &units) {
+        match out.iter_mut().find(|(n, _)| *n == name) {
+            Some(slot) => slot.1 = v,
+            None => out.push((name, v)),
+        }
+    }
+    out
+}
+
+/// Whether a Variable of a Part Studio below `feature` defines `name` (so a feature above it
+/// can't use it yet).
+pub fn defined_below(world: &World, element: ElementId, feature: FeatureId, name: &str) -> bool {
+    let Some(el) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.doc.element(element))
+    else {
+        return false;
+    };
+    el.features()
+        .iter()
+        .skip_while(|f| f.id != feature)
+        .any(|f| matches!(&f.kind, FeatureKind::Variable(v) if v.name == name))
+}
+
+/// A name for a new Variable of `element`: `wanted` if it is a free variable name, else the
+/// first free `var_N`.
+pub fn free_name(world: &World, element: ElementId, wanted: &str) -> String {
+    let Some(el) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.doc.element(element))
+    else {
+        return wanted.to_string();
+    };
+    let taken = |n: &str| {
+        el.variable_base().iter().any(|(k, _)| k == n)
+            || el
+                .features()
+                .iter()
+                .any(|f| matches!(&f.kind, FeatureKind::Variable(v) if v.name == n))
+    };
+    if cadrs_sketch::units::is_variable_name(wanted) && !taken(wanted) {
+        return wanted.to_string();
+    }
+    (1..)
+        .map(|i| format!("var_{i}"))
+        .find(|n| !taken(n))
+        .unwrap_or_default()
+}
+
+/// Inserts the Variable `v` just above `feature` (one undo step, "Insert #name"); false if it
+/// couldn't be.
+pub fn insert_variable_above(
+    world: &mut World,
+    element: ElementId,
+    feature: FeatureId,
+    v: VariableFeature,
+) -> bool {
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return false;
+    };
+    let label = format!("Insert #{}", v.name);
+    let mark = doc.history.undo_len();
+    let id = FeatureId::new();
+    if let Err(e) = doc.execute(&AddFeature::variable(element, id, v)) {
+        warn!("cannot insert a variable: {e}");
+        return false;
+    }
+    let to = doc
+        .doc
+        .element(element)
+        .and_then(|e| e.features().iter().position(|f| f.id == feature));
+    if let Some(to) = to
+        && let Err(e) = doc.execute(&MoveFeature {
+            element,
+            feature: id,
+            to,
+            label: label.clone(),
+        })
+    {
+        warn!("cannot move the new variable above {feature:?}: {e}");
+        // Take the insertion back.
+        doc.undo();
+        doc.discard_since(mark);
+        return false;
+    }
+    doc.squash_since(mark, label);
+    true
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -109,7 +109,10 @@ pub use dialog_fields::{
     NumberField, NumberFieldCancel, NumberFieldCommit, NumberFieldEdit, NumberFieldState,
     OptionRow, Select, SelectChange, SelectState, Slider, SliderChange, SliderState, form_row,
 };
-pub use dim_edit::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditField};
+pub use dim_edit::{
+    DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditField, DimEditNewVariable,
+    DimEditVariable, DimEditVariables, complete_variable,
+};
 pub use doc_details::{
     LabelChip, details_caption, details_divider, details_header, details_value, side_tab,
 };
