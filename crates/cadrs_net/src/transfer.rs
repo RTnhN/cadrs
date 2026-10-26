@@ -27,10 +27,10 @@ use bevy_iroh::{
         protocol::{AcceptError, ProtocolHandler},
     },
 };
-use cadrs_core::DocumentId;
 use cadrs_core::collab::comments::{CommentOp, Comments};
 use cadrs_core::collab::sync::Change;
 use cadrs_core::collab::{self, Access, Snapshot};
+use cadrs_core::{DocumentId, ElementId};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::{mpsc, oneshot};
 
@@ -74,6 +74,13 @@ enum WireAsk {
         epoch: u64,
         name: String,
         description: String,
+    },
+    Lock {
+        element: ElementId,
+        take: bool,
+    },
+    Unlock {
+        element: ElementId,
     },
 }
 
@@ -142,6 +149,15 @@ pub enum Ask {
         epoch: u64,
         name: String,
         description: String,
+    },
+    /// Open a tab for oneself only (`take`: from whoever has it).
+    Lock {
+        element: ElementId,
+        take: bool,
+    },
+    /// Let the others edit it again.
+    Unlock {
+        element: ElementId,
     },
 }
 
@@ -227,6 +243,8 @@ impl Handler {
                 name,
                 description,
             },
+            WireAsk::Lock { element, take } => Ask::Lock { element, take },
+            WireAsk::Unlock { element } => Ask::Unlock { element },
         };
         let (reply, answer) = oneshot::channel();
         self.tx
@@ -415,6 +433,28 @@ pub fn start_create_version(
             name,
             description,
         },
+    };
+    iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
+}
+
+/// Asks the link's owner to open a tab for this user only (`take`: from whoever has it), or
+/// (`lock` false) to let the others edit it again.
+pub fn start_lock(
+    iroh: &Iroh,
+    link: &ShareLink,
+    element: ElementId,
+    lock: bool,
+    take: bool,
+) -> IrohTask<Result<Verdict, String>> {
+    let request = if lock {
+        WireAsk::Lock { element, take }
+    } else {
+        WireAsk::Unlock { element }
+    };
+    let wire = Wire {
+        document: link.document,
+        topic: link.topic,
+        ask: request,
     };
     iroh.spawn(ask(iroh.endpoint(), link.owner.clone(), wire))
 }

@@ -22,6 +22,7 @@ use crate::{ActiveDocument, AppClock, AppState, DocumentStore};
 
 pub mod comments;
 pub mod live;
+pub mod locks;
 pub mod presence;
 pub mod share_dialog;
 pub mod sharing;
@@ -35,6 +36,7 @@ impl Plugin for CollabPlugin {
             .add_systems(Update, poll_joins.run_if(resource_exists::<Iroh>));
         comments::plugin(app);
         live::plugin(app);
+        locks::plugin(app);
         presence::plugin(app);
         sharing::plugin(app);
         share_dialog::plugin(app);

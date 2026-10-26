@@ -509,6 +509,7 @@ fn serve(world: &mut World) {
             Ask::Propose { .. } => propose(world, r),
             Ask::Comment(_) => super::comments::answer(world, r),
             Ask::CreateVersion { .. } => super::versions::answer(world, r),
+            Ask::Lock { .. } | Ask::Unlock { .. } => super::locks::answer(world, r),
             _ => super::sharing::answer(world, r),
         }
     }
@@ -594,10 +595,21 @@ fn propose(world: &mut World, r: Request) {
         ));
     }
     number_own(world);
+    let author = r.from.to_string();
+    // A tab someone else has open for themselves (`super::locks`).
+    if let Some(name) = change
+        .footprint()
+        .0
+        .iter()
+        .find_map(|k| super::locks::held_against(world, *k, &author))
+    {
+        return r.verdict(Verdict::Refused(format!(
+            "{name} has that tab open: your change was undone"
+        )));
+    }
     let Some(mut live) = world.remove_resource::<Live>() else {
         return r.verdict(Verdict::Closed);
     };
-    let author = r.from.to_string();
     let author_name = peer_name(world, r.from);
     let verdict = match &mut live.role {
         Role::Owner(o) if live.document == r.document && o.epoch == epoch => {

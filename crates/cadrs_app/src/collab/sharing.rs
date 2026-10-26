@@ -375,7 +375,12 @@ pub(super) fn answer(world: &mut World, r: Request) {
                 Err(why) => Verdict::Refused(why),
             })
         }
-        Ask::Join | Ask::Propose { .. } | Ask::Comment(_) | Ask::CreateVersion { .. } => {}
+        Ask::Join
+        | Ask::Propose { .. }
+        | Ask::Comment(_)
+        | Ask::CreateVersion { .. }
+        | Ask::Lock { .. }
+        | Ask::Unlock { .. } => {}
     }
 }
 
