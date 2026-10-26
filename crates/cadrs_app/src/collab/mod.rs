@@ -1,33 +1,37 @@
 //! Sharing and collaboration, peer to peer ([`cadrs_net`]; Onshape's "Sharing and
 //! Collaboration").
 //!
-//! - **Share** (the document's top bar) makes the open document shareable and copies its link:
-//!   the room it is shared in is kept in its metadata ([`cadrs_core::collab::Sharing`]), so the
-//!   link stays the same. For now the link lets anyone who has it in with **Can edit**; the
-//!   Share dialog will offer the choice.
-//! - The owner's cadrs answers whoever opens the link ([`serve_requests`]), from the open
-//!   document or from the store, while link sharing is on.
-//! - **Create ▸ Join shared document…** on the documents page fetches a document by its link,
+//! - **Share** (the document's top bar) opens the share dialog ([`share_dialog`]): people to
+//!   share with, by their cadrs ID, with **Can edit** or **Can view** and the checkboxes; and
+//!   link sharing. Who the owner shares with is kept in the document's metadata
+//!   ([`cadrs_core::collab::Sharing`]) and gets the link from the owner's cadrs ([`sharing`]).
+//! - **Create ▸ Join shared document…** on the documents page fetches a document by a link,
 //!   keeps it in the store marked as shared ([`cadrs_core::collab::SharedInfo`]: it is listed
-//!   under **Shared with me**) and opens it. Until edits travel between peers it opens
-//!   read-only.
+//!   under **Shared with me**) and opens it. Someone shared with by name gets it there
+//!   without asking.
+//! - Opened, a shared document is edited together ([`live`]).
 
 use bevy::prelude::*;
 use cadrs_core::DocumentMeta;
-use cadrs_core::collab::{Permission, SharedInfo, Sharing};
-use cadrs_net::bevy_iroh::{Iroh, IrohTask};
-use cadrs_net::{ShareLink, Welcome, transfer};
+use cadrs_core::collab::{Permission, Rights, SharedInfo};
+use cadrs_net::bevy_iroh::Iroh;
+use cadrs_net::{Answer, ShareLink, Welcome, transfer};
 
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore};
 
 pub mod live;
+pub mod share_dialog;
+pub mod sharing;
 
 pub struct CollabPlugin;
 
 impl Plugin for CollabPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Joins>().add_systems(Update, poll_joins);
+        app.init_resource::<Joins>()
+            .add_systems(Update, poll_joins.run_if(resource_exists::<Iroh>));
         live::plugin(app);
+        sharing::plugin(app);
+        share_dialog::plugin(app);
     }
 }
 
@@ -40,24 +44,60 @@ pub fn read_only_reason(shared: &SharedInfo) -> String {
     )
 }
 
-/// A fresh room topic.
-fn random_topic() -> [u8; 32] {
-    let mut t = [0; 32];
-    t[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    t[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    t
+/// True, with a toast saying why, when the open document is shared with this user without
+/// the right `what` asks for (Copy, Export: their own cadrs keeps the owner's checkboxes).
+pub fn lacks(world: &mut World, right: fn(&Rights) -> bool, what: &str) -> bool {
+    let shared = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.meta.as_ref()?.shared.clone());
+    match shared {
+        Some(s) if !right(&s.access().rights) => {
+            let text = format!("{} hasn't let you {what} this document", s.owner_name);
+            crate::linked::toast(world, text);
+            true
+        }
+        _ => false,
+    }
 }
 
-/// Share: the open document's link, on the clipboard.
+/// The **Share** button: the share dialog, for the owner or someone who may share.
+pub fn open_share(world: &mut World) {
+    if world.get_resource::<Iroh>().is_none() {
+        crate::linked::toast(
+            world,
+            "Sharing needs the network, which is off (CADRS_NET=0)",
+        );
+        return;
+    }
+    let Some((id, meta)) = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| Some((d.doc.id, d.meta.clone()?)))
+    else {
+        crate::linked::toast(world, "Only a saved document can be shared");
+        return;
+    };
+    if let Some(s) = &meta.shared
+        && !s.access().rights.share
+    {
+        crate::linked::toast(
+            world,
+            format!("Only {} can share this document", s.owner_name),
+        );
+        return;
+    }
+    share_dialog::open(world, id);
+}
+
+/// Link sharing on with Can edit, the link on the clipboard (the `share` script command).
 pub fn share_current(world: &mut World) {
-    let text = match make_link(world) {
+    let Some(id) = world.get_resource::<ActiveDocument>().map(|d| d.doc.id) else {
+        return;
+    };
+    let text = match sharing::set_link(world, id, Some(Permission::Edit), true)
+        .and_then(|()| sharing::link_for(world, id).ok_or("Sharing needs the network".into()))
+    {
         Ok(link) => {
-            info!("share link: {link}");
-            if let Some(mut clip) = world.get_resource_mut::<bevy::clipboard::Clipboard>()
-                && let Err(e) = clip.set_text(link.to_string())
-            {
-                warn!("clipboard: {e:?}");
-            }
+            copy_link(world, &link);
             "Link copied: anyone with it can open and edit this document".to_string()
         }
         Err(why) => why,
@@ -65,45 +105,59 @@ pub fn share_current(world: &mut World) {
     crate::linked::toast(world, text);
 }
 
-/// The open document's link, sharing it (and saving that) if it wasn't yet.
-fn make_link(world: &mut World) -> Result<ShareLink, String> {
-    let owner = world
-        .get_resource::<Iroh>()
-        .and_then(Iroh::addr)
-        .ok_or("Sharing needs the network, which is off (CADRS_NET=0)")?;
-    let store = world.resource::<DocumentStore>().0.clone();
-    let mut d = world.resource_mut::<ActiveDocument>();
-    let (document, name) = (d.doc.id, d.doc.name.clone());
-    let meta = d
-        .meta
-        .as_mut()
-        .ok_or("Only a saved document can be shared")?;
-    if let Some(shared) = &meta.shared {
-        return Err(format!(
-            "Only {} can share this document",
-            shared.owner_name
-        ));
+/// The sharing script commands (`crate::script`): `share-with <cadrs ID> <name> edit|view`,
+/// `unshare <cadrs ID>`, `share-link off|view|edit`, on the open document.
+pub fn script(world: &mut World, command: &str, args: &str) {
+    let Some(id) = world.get_resource::<ActiveDocument>().map(|d| d.doc.id) else {
+        return;
+    };
+    let words: Vec<&str> = args.split_whitespace().collect();
+    let permission = |w: Option<&&str>| match w.copied() {
+        Some("view") => Permission::View,
+        _ => Permission::Edit,
+    };
+    let r = match (command, words.as_slice()) {
+        ("share-with", [member, name, rest @ ..]) => {
+            let member = cadrs_core::collab::Member {
+                id: member.to_string(),
+                name: name.to_string(),
+                permission: permission(rest.first()),
+                rights: None,
+                delivered: None,
+            };
+            // As the dialog does: someone it is shared with asks the owner.
+            let shared = sharing::read(world, id).is_some_and(|(_, m)| m.shared.is_some());
+            if shared {
+                sharing::ask_owner_to_share(world, id, member)
+            } else {
+                sharing::share_with(world, id, member, String::new())
+            }
+        }
+        ("unshare", [member]) => sharing::unshare(world, id, member),
+        ("share-link", ["off"]) => sharing::set_link(world, id, None, false),
+        ("share-link", [p]) => sharing::set_link(world, id, Some(permission(Some(p))), true),
+        _ => Err(format!("{command} {args}: not understood")),
+    };
+    if let Err(why) = r {
+        warn!("{command}: {why}");
     }
-    let sharing = meta
-        .sharing
-        .get_or_insert_with(|| Sharing::new(random_topic()));
-    sharing.link.get_or_insert(Permission::Edit);
-    let topic = sharing.topic;
-    d.save_now(&store)
-        .map_err(|e| format!("Cannot share the document: {e}"))?;
-    Ok(ShareLink {
-        document,
-        name,
-        topic,
-        owner,
-    })
 }
 
-/// Documents being fetched by their links.
-#[derive(Resource, Default)]
-struct Joins(Vec<(ShareLink, IrohTask<Result<Welcome, String>>)>);
+/// Puts `link` on the clipboard (and in the log, for scripts).
+pub fn copy_link(world: &mut World, link: &ShareLink) {
+    info!("share link: {link}");
+    if let Some(mut clip) = world.get_resource_mut::<bevy::clipboard::Clipboard>()
+        && let Err(e) = clip.set_text(link.to_string())
+    {
+        warn!("clipboard: {e:?}");
+    }
+}
 
-/// Join shared document: fetches the document a link names.
+/// Documents being fetched by their links: whether to open each when it arrives.
+#[derive(Resource, Default)]
+struct Joins(Vec<(ShareLink, bool, Answer<Welcome>)>);
+
+/// Join shared document: fetches the document a link names, and opens it.
 pub fn start_join(world: &mut World, text: &str) {
     let link = match text.parse::<ShareLink>() {
         Ok(l) => l,
@@ -125,32 +179,52 @@ pub fn start_join(world: &mut World, text: &str) {
     }
     let task = transfer::start_fetch(iroh, link.clone());
     let text = format!("Joining \u{201c}{}\u{201d}…", link.name);
-    world.resource_mut::<Joins>().0.push((link, task));
+    world.resource_mut::<Joins>().0.push((link, true, task));
     crate::linked::toast(world, text);
+}
+
+/// Fetches a document shared with this user by name, into Shared with me.
+pub fn fetch_in_background(world: &mut World, link: ShareLink) {
+    if world
+        .resource::<Joins>()
+        .0
+        .iter()
+        .any(|(l, ..)| l.document == link.document)
+    {
+        return;
+    }
+    let task = transfer::start_fetch(world.resource::<Iroh>(), link.clone());
+    world.resource_mut::<Joins>().0.push((link, false, task));
 }
 
 fn poll_joins(world: &mut World) {
     let mut done = Vec::new();
-    world.resource_mut::<Joins>().0.retain_mut(|(link, task)| {
-        let Some(r) = task.try_take() else {
-            return true;
-        };
-        done.push((link.clone(), r));
-        false
-    });
-    for (link, r) in done {
+    world
+        .resource_mut::<Joins>()
+        .0
+        .retain_mut(|(link, open, task)| {
+            let Some(r) = task.try_take() else {
+                return true;
+            };
+            done.push((link.clone(), *open, r));
+            false
+        });
+    for (link, open, r) in done {
         match r.and_then(|w| keep_joined(world, &link, w)) {
             Ok(id) => {
-                // Opened at once from the documents page; from anywhere else it waits in Shared
-                // with me.
-                if *world.resource::<State<AppState>>().get() == AppState::Landing {
+                // Opened at once from the documents page; otherwise it waits in Shared with me.
+                let landing = *world.resource::<State<AppState>>().get() == AppState::Landing;
+                if open && landing {
                     crate::landing::open_document(world, id);
-                } else {
+                } else if landing {
+                    crate::landing::reload_library(world);
+                } else if open {
                     let text = format!("\u{201c}{}\u{201d} is in Shared with me", link.name);
                     crate::linked::toast(world, text);
                 }
             }
-            Err(why) => crate::linked::toast(world, format!("Cannot join: {why}")),
+            Err(why) if open => crate::linked::toast(world, format!("Cannot join: {why}")),
+            Err(why) => info!("cannot fetch {} yet: {why}", link.name),
         }
     }
 }
@@ -167,11 +241,13 @@ fn keep_joined(
     if doc.id != link.document {
         return Err("The owner sent another document".into());
     }
+    sharing::note_contact(world, &link.owner.id.to_string(), &welcome.owner_name);
     let shared = SharedInfo {
         owner: link.owner.id.to_string(),
         owner_name: welcome.owner_name.clone(),
         link: link.to_string(),
-        permission: welcome.permission,
+        permission: welcome.access.permission,
+        rights: Some(welcome.access.rights),
     };
     let earlier = store.read(doc.id).ok().map(|f| f.meta);
     let mut meta = earlier

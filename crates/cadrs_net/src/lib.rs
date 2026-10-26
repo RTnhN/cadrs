@@ -7,7 +7,7 @@
 //!   user's **cadrs ID** ([`cadrs_id`]).
 //! - A document is shared by a [`ShareLink`]; whoever opens one fetches the document from its
 //!   owner over [`transfer`], and proposes their edits the same way. The owner's app decides
-//!   through [`OwnerRequests`], and its numbered edits ([`Sequenced`]) reach everyone over
+//!   through [`Requests`], and its numbered edits ([`Sequenced`]) reach everyone over
 //!   the document's room ([`session`]).
 //! - Only bevy_iroh's transport, rooms and typed messages are used; its entity replication of
 //!   `Transform` is off and its voice and video features are not built.
@@ -24,8 +24,12 @@ use bevy_iroh::{Identity, Iroh, IrohPlugin, Relays};
 
 pub use bevy_iroh;
 pub use link::ShareLink;
-pub use session::Sequenced;
-pub use transfer::{Ask, OwnerRequest, OwnerRequests, Verdict, Welcome};
+pub use session::{AccessChanged, Sequenced};
+
+/// A question to another peer on its way: polled from a system until the answer (or why
+/// there is none) arrives.
+pub type Answer<T> = bevy_iroh::IrohTask<Result<T, String>>;
+pub use transfer::{Ask, Invite, Request, Requests, Verdict, Welcome};
 
 /// The node's secret key, in the documents folder (32 raw bytes, mode 0600). Each data
 /// directory is a peer of its own, so two instances with their own `--data-dir` can share
@@ -61,6 +65,9 @@ impl Plugin for NetPlugin {
         // Documents travel as their own messages, never as replicated entities.
         iroh.replicate_transform = false;
         app.add_plugins(iroh).insert_resource(requests);
+        if let Some(id) = cadrs_id(app.world().get_resource::<Iroh>()) {
+            info!("cadrs ID: {id}");
+        }
         session::register(app);
     }
 }

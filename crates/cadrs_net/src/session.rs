@@ -7,7 +7,7 @@ use bevy_iroh::TopicId;
 use bevy_iroh::message::MessageAppExt;
 use bevy_iroh::prelude::Room;
 use cadrs_core::DocumentId;
-use cadrs_core::collab::{self, sync::Change};
+use cadrs_core::collab::{self, Access, sync::Change};
 use serde::{Deserialize, Serialize};
 
 use crate::link::ShareLink;
@@ -62,8 +62,30 @@ impl Sequenced {
     }
 }
 
+/// Who may do what now, from the owner: each member's access and the link's. Sent to the
+/// room whenever the owner changes the sharing, so everyone in it follows at once (and
+/// someone removed knows to leave).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccessChanged {
+    pub document: DocumentId,
+    pub members: Vec<(String, Access)>,
+    pub link: Option<Access>,
+}
+
+impl AccessChanged {
+    /// What `peer` may do now, if anything.
+    pub fn access(&self, peer: &str) -> Option<Access> {
+        self.members
+            .iter()
+            .find(|(id, _)| id == peer)
+            .map(|(_, a)| *a)
+            .or(self.link)
+    }
+}
+
 pub(crate) fn register(app: &mut App) {
-    app.add_net_message::<Sequenced>();
+    app.add_net_message::<Sequenced>()
+        .add_net_message::<AccessChanged>();
 }
 
 /// The owner's room for a document shared in `topic`: always the same topic, so links keep

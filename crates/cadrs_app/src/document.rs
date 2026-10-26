@@ -614,10 +614,10 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
                     .label("Share")
                     .primary()
                     .small()
-                    .tooltip("Share this document: copies a link to it")
+                    .tooltip("Share this document")
                     .build(t),
                 observe(|_: On<Activate>, mut commands: Commands| {
-                    commands.queue(crate::collab::share_current);
+                    commands.queue(crate::collab::open_share);
                 }),
             ))
             .entry::<Node>()

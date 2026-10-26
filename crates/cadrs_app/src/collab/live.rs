@@ -18,13 +18,13 @@
 
 use bevy::prelude::*;
 use cadrs_core::collab::sync::{Incoming, Key, Refusal, Replica, Sequencer};
-use cadrs_core::collab::{Permission, Snapshot};
+use cadrs_core::collab::{Access, Permission, Snapshot};
 use cadrs_core::history_log::document_hash;
 use cadrs_core::{Document, DocumentId};
 use cadrs_net::bevy_iroh::iroh::EndpointId;
 use cadrs_net::bevy_iroh::prelude::{NetSender, Peer, PeerJoined, PeerLeft, Received};
 use cadrs_net::bevy_iroh::{Iroh, IrohTask};
-use cadrs_net::{Ask, OwnerRequest, OwnerRequests, Sequenced, ShareLink, Verdict, Welcome};
+use cadrs_net::{AccessChanged, Ask, Request, Requests, Sequenced, ShareLink, Verdict, Welcome};
 use cadrs_net::{session, transfer};
 
 use crate::{ActiveDocument, AppState, DocumentStore, UserProfile};
@@ -32,6 +32,8 @@ use crate::{ActiveDocument, AppState, DocumentStore, UserProfile};
 /// The owner numbers its own edits at most this often: a drag that changes the document every
 /// frame goes out as a few edits a second, not sixty.
 const OWN_EVERY: f64 = 0.1;
+/// How long the owner's old room stays after the document moved to a new one.
+const LINGER: f64 = 3.0;
 /// How long numbered edits may wait for a missing one before the copy is fetched again.
 const GAP_PATIENCE: f64 = 5.0;
 /// How often a peer whose owner is away joins the room again (gossip meets only peers it
@@ -42,13 +44,23 @@ pub(super) fn plugin(app: &mut App) {
     // Registered here as well: without the network (scenarios, tests, CADRS_NET=0) there is
     // no node, and these systems don't run, but their parameters still need the messages.
     app.add_message::<Received<Sequenced>>()
+        .add_message::<Received<AccessChanged>>()
         .add_message::<PeerJoined>()
         .add_message::<PeerLeft>()
         .init_resource::<Outbox>()
+        .init_resource::<Leaving>()
         .init_resource::<Inbox>()
         .add_systems(
             Update,
-            (start_stop, collect, own_edits, serve, guest, send)
+            (
+                start_stop,
+                collect,
+                own_edits,
+                serve,
+                guest,
+                send,
+                leave_rooms,
+            )
                 .chain()
                 .run_if(resource_exists::<Iroh>),
         );
@@ -79,7 +91,7 @@ pub struct Owner {
 pub struct Guest {
     pub link: ShareLink,
     pub owner_name: String,
-    pub permission: Permission,
+    pub access: Access,
     pub state: GuestState,
 }
 
@@ -100,6 +112,8 @@ pub enum GuestState {
     },
     /// The owner is away (or has the document closed): the last copy, read-only.
     Away { since: f64 },
+    /// The owner stopped sharing it with this user: the last copy, read-only, for good.
+    Removed,
 }
 
 /// True while the open document is shared live (with others or waiting for them).
@@ -110,6 +124,42 @@ pub fn together(world: &World) -> bool {
 impl Live {
     pub fn is_owner(&self) -> bool {
         matches!(self.role, Role::Owner(_))
+    }
+
+    /// The room's entity.
+    pub fn room(&self) -> Entity {
+        self.room
+    }
+
+    /// This user's access: everything for the owner.
+    pub fn access(&self) -> Access {
+        match &self.role {
+            Role::Owner(_) => Access::owner(),
+            Role::Guest(g) => g.access,
+        }
+    }
+}
+
+/// Rooms on their way out: each with when to leave it.
+#[derive(Resource, Default)]
+struct Leaving(Vec<(Entity, f64)>);
+
+fn leave_rooms(world: &mut World) {
+    let t = now(world);
+    let gone: Vec<Entity> = {
+        let mut l = world.resource_mut::<Leaving>();
+        let gone =
+            l.0.iter()
+                .filter(|(_, at)| *at <= t)
+                .map(|(e, _)| *e)
+                .collect();
+        l.0.retain(|(_, at)| *at > t);
+        gone
+    };
+    for e in gone {
+        if let Ok(e) = world.get_entity_mut(e) {
+            e.despawn();
+        }
     }
 }
 
@@ -122,6 +172,7 @@ struct Outbox(Vec<Sequenced>);
 #[derive(Resource, Default)]
 struct Inbox {
     edits: Vec<(EndpointId, Sequenced)>,
+    access: Vec<(EndpointId, AccessChanged)>,
     joined: Vec<(Entity, EndpointId)>,
     left: Vec<(Entity, EndpointId)>,
 }
@@ -168,7 +219,10 @@ fn guest_read_only(g: &Guest) -> Option<String> {
         GuestState::Away { .. } => Some(format!(
             "{owner} isn't sharing this document right now: you're viewing the last copy"
         )),
-        GuestState::Following { .. } if g.permission == Permission::View => Some(format!(
+        GuestState::Removed => Some(format!(
+            "{owner} no longer shares this document with you: this is the last copy"
+        )),
+        GuestState::Following { .. } if g.access.permission == Permission::View => Some(format!(
             "You can view this document; {owner} hasn't given you edit access"
         )),
         GuestState::Following { .. } => None,
@@ -186,7 +240,7 @@ enum Want {
     Guest {
         link: ShareLink,
         owner_name: String,
-        permission: Permission,
+        access: Access,
     },
 }
 
@@ -201,7 +255,7 @@ fn wanted(world: &World) -> Option<(DocumentId, String, Want)> {
         (Some(s), _) => Want::Guest {
             link: s.link.parse().ok()?,
             owner_name: s.owner_name.clone(),
-            permission: s.permission,
+            access: s.access(),
         },
         (None, Some(s)) => Want::Owner { topic: s.topic },
         (None, None) => return None,
@@ -234,9 +288,14 @@ fn start_stop(world: &mut World) {
     if same {
         return;
     }
-    if let Some((_, _, _, room)) = current {
+    if let Some((_, owner, _, room)) = current {
         world.remove_resource::<Live>();
-        if let Ok(e) = world.get_entity_mut(room) {
+        // The owner's old room stays a moment, for the news of who may do what to get out
+        // (the room moves when someone is removed); anyone else's goes at once.
+        if owner {
+            let until = now(world) + LINGER;
+            world.resource_mut::<Leaving>().0.push((room, until));
+        } else if let Ok(e) = world.get_entity_mut(room) {
             e.despawn();
         }
     }
@@ -262,7 +321,7 @@ fn start_stop(world: &mut World) {
         Want::Guest {
             link,
             owner_name,
-            permission,
+            access,
         } => {
             let room = session::join_room(&mut world.commands(), &link);
             let task = transfer::start_fetch(world.resource::<Iroh>(), link.clone());
@@ -272,7 +331,7 @@ fn start_stop(world: &mut World) {
                 role: Role::Guest(Guest {
                     link,
                     owner_name,
-                    permission,
+                    access,
                     state: GuestState::Connecting {
                         task,
                         early: Vec::new(),
@@ -294,12 +353,16 @@ fn start_stop(world: &mut World) {
 
 fn collect(
     mut rx: MessageReader<Received<Sequenced>>,
+    mut access: MessageReader<Received<AccessChanged>>,
     mut joined: MessageReader<PeerJoined>,
     mut left: MessageReader<PeerLeft>,
     mut inbox: ResMut<Inbox>,
 ) {
     for m in rx.read() {
         inbox.edits.push((m.from, m.msg.clone()));
+    }
+    for m in access.read() {
+        inbox.access.push((m.from, m.msg.clone()));
     }
     inbox.joined.extend(joined.read().map(|j| (j.room, j.id)));
     inbox.left.extend(left.read().map(|l| (l.room, l.id)));
@@ -382,7 +445,7 @@ fn number_own(world: &mut World) {
 /// Answers what peers ask: the document (open or stored), and edits to number.
 fn serve(world: &mut World) {
     let Some(requests) = world
-        .get_resource_mut::<OwnerRequests>()
+        .get_resource_mut::<Requests>()
         .map(|mut r| r.drain())
         .filter(|r| !r.is_empty())
     else {
@@ -392,6 +455,7 @@ fn serve(world: &mut World) {
         match r.ask {
             Ask::Join => join(world, r),
             Ask::Propose { .. } => propose(world, r),
+            _ => super::sharing::answer(world, r),
         }
     }
 }
@@ -400,7 +464,7 @@ fn serve(world: &mut World) {
 /// refusal.
 fn sharing_for(
     world: &World,
-    r: &OwnerRequest,
+    r: &Request,
 ) -> Result<(Document, cadrs_core::collab::Sharing, bool), String> {
     let store = world.resource::<DocumentStore>().0.clone();
     let open = world
@@ -422,12 +486,12 @@ fn sharing_for(
     }
 }
 
-fn join(world: &mut World, r: OwnerRequest) {
+fn join(world: &mut World, r: Request) {
     let owner_name = world.resource::<UserProfile>().display_name.clone();
     let store = world.resource::<DocumentStore>().0.clone();
     let answer = sharing_for(world, &r).and_then(|(doc, sharing, _)| {
-        let permission = sharing
-            .permission(&r.from.to_string())
+        let access = sharing
+            .access(&r.from.to_string())
             .ok_or("Link sharing is off for this document")?;
         // The numbered copy while the owner edits it; the stored one (session 0, which
         // numbers nothing) while it is closed.
@@ -439,7 +503,7 @@ fn join(world: &mut World, r: OwnerRequest) {
         };
         let snapshot = Snapshot::of(&doc, seq, &store)?;
         Ok(Welcome {
-            permission,
+            access,
             owner_name,
             epoch,
             snapshot,
@@ -452,7 +516,7 @@ fn join(world: &mut World, r: OwnerRequest) {
     r.welcome(answer);
 }
 
-fn propose(world: &mut World, r: OwnerRequest) {
+fn propose(world: &mut World, r: Request) {
     let Ask::Propose {
         epoch,
         id,
@@ -585,6 +649,26 @@ fn step(world: &mut World, g: &mut Guest, document: DocumentId, room: &mut Entit
         .collect();
     let owner_back = inbox.joined.contains(&(*room, owner));
     let owner_gone = inbox.left.contains(&(*room, owner));
+    // The owner changed who may do what: this user's part of it.
+    let me = world.resource::<Iroh>().id().to_string();
+    if let Some((_, a)) = inbox
+        .access
+        .iter()
+        .rev()
+        .find(|(from, a)| *from == owner && a.document == document)
+    {
+        match a.access(&me) {
+            Some(access) => {
+                g.access = access;
+                note_access(world, access);
+            }
+            None => {
+                info!("{} stopped sharing {}", g.owner_name, g.link.name);
+                g.state = GuestState::Removed;
+                return;
+            }
+        }
+    }
     let t = now(world);
     match &mut g.state {
         GuestState::Connecting { task, early } => {
@@ -615,6 +699,7 @@ fn step(world: &mut World, g: &mut Guest, document: DocumentId, room: &mut Entit
             follow(world, g, incoming, t);
             propose_next(world, g, changed);
         }
+        GuestState::Removed => {}
         GuestState::Away { since } => {
             if owner_back || !incoming.is_empty() {
                 reconnect(world, g);
@@ -634,7 +719,7 @@ fn welcome(world: &mut World, g: &mut Guest, w: Welcome) -> Result<(), String> {
         return Err("The owner sent another document".into());
     }
     g.owner_name = w.owner_name.clone();
-    g.permission = w.permission;
+    g.access = w.access;
     let lost = match &g.state {
         GuestState::Following { replica, .. } => {
             replica.in_flight() || world.resource::<ActiveDocument>().doc != *replica.confirmed()
@@ -652,7 +737,8 @@ fn welcome(world: &mut World, g: &mut Guest, w: Welcome) -> Result<(), String> {
     if let Some(meta) = active.meta.as_mut()
         && let Some(s) = meta.shared.as_mut()
     {
-        s.permission = w.permission;
+        s.permission = w.access.permission;
+        s.rights = Some(w.access.rights);
         s.owner_name = w.owner_name.clone();
     }
     g.state = if w.epoch == 0 {
@@ -764,7 +850,7 @@ fn propose_next(world: &mut World, g: &mut Guest, changed: bool) {
             }
         }
     }
-    if !check || g.permission != Permission::Edit {
+    if !check || g.access.permission != Permission::Edit {
         return;
     }
     let local = world.resource::<ActiveDocument>().doc.clone();
@@ -772,5 +858,16 @@ fn propose_next(world: &mut World, g: &mut Guest, changed: bool) {
         let task =
             transfer::start_propose(world.resource::<Iroh>(), &g.link, *epoch, id, base, &change);
         *sending = Some((id, task));
+    }
+}
+
+/// Keeps the access the owner gave in the shared copy's metadata.
+fn note_access(world: &mut World, access: Access) {
+    let mut active = world.resource_mut::<ActiveDocument>();
+    if let Some(s) = active.meta.as_mut().and_then(|m| m.shared.as_mut())
+        && s.access() != access
+    {
+        s.permission = access.permission;
+        s.rights = Some(access.rights);
     }
 }

@@ -273,6 +273,9 @@ fn strip_instance_number(name: &str) -> String {
 
 /// Opens the dialog for `source`.
 pub fn open(world: &mut World, source: ExportSource) {
+    if crate::collab::lacks(world, |r| r.export, "export") {
+        return;
+    }
     let Some(tab) = world
         .get_resource::<ActiveDocument>()
         .and_then(|d| d.active_element().map(|e| e.name.clone()))
