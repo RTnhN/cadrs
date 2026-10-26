@@ -189,8 +189,8 @@ struct Rule {
 
 impl Rule {
     /// "Steel (mm)": 2.5 thick, the bend radius the thickness, K 0.44 (reference part 74's
-    /// bend allowance (π/2)(R + K t) = 5.654866776), walls at a corner the thickness apart
-    /// (69's tray).
+    /// bend allowance (π/2)(R + K t) = 5.654866776), a minimal gap of 0.01 (73's flat hem,
+    /// 75's flange beside another).
     fn named(name: &str) -> R<Rule> {
         match name {
             "Steel (mm)" => Ok(Rule {
@@ -207,7 +207,7 @@ impl Rule {
         p.thickness = self.thickness;
         p.bend_radius = self.bend_radius.unwrap_or(self.thickness);
         p.k_factor = self.k_factor;
-        p.minimal_gap = self.thickness;
+        p.minimal_gap = 0.01;
         p
     }
 }
@@ -1473,11 +1473,8 @@ impl Recipe {
                     FeatureKind::SheetMetal(SheetMetalFeature::Hem(HemFeature {
                         edges,
                         kind: HemKind::Straight,
-                        // SolidCraft's flat hem has a gap of 0.01 (its rule's hem gap): an inner
-                        // radius of that.
-                        flattened: false,
-                        radius: 0.01,
-                        radius_expr: "0.01 mm".into(),
+                        // Flat, the rule's minimal gap inside.
+                        flattened: true,
                         total: l,
                         total_expr: format!("{l} mm"),
                         // Its bend starts at the edge ("StartEdge").
