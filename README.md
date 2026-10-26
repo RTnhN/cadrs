@@ -11,7 +11,14 @@ build parts from features, put them together in assemblies, and make drawings fr
 
 ## Install
 
-Prebuilt Linux and Windows builds are on [GitHub Releases](https://github.com/rvdende/cadrs/releases).
+Prebuilt Linux, Windows and macOS builds are on [GitHub Releases](https://github.com/rvdende/cadrs/releases).
+
+On macOS, open the `.dmg` and drag cadrs to Applications. It runs on Apple silicon and Intel
+Macs (macOS 11 or later). The app isn't signed with an Apple Developer ID yet, so the first time
+macOS won't open it: right-click cadrs in Applications and choose Open, then Open again (on
+macOS 15 and later, open it once, then choose Open Anyway in System Settings › Privacy &
+Security). A newer release is installed the same way, over the old app.
+
 To install from source, with the [build prerequisites](#building) in place:
 
 ```sh

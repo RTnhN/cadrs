@@ -53,6 +53,9 @@ Usage:
   cadrs --install
       Installs this build for the current user, with a launcher entry (Linux, macOS, Windows;
       `cargo install-local`).
+  cadrs --bundle <cadrs.app> [--libraries <dir>]
+      Makes the macOS app bundle of this build, as --install would, without installing it (the
+      macOS release, tools/release/package.sh).
 
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
@@ -75,6 +78,28 @@ fn main() -> AppExit {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{HELP}");
         return AppExit::Success;
+    }
+    // `--bundle <app>`: the macOS app bundle of this build (`install.rs`).
+    if let Some(i) = args.iter().position(|a| a == "--bundle") {
+        let Some(app) = args.get(i + 1) else {
+            eprintln!("--bundle needs the bundle's path (cadrs.app)");
+            return AppExit::from_code(2);
+        };
+        let libraries = args
+            .iter()
+            .position(|a| a == "--libraries")
+            .and_then(|k| args.get(k + 1))
+            .map(std::path::PathBuf::from);
+        return match install::bundle(std::path::Path::new(app), libraries.as_deref()) {
+            Ok(()) => {
+                println!("Made {app}");
+                AppExit::Success
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                AppExit::from_code(1)
+            }
+        };
     }
     // `--install`: installs this build for the user, with a launcher entry (`install.rs`;
     // `--install-desktop` is its older name).
