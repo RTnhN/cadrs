@@ -32,9 +32,9 @@ use cadrs_core::commands::{
     SetRevolve,
 };
 use cadrs_core::document::{
-    AxisRef, BodyType, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, Document, EdgeRef,
-    EndCondition, EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef, RevolveFeature,
-    RevolveType, ThinWall, VertexRef,
+    AxisRef, BodyType, BooleanFeature, BooleanKind, BooleanOp, DeletePartFeature, DirectionRef,
+    Document, EdgeRef, EndCondition, EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef,
+    RevolveFeature, RevolveType, ThinWall, VertexRef,
 };
 use cadrs_core::draft::{DraftFeature, ExtrudeDraft};
 use cadrs_core::hole::{HoleEnd, HoleSpec, HoleStyle, Length};
@@ -45,6 +45,7 @@ use cadrs_core::pattern::{MirrorFeature, MirrorPlane, PatternFeature, PatternKin
 use cadrs_core::plane::{PlaneEntity, PlaneFeature, PlaneType};
 use cadrs_core::rebuild::Rebuilder;
 use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
+use cadrs_core::surfacing::{FillEdge, FillFeature, ThickenFeature};
 use cadrs_core::{ElementId, Feature, FeatureId, History, Part, PartId};
 use cadrs_sketch::region::regions;
 use cadrs_sketch::{
@@ -1242,6 +1243,73 @@ impl Recipe {
                 self.notes
                     .push("cosmetic thread: no geometry, not built".into());
                 return Ok(());
+            }
+            // A surface through a sketch's curves: a Fill.
+            "boundary_surface" => {
+                let sname = f["sketch"].as_str().unwrap_or("");
+                let Some(info) = self.sketches.get(sname) else {
+                    return unsupported(format!("boundary of unknown sketch `{sname}`"));
+                };
+                let sketch = info.id;
+                let edges = f["curves"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|c| {
+                        Ok(FillEdge::SketchCurve {
+                            sketch,
+                            curve: curve_ref(info, c)?,
+                        })
+                    })
+                    .collect::<R<Vec<_>>>()?;
+                let before = self.ids();
+                let id = self.add(
+                    "Fill",
+                    FeatureKind::Fill(FillFeature {
+                        edges,
+                        ..FillFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            // Surfaces made solid; they stay (a recipe removes them itself).
+            "thicken" => {
+                let parts = f["bodies"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|b| self.body(b))
+                    .collect::<R<Vec<_>>>()?;
+                let t = self.num(f.get("thickness"))?;
+                let before = self.ids();
+                let id = self.add(
+                    "Thicken",
+                    FeatureKind::Thicken(ThickenFeature {
+                        parts,
+                        mid_plane: f["symmetric"].as_bool().unwrap_or(false),
+                        thickness1: t,
+                        thickness1_expr: format!("{t} mm"),
+                        op: Self::op_of(f)?,
+                        keep_tools: true,
+                        ..ThickenFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            "remove" => {
+                let parts = f["bodies"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|b| self.body(b))
+                    .collect::<R<Vec<_>>>()?;
+                self.add(
+                    "Delete part",
+                    FeatureKind::DeletePart(DeletePartFeature { parts }),
+                )?
             }
             "path_pattern" => {
                 if f["pattern_of"].as_str().unwrap_or("features") != "features" {
