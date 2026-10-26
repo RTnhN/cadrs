@@ -75,6 +75,7 @@
 77-fillet-variable-linear
 78-fillet-variable-to-zero
 79-fillet-chord-length
+80-fillet-taper-to-fit
 81-fillet-spline-radius
 82-thin-extrude-frame
 83-boundary-loop-thicken

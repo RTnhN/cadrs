@@ -949,6 +949,96 @@ impl Recipe {
         }
     }
 
+    /// A fillet's radius law with fit "taper" (SolidCraft's): a clamped cubic B-spline in u
+    /// (0 at the edge's recipe `start`, 1 at its end) on 8 equal spans, its control radii
+    /// min(r, 0.9 room) at the Greville abscissae, where the room at a point of the edge is
+    /// the narrower of its two faces across the edge (from the edge to the face's far side)
+    /// times tan(θ/2), θ the angle between the faces inside the part. One straight edge between
+    /// flat faces.
+    fn taper_law(&self, entities: &[EdgeOrFace], f: &Value, r: f64) -> R<(Vec<f64>, Vec<f64>)> {
+        let [EdgeOrFace::Edge(e)] = entities else {
+            return unsupported("a taper fillet of several edges");
+        };
+        let parts = cadrs_core::rebuild::build(&self.features_now())
+            .parts
+            .clone();
+        let part = parts.iter().find(|p| p.id == e.part).unwrap();
+        let (Some(p0), Some(p1)) = (v3(&f["edges"][0]["start"]), v3(&f["edges"][0]["end"])) else {
+            return unsupported("a taper fillet's edge without its ends");
+        };
+        let along = unit(sub(p1, p0));
+        let faces: Vec<&cadrs_core::solid::SolidFace> = e
+            .edge
+            .faces
+            .iter()
+            .filter_map(|n| part.solid.face(n))
+            .collect();
+        let planes: Vec<_> = faces.iter().filter_map(|x| x.plane).collect();
+        if faces.len() != 2 || planes.len() != 2 {
+            return unsupported("a taper fillet between faces that aren't flat");
+        }
+        // Outward normals, and the angle between the faces inside the part.
+        let normal = |pl: &cadrs_sketch::PlaneFrame| unit(cross(pl.u, pl.v));
+        let (n1, n2) = (normal(&planes[0]), normal(&planes[1]));
+        let theta = std::f64::consts::PI - dot(n1, n2).clamp(-1.0, 1.0).acos();
+        // How far across a face from point q on the edge: along the face, square to the edge,
+        // into it, to the first crossing of its boundary.
+        let across = |face: &cadrs_core::solid::SolidFace, pl: &cadrs_sketch::PlaneFrame, q: V3| {
+            let to2 = |p: V3| (dot(sub(p, pl.origin), pl.u), dot(sub(p, pl.origin), pl.v));
+            let d3 = cross(normal(pl), along);
+            let q2 = to2(q);
+            let (dx, dy) = (dot(d3, pl.u), dot(d3, pl.v));
+            let mut hits: Vec<f64> = Vec::new();
+            for lp in &face.loops {
+                for k in 0..lp.len() {
+                    let (a, b) = (to2(lp[k]), to2(lp[(k + 1) % lp.len()]));
+                    let (ex, ey) = (b.0 - a.0, b.1 - a.1);
+                    let den = dx * ey - dy * ex;
+                    if den.abs() < 1e-12 {
+                        continue;
+                    }
+                    let (wx, wy) = (a.0 - q2.0, a.1 - q2.1);
+                    let t = (wx * ey - wy * ex) / den;
+                    let s = (wx * dy - wy * dx) / den;
+                    if (-1e-9..=1.0 + 1e-9).contains(&s) && t.abs() > 1e-6 {
+                        hits.push(t);
+                    }
+                }
+            }
+            // Into the face: the side with the nearer crossing beyond the edge.
+            let fwd = hits
+                .iter()
+                .filter(|t| **t > 0.0)
+                .fold(f64::INFINITY, |m, t| m.min(*t));
+            let back = hits
+                .iter()
+                .filter(|t| **t < 0.0)
+                .fold(f64::INFINITY, |m, t| m.min(-*t));
+            fwd.min(back)
+        };
+        let room = |u: f64| {
+            let q = add(p0, scale(sub(p1, p0), u));
+            faces
+                .iter()
+                .zip(&planes)
+                .map(|(x, pl)| across(x, pl, q))
+                .fold(f64::INFINITY, f64::min)
+                * (theta / 2.0).tan()
+        };
+        const SPANS: usize = 8;
+        let mut knots = vec![0.0; 4];
+        knots.extend((1..SPANS).map(|k| k as f64 / SPANS as f64));
+        knots.extend([1.0; 4]);
+        let n = knots.len() - 4;
+        let cps = (0..n)
+            .map(|i| {
+                let xi = (knots[i + 1] + knots[i + 2] + knots[i + 3]) / 3.0;
+                r.min(0.9 * room(xi))
+            })
+            .collect();
+        Ok((cps, knots))
+    }
+
     /// The part vertex at a world point.
     fn vertex(&self, parts: &[Part], p: V3) -> R<VertexRef> {
         parts
@@ -1120,14 +1210,22 @@ impl Recipe {
                     tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
                     ..FilletFeature::default()
                 };
-                match f["type"].as_str().unwrap_or("constant_radius") {
+                let kind = match f["type"].as_str().unwrap_or("constant_radius") {
+                    "constant_radius" if f["fit"].as_str() == Some("taper") => "taper",
+                    other => other,
+                };
+                match kind {
                     "constant_radius" => {}
                     // The round's width across, kept along the edge.
                     "chord_length" => x.measurement = FilletMeasurement::Width,
                     // The radius along the edge from its `start`: straight from `radius` to
                     // `radius2`, or a clamped B-spline of `radius` then `radii` on `knots`.
-                    kind @ ("variable_radius" | "spline_radius") => {
-                        let law: Box<dyn Fn(f64) -> f64> = if kind == "variable_radius" {
+                    // Fit "taper": the radius where it fits, else what fits (see `taper_law`).
+                    kind @ ("variable_radius" | "spline_radius" | "taper") => {
+                        let law: Box<dyn Fn(f64) -> f64> = if kind == "taper" {
+                            let (cps, knots) = self.taper_law(&entities, f, r)?;
+                            Box::new(move |u| bspline(&cps, &knots, 3, u))
+                        } else if kind == "variable_radius" {
                             let r2 = self.num(f.get("radius2"))?;
                             Box::new(move |u| r + (r2 - r) * u)
                         } else {
@@ -1156,7 +1254,9 @@ impl Recipe {
                         let edge = part.solid.edges.iter().find(|x| x.name == e.edge).unwrap();
                         let (a, b) = (edge.points[0], *edge.points.last().unwrap());
                         // The edge's start as cadrs has it, at the recipe's start or not.
-                        let start = v3(&f["start"]).unwrap_or(a);
+                        let start = v3(&f["start"])
+                            .or_else(|| v3(&f["edges"][0]["start"]))
+                            .unwrap_or(a);
                         let forward = norm(sub(a, start)) <= norm(sub(b, start));
                         let u = |t: f64| if forward { t } else { 1.0 - t };
                         x.variable = true;
@@ -1169,7 +1269,7 @@ impl Recipe {
                                 expr: format!("{radius} mm"),
                             });
                         }
-                        if kind == "spline_radius" {
+                        if kind != "variable_radius" {
                             const N: usize = 48;
                             for k in 1..N {
                                 let t = k as f64 / N as f64;
