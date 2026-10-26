@@ -108,6 +108,7 @@ impl Rebuilder {
                     alignment: f.alignment,
                     radius: (!f.use_model_radius).then_some(f.radius),
                     miter: (!f.auto_miter).then_some(f.miter_angle.to_radians()),
+                    gap: f.corner_gap,
                     hold_adjacent: f.hold_adjacent,
                     per_chain: f.partial && f.chain == ChainType::PerChain,
                 };

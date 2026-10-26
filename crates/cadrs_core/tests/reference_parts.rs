@@ -1556,6 +1556,10 @@ impl Recipe {
                             angle: a,
                             angle_expr: format!("{a} deg"),
                             flip: f["flip"].as_bool().unwrap_or(false),
+                            // Flanges meeting at a corner end square, their insides the
+                            // thickness apart (SolidCraft's corners): a 45° miter with that gap.
+                            auto_miter: false,
+                            corner_gap: Some(self.sheet.map_or(0.0, |(_, r)| r.thickness)),
                             ..FlangeFeature::default()
                         })),
                     )?
@@ -2467,8 +2471,8 @@ fn measure(parts: &[Part]) -> Measured {
         if std::env::var("DBG_FACES").is_ok() {
             for f in &p.solid.faces {
                 eprintln!(
-                    "DBG {:?} r {:?} area {:?} c {:?}",
-                    f.kind, f.radius, f.area, f.center
+                    "DBG {:?} r {:?} area {:?} c {:?} name {:?}",
+                    f.kind, f.radius, f.area, f.center, f.name
                 );
             }
         }

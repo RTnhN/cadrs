@@ -308,6 +308,10 @@ pub struct FlangeFeature {
     pub miter_angle: f64,
     #[serde(default = "forty_five_deg")]
     pub miter_angle_expr: String,
+    /// The gap between this flange's walls where they meet at a corner (`None`: the model's
+    /// minimal gap at an automatic miter, none at a miter angle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner_gap: Option<f64>,
     #[serde(default = "yes")]
     pub use_model_radius: bool,
     #[serde(default = "one")]
@@ -370,6 +374,7 @@ impl Default for FlangeFeature {
             auto_miter: true,
             miter_angle: 45.0,
             miter_angle_expr: forty_five_deg(),
+            corner_gap: None,
             use_model_radius: true,
             radius: 1.0,
             radius_expr: one_mm(),

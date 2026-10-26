@@ -460,6 +460,7 @@ mod tests {
                 alignment: FlangeAlignment::Inner,
                 radius: None,
                 miter: None,
+                gap: None,
                 hold_adjacent: false,
                 per_chain: false,
             },
