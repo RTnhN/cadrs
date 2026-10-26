@@ -344,6 +344,127 @@ fn a_torus_band_in_two_pieces_is_one_face() {
     assert_eq!(k.faces(u).unwrap().len(), 3, "one side face and two ends");
 }
 
+/// Pieces that close a whole turn joined: one face as one revolve makes it (#114). A torus of
+/// two halves and of four quarters (a circular pattern), 2π²Rr²; a sphere of a quarter and
+/// three, 4/3 πr³ and 4πr²; a cone of two halves (a pole at its apex), πr²h/3 and its base
+/// and side, πr² + πr·√(r² + h²).
+#[test]
+fn pieces_closing_a_whole_turn_are_one_face() {
+    let turned = |axis: &Axis, deg: f64| {
+        let rot = nalgebra::Rotation3::from_axis_angle(&axis.dir, deg.to_radians());
+        let top = Plane::top();
+        Plane {
+            origin: top.origin,
+            x_dir: nalgebra::Unit::new_normalize(rot * top.x_dir.into_inner()),
+            normal: nalgebra::Unit::new_normalize(rot * top.normal.into_inner()),
+        }
+    };
+    let region = |outer: Loop| Region {
+        outer,
+        holes: vec![],
+        source: None,
+    };
+    // Revolved in pieces of `degs` (in turn round the axis), joined.
+    let pieces = |k: &mut NativeKernel, outer: &Loop, axis: Axis, degs: &[f64]| -> BodyId {
+        let mut at = 0.0;
+        let bodies: Vec<BodyId> = degs
+            .iter()
+            .map(|d| {
+                let profile = Profile::new(turned(&axis, at), vec![region(outer.clone())]);
+                at += d;
+                k.revolve(&profile, axis, d.to_radians()).unwrap().bodies[0]
+            })
+            .collect();
+        k.boolean(BoolOp::Union, bodies[0], &bodies[1..])
+            .unwrap()
+            .bodies[0]
+    };
+    let expect = |k: &NativeKernel, b: BodyId, volume: f64, area: Option<f64>, faces: usize| {
+        let issues = k.get(b).unwrap().check_with(CheckLevel::Full);
+        assert!(issues.is_empty(), "invalid body: {issues:?}");
+        let m = k.mass_properties(b).unwrap();
+        assert!(
+            (m.volume - volume).abs() < 1e-6 * volume,
+            "{} vs {volume}",
+            m.volume
+        );
+        if let Some(a) = area {
+            assert!(
+                (m.surface_area - a).abs() < 1e-6 * a,
+                "{} vs {a}",
+                m.surface_area
+            );
+        }
+        assert_eq!(k.faces(b).unwrap().len(), faces);
+    };
+    let mut k = NativeKernel::new();
+    let down = Axis {
+        origin: Point3::origin(),
+        dir: nalgebra::Unit::new_normalize(nalgebra::Vector3::new(0.0, -1.0, 0.0)),
+    };
+    let up = Axis {
+        origin: Point3::origin(),
+        dir: nalgebra::Unit::new_normalize(nalgebra::Vector3::new(0.0, 1.0, 0.0)),
+    };
+    let (big, r) = (25.0, 6.0);
+    let torus = 2.0 * PI * PI * big * r * r;
+    let disc = circle(big, 0.0, r);
+    let u = pieces(&mut k, &disc, down, &[180.0, 180.0]);
+    expect(&k, u, torus, Some(4.0 * PI * PI * big * r), 1);
+    let u = pieces(&mut k, &disc, down, &[90.0, 90.0, 90.0, 90.0]);
+    expect(&k, u, torus, Some(4.0 * PI * PI * big * r), 1);
+    // A half disc of radius 10 on the axis.
+    let rs = 10.0;
+    let half = Loop {
+        curves: vec![
+            Curve2::Arc {
+                center: Point2::new(0.0, 0.0),
+                radius: rs,
+                start_angle: -PI / 2.0,
+                sweep: PI,
+                source: None,
+            },
+            Curve2::Line {
+                a: Point2::new(0.0, rs),
+                b: Point2::new(0.0, -rs),
+                source: None,
+            },
+        ],
+    };
+    let u = pieces(&mut k, &half, up, &[90.0, 270.0]);
+    expect(
+        &k,
+        u,
+        4.0 / 3.0 * PI * rs.powi(3),
+        Some(4.0 * PI * rs * rs),
+        1,
+    );
+    // A right triangle: base radius 8 on Top, apex 12 up the axis.
+    let (rc, h) = (8.0, 12.0);
+    let tri = Loop {
+        curves: vec![
+            Curve2::Line {
+                a: Point2::new(0.0, 0.0),
+                b: Point2::new(rc, 0.0),
+                source: None,
+            },
+            Curve2::Line {
+                a: Point2::new(rc, 0.0),
+                b: Point2::new(0.0, h),
+                source: None,
+            },
+            Curve2::Line {
+                a: Point2::new(0.0, h),
+                b: Point2::new(0.0, 0.0),
+                source: None,
+            },
+        ],
+    };
+    let u = pieces(&mut k, &tri, up, &[180.0, 180.0]);
+    let side = PI * rc * (rc * rc + h * h).sqrt();
+    expect(&k, u, PI * rc * rc * h / 3.0, Some(PI * rc * rc + side), 2);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fillets
 
