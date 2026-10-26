@@ -1957,6 +1957,12 @@ fn on_row_context_menu(
     let shared_info = lib.lib.get(id).and_then(|e| e.meta.shared.clone());
     let shared = shared_info.is_some();
     let may_copy = shared_info.is_none_or(|s| s.access().rights.copy);
+    // Transfer ownership (`crate::collab`): one's own document shared with someone.
+    let transferable = lib
+        .lib
+        .get(id)
+        .and_then(|e| e.meta.sharing.as_ref())
+        .is_some_and(|s| !s.members.is_empty());
     commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), false));
     let menu = if state.filter == Filter::Trash {
         Menu::new("doc-context-menu")
@@ -2029,6 +2035,11 @@ fn on_row_context_menu(
                     .submenu(entries)
             })
             .item(MenuItem::new("ctx-properties", "Details…").icon("list-details"))
+            .item(
+                MenuItem::new("ctx-transfer", "Transfer ownership…")
+                    .icon("share")
+                    .disabled(!transferable),
+            )
             .separator()
             .item(if shared {
                 // Shared with me (`crate::collab`): the owner hears of it; the copy goes.
@@ -2064,6 +2075,8 @@ fn on_context_action(
         "ctx-rename" => open_rename_dialog(&mut commands, &theme, &entry),
         "ctx-copy" => open_copy_dialog(&mut commands, &theme, &entry),
         "ctx-trash" => open_trash_dialog(&mut commands, &theme, &entry),
+        "ctx-transfer" => commands
+            .queue(move |world: &mut World| crate::collab::share_dialog::open_transfer(world, id)),
         "ctx-unshare" => {
             let store = store.0.clone();
             let name = entry.name.clone();

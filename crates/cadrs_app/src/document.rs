@@ -2807,9 +2807,13 @@ fn on_tab_double_click(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_tab_context_menu(
     ev: On<ContextMenuRequested>,
     q: Query<&TabButton>,
+    locks: Option<Res<crate::collab::locks::TabLocks>>,
+    live: Option<Res<crate::collab::live::Live>>,
+    iroh: Option<Res<cadrs_net::bevy_iroh::Iroh>>,
     q_bar: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform), With<TabStrip>>,
     doc: Option<Res<ActiveDocument>>,
     theme: Res<Theme>,
@@ -2818,6 +2822,12 @@ fn on_tab_context_menu(
     let (Ok(tab), Some(doc)) = (q.get(ev.entity), doc) else {
         return;
     };
+    let live = live.is_some();
+    let lock_holder = locks
+        .as_ref()
+        .and_then(|l| l.locks.iter().find(|(e, ..)| *e == tab.0))
+        .map(|(_, id, name)| (id.clone(), name.clone()));
+    let me = iroh.map(|i| i.id().to_string());
     let only_tab = doc.doc.elements.len() <= 1;
     // Grouped like Onshape's tab menu (reference/onshape/tab_menu/tab-bar-wmenu-01.png).
     let el = doc.doc.element(tab.0);
@@ -2831,6 +2841,18 @@ fn on_tab_context_menu(
     // An Assembly tab's menu has the icon column (Delete, Create Drawing) and "Create task…"
     // as `ex3-step13.png` shows it (P3B.4 judge).
     let is_assembly = el.is_some_and(|e| e.assembly_model().is_some());
+    let lock_item =
+        (live && el.is_some_and(|e| crate::collab::locks::lockable(&e.kind))).then(|| {
+            match lock_holder.as_ref() {
+                Some((id, _)) if Some(id) == me.as_ref() => {
+                    MenuItem::new("tab-unlock", "Let others edit this tab").icon("lock-open")
+                }
+                Some((_, name)) => MenuItem::new("tab-take-lock", format!("Take over from {name}"))
+                    .icon("lock-filled"),
+                None => MenuItem::new("tab-lock", "Open tab, close it for other users")
+                    .icon("lock-filled"),
+            }
+        });
     let mut menu = Menu::new("tab-context-menu")
         .side(PopoverSide::Top)
         .min_width(176.0)
@@ -2848,6 +2870,11 @@ fn on_tab_context_menu(
         .item(MenuItem::new("tab-open-new", "Open in new window").planned())
         .item(MenuItem::new("tab-rename", "Rename…"))
         .item(MenuItem::new("tab-properties", "Properties…"));
+    // Editing together (`crate::collab::locks`): a tab that can't be edited together can be
+    // opened for oneself.
+    if let Some(lock) = lock_item {
+        menu = menu.separator().item(lock);
+    }
     if is_part_studio {
         menu = menu.item(MenuItem::new("tab-show-code", "Show code").planned());
     }
@@ -2979,6 +3006,14 @@ fn on_tab_menu_action(
             if let Some((e, _)) = q_tabs.iter().find(|(_, t)| t.0 == id) {
                 start_tab_rename(&mut commands, &theme, e, el.name);
             }
+        }
+        "tab-lock" | "tab-take-lock" | "tab-unlock" => {
+            let (lock, take) = match ev.item.as_str() {
+                "tab-lock" => (true, false),
+                "tab-take-lock" => (true, true),
+                _ => (false, false),
+            };
+            commands.queue(move |w: &mut World| crate::collab::locks::lock(w, id, lock, take));
         }
         "tab-duplicate" => {
             let new = ElementId::new();
