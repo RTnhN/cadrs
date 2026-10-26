@@ -170,7 +170,7 @@ the kernel API, persistent face and edge naming, and the native kernel's design.
 
 [Sponsor cadrs on GitHub](https://github.com/sponsors/rvdende). The list below updates daily.
 
-<!-- sponsors --><!-- sponsors -->
+<!-- sponsors --><a href="https://github.com/thomasfla"><img src="https:&#x2F;&#x2F;github.com&#x2F;thomasfla.png" width="60px" alt="User avatar: Thomas Flayols" /></a><!-- sponsors -->
 
 ## License
 
