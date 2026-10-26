@@ -14,25 +14,28 @@
 
 use bevy::prelude::*;
 use cadrs_core::DocumentMeta;
-use cadrs_core::collab::{Permission, SharedInfo, Sharing, Snapshot};
+use cadrs_core::collab::{Permission, SharedInfo, Sharing};
 use cadrs_net::bevy_iroh::{Iroh, IrohTask};
-use cadrs_net::{ShareLink, SnapshotRequests, Welcome, transfer};
+use cadrs_net::{ShareLink, Welcome, transfer};
 
-use crate::{ActiveDocument, AppClock, AppState, DocumentStore, UserProfile};
+use crate::{ActiveDocument, AppClock, AppState, DocumentStore};
+
+pub mod live;
 
 pub struct CollabPlugin;
 
 impl Plugin for CollabPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Joins>()
-            .add_systems(Update, (serve_requests, poll_joins));
+        app.init_resource::<Joins>().add_systems(Update, poll_joins);
+        live::plugin(app);
     }
 }
 
-/// Why a shared document opens read-only.
+/// Why a shared document opens read-only: until its room is joined ([`live`]), or for good
+/// without the network.
 pub fn read_only_reason(shared: &SharedInfo) -> String {
     format!(
-        "This is a copy of {}'s document: editing it together isn't connected yet",
+        "Connecting to {}… (with the network off, CADRS_NET=0, this is the last copy)",
         shared.owner_name
     )
 }
@@ -94,48 +97,6 @@ fn make_link(world: &mut World) -> Result<ShareLink, String> {
         topic,
         owner,
     })
-}
-
-/// The owner's side: answers whoever asks for a shared document by its link.
-fn serve_requests(world: &mut World) {
-    let Some(requests) = world
-        .get_resource_mut::<SnapshotRequests>()
-        .map(|mut r| r.drain())
-        .filter(|r| !r.is_empty())
-    else {
-        return;
-    };
-    let store = world.resource::<DocumentStore>().0.clone();
-    let owner_name = world.resource::<UserProfile>().display_name.clone();
-    for r in requests {
-        let open = world
-            .get_resource::<ActiveDocument>()
-            .filter(|d| d.doc.id == r.document)
-            .and_then(|d| Some((d.doc.clone(), d.meta.clone()?)));
-        let found = open.or_else(|| {
-            let file = store.load(r.document).ok()?;
-            Some((file.document, file.meta))
-        });
-        let answer = match found {
-            None => Err("The owner no longer has this document".to_string()),
-            Some((doc, meta)) => match meta.sharing.as_ref().filter(|s| s.topic == r.topic) {
-                Some(s) if meta.trashed.is_none() => match s.permission(&r.from.to_string()) {
-                    Some(permission) => Snapshot::of(&doc, 0, &store).map(|snapshot| Welcome {
-                        permission,
-                        owner_name: owner_name.clone(),
-                        snapshot,
-                    }),
-                    None => Err("Link sharing is off for this document".into()),
-                },
-                _ => Err("This document is no longer shared".into()),
-            },
-        };
-        match &answer {
-            Ok(_) => info!("sent {} to {}", r.document, r.from.fmt_short()),
-            Err(why) => info!("refused {} to {}: {why}", r.document, r.from.fmt_short()),
-        }
-        r.answer(answer);
-    }
 }
 
 /// Documents being fetched by their links.

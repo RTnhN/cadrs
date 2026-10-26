@@ -319,6 +319,9 @@ pub struct ActiveDocument {
     pub read_only: Option<String>,
     /// How many edits were refused while read-only (the session says so each time).
     pub refused: u32,
+    /// Who made the last change that came from someone else ([`Self::apply_remote`]), until
+    /// the History panel records it as theirs.
+    pub remote_author: Option<String>,
 }
 
 /// P3E.4: a workspace's undo and redo stacks, kept while another workspace is open.
@@ -353,6 +356,7 @@ impl ActiveDocument {
             redo_active: Vec::new(),
             read_only: None,
             refused: 0,
+            remote_author: None,
         }
     }
 
@@ -416,6 +420,21 @@ impl ActiveDocument {
         }
         self.fix_active();
         r
+    }
+
+    /// A change someone else made, editing together ([`collab`]): `doc` is the document with
+    /// it. The undo and redo steps take it in, so undoing one's own edits afterwards leaves
+    /// theirs; the History panel records it as `author`'s. Not refused while read-only (a
+    /// view-only copy follows the owner's).
+    pub fn apply_remote(&mut self, doc: Document, author: &str) {
+        if doc == self.doc {
+            return;
+        }
+        let change = cadrs_core::collab::sync::Change::between(&self.doc, &doc);
+        self.history.rebase(&change);
+        self.doc = doc;
+        self.remote_author = Some(author.to_string());
+        self.fix_active();
     }
 
     /// Undoes the last command. Returns its label.

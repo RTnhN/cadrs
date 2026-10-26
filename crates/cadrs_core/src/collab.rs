@@ -9,6 +9,9 @@
 //! - [`pack`] and [`unpack`] are the wire form of anything with a document in it: MessagePack
 //!   with field names (self-describing, so the documents' optional fields round-trip, as for
 //!   the kernel process's messages), deflated.
+//! - [`sync`]: editing a document together, the owner putting everyone's edits in one order.
+
+pub mod sync;
 
 use std::io::{Read, Write};
 

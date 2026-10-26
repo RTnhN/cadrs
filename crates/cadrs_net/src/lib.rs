@@ -6,13 +6,16 @@
 //!   ([`IDENTITY_FILE`]), so peers recognise it from run to run, and its public key is the
 //!   user's **cadrs ID** ([`cadrs_id`]).
 //! - A document is shared by a [`ShareLink`]; whoever opens one fetches the document from its
-//!   owner over [`transfer`], and the owner's app decides through [`SnapshotRequests`].
+//!   owner over [`transfer`], and proposes their edits the same way. The owner's app decides
+//!   through [`OwnerRequests`], and its numbered edits ([`Sequenced`]) reach everyone over
+//!   the document's room ([`session`]).
 //! - Only bevy_iroh's transport, rooms and typed messages are used; its entity replication of
 //!   `Transform` is off and its voice and video features are not built.
 
 use std::path::PathBuf;
 
 pub mod link;
+pub mod session;
 pub mod transfer;
 
 use bevy::prelude::*;
@@ -21,7 +24,8 @@ use bevy_iroh::{Identity, Iroh, IrohPlugin, Relays};
 
 pub use bevy_iroh;
 pub use link::ShareLink;
-pub use transfer::{SnapshotRequest, SnapshotRequests, Welcome};
+pub use session::Sequenced;
+pub use transfer::{Ask, OwnerRequest, OwnerRequests, Verdict, Welcome};
 
 /// The node's secret key, in the documents folder (32 raw bytes, mode 0600). Each data
 /// directory is a peer of its own, so two instances with their own `--data-dir` can share
@@ -57,6 +61,7 @@ impl Plugin for NetPlugin {
         // Documents travel as their own messages, never as replicated entities.
         iroh.replicate_transform = false;
         app.add_plugins(iroh).insert_resource(requests);
+        session::register(app);
     }
 }
 

@@ -215,12 +215,20 @@ fn track_history(world: &mut World, mut seen: Local<Option<bevy::ecs::change_det
     {
         world.resource_mut::<DocLog>().close();
     }
+    // A change someone else made, editing together (`crate::collab`), is theirs.
+    let remote = world
+        .resource_mut::<ActiveDocument>()
+        .bypass_change_detection()
+        .remote_author
+        .take();
     let doc = world.resource::<ActiveDocument>();
     let now = world.get_resource::<AppClock>().map_or(0, |c| c.now());
-    let user = world
-        .get_resource::<UserProfile>()
-        .map(|u| u.id.clone())
-        .unwrap_or_default();
+    let user = remote.clone().unwrap_or_else(|| {
+        world
+            .get_resource::<UserProfile>()
+            .map(|u| u.id.clone())
+            .unwrap_or_default()
+    });
     let store = world.get_resource::<DocumentStore>().map(|s| s.0.clone());
     let stored = doc.meta.is_some();
     let stacks = (doc.history.undo_len(), doc.history.redo_len());
@@ -283,7 +291,9 @@ fn track_history(world: &mut World, mut seen: Local<Option<bevy::ecs::change_det
     let (prev_undo, prev_redo) = world.resource::<DocLog>().stacks;
     let undo_label = doc.history.undo_label().unwrap_or_default().to_string();
     let redo_label = doc.history.redo_label().unwrap_or_default().to_string();
-    let origin = if stacks.1 == prev_redo + 1 && stacks.0 + 1 == prev_undo {
+    let origin = if remote.is_some() {
+        Origin::Command(String::new())
+    } else if stacks.1 == prev_redo + 1 && stacks.0 + 1 == prev_undo {
         Origin::Undo(redo_label)
     } else if stacks.0 == prev_undo + 1 && stacks.1 + 1 == prev_redo {
         Origin::Redo(undo_label)
