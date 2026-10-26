@@ -1,0 +1,44 @@
+// Issue #122: Section view in an Assembly needs no planar face. An Assembly shows no default
+// planes to pick, and a part with no flat face offers nothing else; the plane button beside
+// Section planes opens Onshape's chooser (Top, Front or Right, the flip button, ✓ / ✕). On the
+// flange stand-in's assembly (`fixtures/flange_standin.cadrs`).
+// 01 the dialog: Section planes with the plane button beside it.
+// 02 the button: the chooser, Top.
+// 03 Front chosen, ✓: "Section plane 1 (Front plane)", the assembly cut by the Front plane,
+//    the caps hatched.
+// 04 the chooser again, Right, flipped, ✓: a second plane, the wedge between them removed.
+Scenario(
+    start: Some("document"),
+    steps: [
+        Custom("fixture flange_standin"),
+        Click(ui("tab-flange-assembly")),
+        Custom("view 25 35 0 0 0 0.16"),
+        Click(ui("view-section")),
+        WaitFor("section-dialog"),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("01-dialog-plane-button"),
+        Click(ui("section-default-plane")),
+        WaitFor("section-default-plane-chooser"),
+        MoveTo(1420, 900),
+        Wait(3),
+        Screenshot("02-chooser-top"),
+        Click(ui("section-default-plane-kind")),
+        Click(ui("section-default-plane-kind-option-1")),
+        Click(ui("section-default-plane-ok")),
+        MoveTo(1420, 900),
+        Wait(5),
+        ExpectText("section-planes", "Front plane"),
+        Screenshot("03-front-plane-cut"),
+        Click(ui("section-default-plane")),
+        WaitFor("section-default-plane-chooser"),
+        Click(ui("section-default-plane-kind")),
+        Click(ui("section-default-plane-kind-option-2")),
+        Click(ui("section-default-plane-flip")),
+        Click(ui("section-default-plane-ok")),
+        MoveTo(1420, 900),
+        Wait(5),
+        ExpectText("section-planes", "Right plane"),
+        Screenshot("04-right-plane-flipped-wedge"),
+    ],
+)

@@ -8,6 +8,10 @@
 //!   plane feature, a sketch or a planar face, picked in the view; **Offset** moves it along its
 //!   normal and the flip button keeps the other side. ✓ keeps the section while you work; ✕
 //!   (or **Exit section view**, the menu item and the tool again) ends it.
+//! - A default plane needn't be picked in the view (an Assembly shows none, and a part with no
+//!   flat face offers nothing else, issue #122): the plane button beside **Section planes**
+//!   opens Onshape's small chooser, **Top**, **Front** or **Right**, with the flip button and
+//!   ✓ / ✕ ([`DefaultPlanePicker`]).
 //! - Up to four **Section planes**: the material on the removed side of every plane goes (two
 //!   planes take out a wedge). The plane row clicked is the one the Offset, Angle, flip and
 //!   gizmo act on. The **Exclude** tab's items are left whole; the **Include** tab's are the
@@ -47,8 +51,8 @@ use cadrs_sketch::FaceName;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
     FeatureDialogAccept, FeatureDialogCancel, FeatureDialogState, NumberField, NumberFieldCommit,
-    SelectionList, SelectionListActivate, SelectionListItem, SelectionListRemove, TabStrip,
-    TabStripSelect,
+    Select, SelectChange, SelectionList, SelectionListActivate, SelectionListItem,
+    SelectionListRemove, TabStrip, TabStripSelect,
 };
 
 use crate::part_shading::{PartShading, PartShadingParams};
@@ -103,6 +107,7 @@ impl Plugin for SectionViewPlugin {
                 },
             )
             .add_observer(on_tool)
+            .add_observer(on_chooser_kind)
             .add_observer(on_accept)
             .add_observer(on_cancel)
             .add_observer(on_number)
@@ -308,6 +313,24 @@ pub struct SectionState {
     pub mode: SectionMode,
     pub items: Vec<PartId>,
     pub field: SectionField,
+    /// The default plane chooser, while open.
+    pub picker: Option<DefaultPlanePicker>,
+}
+
+/// The chooser beside **Section planes** (issue #122): a default plane, and which side goes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DefaultPlanePicker {
+    pub kind: PlaneKind,
+    pub flip: bool,
+}
+
+impl Default for DefaultPlanePicker {
+    fn default() -> Self {
+        Self {
+            kind: PlaneKind::Top,
+            flip: false,
+        }
+    }
 }
 
 impl SectionState {
@@ -1056,6 +1079,85 @@ fn flip(world: &mut World) {
     });
 }
 
+/// Changes the default plane chooser (opening it if need be: a section with no plane yet has
+/// no state).
+fn edit_picker(world: &mut World, f: impl FnOnce(&mut Option<DefaultPlanePicker>)) {
+    let mut views = world.resource_mut::<SectionViews>();
+    let Some(el) = views.dialog else { return };
+    f(&mut views.per.entry(el).or_default().picker);
+}
+
+/// ✓ in the chooser: the default plane becomes a section plane (the active one; picked again,
+/// it is only made active and given the chooser's side).
+pub fn add_default_plane(world: &mut World) {
+    let Some(el) = world.resource::<SectionViews>().dialog else {
+        return;
+    };
+    let Some(picker) = world
+        .resource::<SectionViews>()
+        .per
+        .get(&el)
+        .and_then(|s| s.picker)
+    else {
+        return;
+    };
+    let Some(mut plane) = resolve(world, Pick::Plane(picker.kind)) else {
+        return;
+    };
+    plane.flip = picker.flip;
+    let mut views = world.resource_mut::<SectionViews>();
+    let s = views.per.entry(el).or_default();
+    s.picker = None;
+    s.field = SectionField::Planes;
+    match s.planes.iter().position(|p| p.reference == plane.reference) {
+        Some(i) => {
+            s.planes[i].flip = picker.flip;
+            s.active = i;
+        }
+        None if s.planes.len() < MAX_PLANES => {
+            s.planes.push(plane);
+            s.active = s.planes.len() - 1;
+        }
+        None => {}
+    }
+    show_references(world);
+}
+
+/// The chooser's flip, ✓ and ✕.
+fn on_chooser_button(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
+    match q.get(a.entity).map(Name::as_str) {
+        Ok("section-default-plane-flip") => commands.queue(|w: &mut World| {
+            edit_picker(w, |p| {
+                if let Some(p) = p {
+                    p.flip = !p.flip;
+                }
+            })
+        }),
+        Ok("section-default-plane-ok") => commands.queue(add_default_plane),
+        Ok("section-default-plane-cancel") => {
+            commands.queue(|w: &mut World| edit_picker(w, |p| *p = None))
+        }
+        _ => {}
+    }
+}
+
+/// The chooser's plane.
+fn on_chooser_kind(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
+    if q.get(ev.entity).map(Name::as_str) != Ok("section-default-plane-kind") {
+        return;
+    }
+    let Some(kind) = PlaneKind::ALL.get(ev.index).copied() else {
+        return;
+    };
+    commands.queue(move |w: &mut World| {
+        edit_picker(w, |p| {
+            if let Some(p) = p {
+                p.kind = kind;
+            }
+        })
+    });
+}
+
 #[derive(Component)]
 struct SectionDialog(String);
 
@@ -1117,7 +1219,7 @@ fn section_dialog(
             .unwrap_or_default()
     });
     let has_plane = active.is_some();
-    let (mode, field) = (s.mode, s.field);
+    let (mode, field, picker) = (s.mode, s.field, s.picker);
     FeatureDialog::new("section-dialog")
         .title("Section view")
         .valid(!s.planes.is_empty())
@@ -1132,18 +1234,93 @@ fn section_dialog(
                     .selected(if mode == SectionMode::Exclude { 0 } else { 1 })
                     .build(&tb),
             );
-            b.spawn(
-                SelectionList::new("section-planes")
-                    .placeholder("Section planes")
-                    .items(rows)
-                    .active(field == SectionField::Planes)
-                    .build(&tb),
-            )
-            .entry::<Node>()
-            .and_modify(|mut n| {
-                n.flex_grow = 0.0;
-                n.margin = UiRect::vertical(Val::Px(2.0));
+            // Section planes, and the button for a default plane (issue #122).
+            b.spawn(Node {
+                align_items: AlignItems::Start,
+                column_gap: Val::Px(2.0),
+                margin: UiRect::vertical(Val::Px(2.0)),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn(
+                    SelectionList::new("section-planes")
+                        .placeholder("Section planes")
+                        .items(rows)
+                        .active(field == SectionField::Planes)
+                        .build(&tb),
+                )
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.flex_grow = 1.0;
+                    n.min_width = Val::Px(0.0);
+                });
+                r.spawn((
+                    IconButton::new("section-default-plane", "plane")
+                        .icon_size(18.0)
+                        .tooltip("Section by a default plane: Top, Front or Right")
+                        .build(&tb),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(|w: &mut World| {
+                            edit_picker(w, |p| {
+                                *p = match p {
+                                    Some(_) => None,
+                                    None => Some(DefaultPlanePicker::default()),
+                                }
+                            })
+                        })
+                    }),
+                ))
+                .entry::<Node>()
+                .and_modify(|mut n| {
+                    n.width = Val::Px(24.0);
+                    n.height = Val::Px(24.0);
+                    n.flex_shrink = 0.0;
+                });
             });
+            // The chooser: Top, Front or Right, the side, ✓ and ✕ (Onshape's).
+            if let Some(p) = picker {
+                b.spawn((
+                    Name::new("section-default-plane-chooser"),
+                    Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(2.0),
+                        margin: UiRect::vertical(Val::Px(2.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|r| {
+                    let mut kinds = Select::new("section-default-plane-kind").width(Val::Px(130.0));
+                    for k in PlaneKind::ALL {
+                        kinds = kinds.option(k.name(), true);
+                    }
+                    r.spawn(kinds.selected(p.kind.index()).build(&tb))
+                        .entry::<Node>()
+                        .and_modify(|mut n| n.flex_grow = 1.0);
+                    for (name, icon, tip) in [
+                        (
+                            "section-default-plane-flip",
+                            crate::extrude_dialog::flip_icon(p.flip),
+                            "Flip the side removed",
+                        ),
+                        ("section-default-plane-ok", "check", "Add the section plane"),
+                        ("section-default-plane-cancel", "close", "Cancel"),
+                    ] {
+                        r.spawn((
+                            IconButton::new(name, icon)
+                                .icon_size(16.0)
+                                .tooltip(tip)
+                                .build(&tb),
+                            observe(on_chooser_button),
+                        ))
+                        .entry::<Node>()
+                        .and_modify(|mut n| {
+                            n.width = Val::Px(22.0);
+                            n.height = Val::Px(22.0);
+                            n.flex_shrink = 0.0;
+                        });
+                    }
+                });
+            }
             let placeholder = if mode == SectionMode::Exclude {
                 "Items to exclude"
             } else {
@@ -1258,13 +1435,14 @@ fn sync_dialog(
         })
         .collect();
     let key = format!(
-        "{:?}|{:?}|{:?}|{}|{:?}|{}",
+        "{:?}|{:?}|{:?}|{}|{:?}|{}|{:?}",
         s.planes,
         s.active,
         s.mode,
         offset,
         names,
-        s.field == SectionField::Planes
+        s.field == SectionField::Planes,
+        s.picker
     );
     if let Some((e, d, _)) = q_dialog.iter().next() {
         if d.0 == key {
@@ -2482,6 +2660,39 @@ pub fn clip_polyline(pts: impl IntoIterator<Item = Vec3>, cut: Cut) -> Vec<Vec<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #122: a default plane from the chooser, with nothing picked in the view (an
+    /// Assembly shows no planes); chosen again, it is only made active with the new side.
+    #[test]
+    fn the_chooser_adds_a_default_plane_without_a_pick() {
+        let el = ElementId::new();
+        let mut world = World::new();
+        world.init_resource::<PartCache>();
+        world.init_resource::<ShownBounds>();
+        world.init_resource::<Selection>();
+        world.insert_resource(SectionViews {
+            dialog: Some(el),
+            ..default()
+        });
+        let choose = |world: &mut World, kind, flip| {
+            edit_picker(world, |p| *p = Some(DefaultPlanePicker { kind, flip }));
+            add_default_plane(world);
+        };
+        choose(&mut world, PlaneKind::Front, true);
+        choose(&mut world, PlaneKind::Right, false);
+        let s = world.resource::<SectionViews>().per[&el].clone();
+        assert_eq!(s.planes.len(), 2);
+        assert_eq!(s.planes[0].reference, SectionRef::Plane(PlaneKind::Front));
+        assert!(s.planes[0].flip);
+        assert_eq!(s.active, 1);
+        assert!(s.picker.is_none());
+        // The Front plane's references show selected, as a pick's would.
+        assert_eq!(world.resource::<Selection>().0.len(), 2);
+        choose(&mut world, PlaneKind::Front, false);
+        let s = world.resource::<SectionViews>().per[&el].clone();
+        assert_eq!((s.planes.len(), s.active), (2, 0));
+        assert!(!s.planes[0].flip);
+    }
 
     #[test]
     fn dragging_caps_follow_current_cut_and_preserve_holes_without_kernel_jobs() {
