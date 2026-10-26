@@ -15,3 +15,8 @@ serde.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
+
+[features]
+# Voice while editing together: bevy_iroh's media (cpal, libopus and openh264, built from
+# source with cmake). Off by default; `cargo build -r -F voice` on the app.
+voice = ["bevy_iroh/media"]

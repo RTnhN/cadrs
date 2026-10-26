@@ -9,6 +9,8 @@
 //! - **Follow mode**: double-clicking an avatar follows that person: their tab and their view.
 //!   The graphics area is outlined in their colour; they see the follower's avatar outlined. A
 //!   click, a scroll or a key stops it, as does their leaving.
+//! - With voice (the `voice` feature, `super::voice`): **Join voice** beside the avatars, then
+//!   mute and leave; an avatar is outlined green while that person speaks.
 
 use std::collections::BTreeMap;
 
@@ -23,7 +25,7 @@ use cadrs_net::bevy_iroh::iroh::EndpointId;
 use cadrs_net::bevy_iroh::prelude::{NetSender, PeerLeft, Received};
 use cadrs_net::{Presence, View};
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Avatar, DoubleClick, DoubleClickable};
+use cadrs_ui::{Avatar, DoubleClick, DoubleClickable, IconButton};
 
 use super::live::Live;
 use crate::camera::{RenderMode, ViewState};
@@ -46,6 +48,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_message::<Received<Presence>>()
         .add_message::<PeerLeft>()
         .init_resource::<People>()
+        .init_resource::<VoiceUi>()
         .add_systems(
             Update,
             (hear, tell, follow).chain().run_if(resource_exists::<Iroh>),
@@ -55,6 +58,7 @@ pub(super) fn plugin(app: &mut App) {
             (sync_people_bar, sync_markers, sync_follow_outline).after(follow),
         )
         .add_observer(on_avatar_double_click)
+        .add_observer(on_voice_button)
         .add_observer(stop_on_press);
 }
 
@@ -99,6 +103,30 @@ impl Person {
 pub struct People {
     document: Option<DocumentId>,
     pub by_id: BTreeMap<String, Person>,
+}
+
+/// Voice in the top bar (`super::voice` fills it when voice is built in): whether it is,
+/// whether this user joined and is muted, who is speaking (cadrs IDs), and what the buttons
+/// asked for.
+#[derive(Resource, Default, Clone, PartialEq)]
+pub struct VoiceUi {
+    pub available: bool,
+    pub joined: bool,
+    pub muted: bool,
+    pub speaking: Vec<String>,
+    /// Join (true) or leave (false), asked by a button.
+    pub want_join: Option<bool>,
+    /// Mute or unmute, asked by a button.
+    pub toggle_mute: bool,
+}
+
+fn on_voice_button(a: On<bevy::ui_widgets::Activate>, q: Query<&Name>, mut ui: ResMut<VoiceUi>) {
+    match q.get(a.entity).map(Name::as_str) {
+        Ok("collab-voice-join") => ui.want_join = Some(true),
+        Ok("collab-voice-leave") => ui.want_join = Some(false),
+        Ok("collab-voice-mute") => ui.toggle_mute = true,
+        _ => {}
+    }
 }
 
 /// Following someone: their cadrs ID, and since when (the click that started it doesn't stop
@@ -338,9 +366,15 @@ pub struct PeopleBar;
 #[derive(Component)]
 struct PersonAvatar(String);
 
-/// What the avatars show, to rebuild them only when it changes.
+/// What the avatars show, to rebuild them only when it changes: each person (id, name, where
+/// they are, follows me, I follow them, speaking), the status, and voice (built in, joined,
+/// muted).
 #[derive(PartialEq, Clone, Default)]
-struct BarState(Vec<(String, String, String, bool, bool)>, Option<String>);
+struct BarState(
+    Vec<(String, String, String, bool, bool, bool)>,
+    Option<String>,
+    (bool, bool, bool),
+);
 
 fn describe(doc: &ActiveDocument, p: &Presence) -> String {
     let mut text = p.name.clone();
@@ -362,6 +396,7 @@ fn describe(doc: &ActiveDocument, p: &Presence) -> String {
 fn sync_people_bar(
     people: Res<People>,
     following: Option<Res<Following>>,
+    voice: Res<VoiceUi>,
     doc: Option<Res<ActiveDocument>>,
     live: Option<Res<Live>>,
     iroh: Option<Res<Iroh>>,
@@ -384,17 +419,20 @@ fn sync_people_bar(
             let key = p.key();
             let follows_me = p.presence.following.as_deref() == Some(me.as_str());
             let i_follow = leader.as_deref() == Some(key.as_str());
+            let speaking = voice.speaking.contains(&key);
             (
                 key,
                 p.presence.name.clone(),
                 describe(&doc, &p.presence),
                 follows_me,
                 i_follow,
+                speaking,
             )
         })
         .collect();
     let status = live.as_ref().and_then(|l| l.status());
-    let state = BarState(rows, status);
+    let voice_state = (voice.available && live.is_some(), voice.joined, voice.muted);
+    let state = BarState(rows, status, voice_state);
     if *last == state {
         return;
     }
@@ -412,7 +450,35 @@ fn sync_people_bar(
                 },
             ));
         }
-        for (key, name, tip, follows_me, i_follow) in &state.0 {
+        // Voice: join; once joined, mute and leave.
+        let (available, joined, muted) = state.2;
+        if available && !joined {
+            b.spawn(
+                IconButton::new("collab-voice-join", "volume-mute")
+                    .small()
+                    .tooltip("Join voice: talk with everyone in this document")
+                    .build(t),
+            );
+        } else if available {
+            b.spawn(
+                IconButton::new(
+                    "collab-voice-mute",
+                    if muted { "volume-mute" } else { "volume" },
+                )
+                .small()
+                .tooltip(if muted { "Unmute" } else { "Mute" })
+                .build(t),
+            );
+            b.spawn(
+                IconButton::new("collab-voice-leave", "close")
+                    .small()
+                    .tooltip("Leave voice")
+                    .build(t),
+            )
+            .entry::<Node>()
+            .and_modify(|mut n| n.margin = UiRect::right(Val::Px(4.0)));
+        }
+        for (key, name, tip, follows_me, i_follow, speaking) in &state.0 {
             let color = color_of(key);
             let outlined = *follows_me || *i_follow;
             let tip = if *i_follow {
@@ -430,7 +496,13 @@ fn sync_people_bar(
                     border_radius: BorderRadius::all(Val::Px(t.radius + 2.0)),
                     ..default()
                 },
-                BorderColor::all(if outlined { color } else { Color::NONE }),
+                BorderColor::all(if *speaking {
+                    t.success
+                } else if outlined {
+                    color
+                } else {
+                    Color::NONE
+                }),
                 Tooltip::new(tip),
             ))
             .with_children(|a| {
