@@ -244,8 +244,8 @@ fn a_cube_with_two_round_holes_touching() {
 }
 
 /// A torus band (minor radius r about a circle of radius R) made in two revolves, or one
-/// mirrored, joined: one torus face, as one revolve makes it (#114). Pappus: the volume
-/// πr²·Rθ, the side 2πr·Rθ, and the two end discs.
+/// mirrored, joined: one torus face, as one revolve makes it (#114); and an ellipse's band.
+/// Pappus: the volume πr²·Rθ, the side 2πr·Rθ, and the two end discs.
 #[test]
 fn a_torus_band_in_two_pieces_is_one_face() {
     let (big, r) = (20.0, 5.0);
@@ -307,6 +307,41 @@ fn a_torus_band_in_two_pieces_is_one_face() {
         .bodies[0];
     let u = k.boolean(BoolOp::Union, a, &[m]).unwrap().bodies[0];
     expect(&k, u, 30.0);
+    // An ellipse (semi-axes 8 and 5) revolved on: a surface of revolution whose meridian
+    // closes, seamed where the surface doesn't call itself periodic. Pappus: πab·Rθ.
+    let ellipse = |plane: Plane| {
+        Profile::new(
+            plane,
+            vec![Region {
+                outer: Loop {
+                    curves: vec![Curve2::Ellipse {
+                        center: Point2::new(big, 0.0),
+                        major_radius: 8.0,
+                        minor_radius: 5.0,
+                        rotation: 0.3,
+                        source: None,
+                    }],
+                },
+                holes: vec![],
+                source: None,
+            }],
+        )
+    };
+    let a = k
+        .revolve(&ellipse(Plane::top()), axis, 15f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let b = k
+        .revolve(&ellipse(turned(15.0)), axis, 45f64.to_radians())
+        .unwrap()
+        .bodies[0];
+    let u = k.boolean(BoolOp::Union, a, &[b]).unwrap().bodies[0];
+    let issues = k.get(u).unwrap().check_with(CheckLevel::Full);
+    assert!(issues.is_empty(), "invalid body: {issues:?}");
+    let v = k.mass_properties(u).unwrap().volume;
+    let want = PI * 8.0 * 5.0 * big * 60f64.to_radians();
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    assert_eq!(k.faces(u).unwrap().len(), 3, "one side face and two ends");
 }
 
 // ---------------------------------------------------------------------------------------------

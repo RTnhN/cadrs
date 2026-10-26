@@ -531,17 +531,15 @@ pub fn compact(b: &mut Body) {
     b.verts = verts;
 }
 
-/// Pieces of a torus band merged into one (#114: a partial torus revolved on, or mirrored): the
-/// group's outer boundary is two minor circles, each round the torus's v once, and each piece
-/// has its seam along u; those seams join end to end from one circle to the other. The merged
-/// face runs round the first circle, along the seams to the second, round it, and back: as each
-/// piece did. `None` when the group isn't such a band.
-fn merge_torus_band(b: &Body, g: &[usize]) -> Option<Face> {
+/// Pieces of a band merged into one (#114: a partial torus revolved on, or mirrored; an
+/// ellipse's or a closed spline's surface of revolution): the group's outer boundary is two
+/// closed curves, each once round the surface the way its pieces' seams cross, and the pieces'
+/// seams join end to end from one to the other. The merged face runs round the first curve,
+/// along the seams to the second, round it, and back: as each piece did. `None` when the group
+/// isn't such a band (the loop must close in the base face's parameters).
+fn merge_band(b: &Body, g: &[usize]) -> Option<Face> {
     let base = g[0];
     let surf = b.faces[base].surf.clone();
-    if !surf.v_periodic() {
-        return None;
-    }
     let mut uses: std::collections::HashMap<usize, Vec<usize>> = Default::default();
     for &f in g {
         for c in b.faces[f].loops.iter().flatten() {
@@ -645,6 +643,7 @@ fn merge_torus_band(b: &Body, g: &[usize]) -> Option<Face> {
         let c = bb.center();
         P2::new(c.x, c.y)
     };
+    let close = |p: P2, q: P2| (p - q).norm() <= tol::ROUNDOFF * (1.0 + p.coords.norm());
     let mut at: Option<P2> = None;
     for (k, c) in lp.iter_mut().enumerate() {
         c.pc = if k == 0 {
@@ -653,10 +652,18 @@ fn merge_torus_band(b: &Body, g: &[usize]) -> Option<Face> {
         } else {
             chain_pc(&surf, b, c, at)
         };
+        // Across a seam the surface doesn't call periodic (a closed meridian's surface of
+        // revolution): the p-curve moved on to where the loop is, if the surface repeats there
+        // all along it.
+        if let Some(a) = at
+            && !close(co_uv(b, c, false), a)
+        {
+            c.pc = repeat_onto(&surf, &c.pc, &b.edges[c.edge], c.fwd, a)?;
+        }
         at = Some(co_uv(b, c, true));
     }
     let (first, last) = (co_uv(b, &lp[0], false), at?);
-    if (first - last).norm() > tol::ROUNDOFF * (1.0 + first.coords.norm()) {
+    if !close(first, last) {
         return None;
     }
     Some(Face {
@@ -666,9 +673,25 @@ fn merge_torus_band(b: &Body, g: &[usize]) -> Option<Face> {
     })
 }
 
+/// A coedge's p-curve `pc` (of edge `e`, run `fwd`) moved to start at `at`, where the surface
+/// repeats it: the same point at each of its samples moved so (across a seam of a surface that
+/// doesn't call itself periodic, as a closed meridian's surface of revolution). `None` when
+/// the surface doesn't repeat there.
+fn repeat_onto(surf: &Surface, pc: &Curve, e: &Edge, fwd: bool, at: P2) -> Option<Curve> {
+    let (t0, _) = co_range(e, fwd);
+    let s = pc.point(t0);
+    let d = at - P2::new(s.x, s.y);
+    let size = 1.0 + e.point(e.t[0]).coords.norm();
+    let same = (0..=8).all(|i| {
+        let q = pc.point(e.t[0] + (e.t[1] - e.t[0]) * i as f64 / 8.0);
+        (surf.eval(q.x, q.y) - surf.eval(q.x + d.x, q.y + d.y)).norm() <= tol::REL_POINT * size
+    });
+    same.then(|| pc.transformed(&Affine::translation(V3::new(d.x, d.y, 0.0))))
+}
+
 /// One merged face for the group, or None when the merge can't be made cleanly.
 fn merge_group(b: &mut Body, g: &[usize]) -> Option<Face> {
-    if let Some(f) = merge_torus_band(b, g) {
+    if let Some(f) = merge_band(b, g) {
         return Some(f);
     }
     let base = g[0];
@@ -1281,7 +1304,16 @@ pub fn merge_edges(b: &mut Body) {
                             ne.curve.tangent(ne.t[0]).dot(&travel) > 0.0
                         };
                         let sp = first.pc.point(ot0);
-                        let pc = pc_from(&surf, &ne, fwd, Some(P2::new(sp.x, sp.y)));
+                        let sp = P2::new(sp.x, sp.y);
+                        let mut pc = pc_from(&surf, &ne, fwd, Some(sp));
+                        // (Across a seam the surface doesn't call periodic: moved on to `sp`.)
+                        let s0 = pc.point(co_range(&ne, fwd).0);
+                        if (P2::new(s0.x, s0.y) - sp).norm()
+                            > tol::ROUNDOFF * (1.0 + sp.coords.norm())
+                            && let Some(moved) = repeat_onto(&surf, &pc, &ne, fwd, sp)
+                        {
+                            pc = moved;
+                        }
                         let mut nl: Vec<Coedge> = Vec::with_capacity(n - 1);
                         for (j, co) in l.iter().enumerate() {
                             if j == k {
