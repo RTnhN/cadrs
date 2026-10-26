@@ -1,4 +1,4 @@
-// docs/PCB_IN_PART_STUDIO.md P1–P2: a PCB Studio board derived into a Part Studio. The
+// A PCB Studio board derived into a Part Studio. The
 // mains-sensor enclosure (`board setup`, cadrs_core::samples::pcb_enclosure): a tube on an end
 // plate with a plug whose Live, Earth and Neutral pins stand up into it, "Board location" at
 // z 12, and PCB Studio 1's board "AC sensor".

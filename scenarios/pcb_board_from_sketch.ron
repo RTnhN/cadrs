@@ -1,4 +1,4 @@
-// docs/PCB_IN_PART_STUDIO.md P5: a board's outline from a Part Studio sketch. The mains-sensor
+// A board's outline from a Part Studio sketch. The mains-sensor
 // enclosure (`board setup`) with "Board outline" (`board outline-sketch`): a sketch on "Board
 // plane", 4 mm above Top inside the tube, the tube's four inner edges used (Use) and offset 1 mm
 // in (Offset): a 38 × 38 square from (−19, −19), with a ⌀3.2 mounting hole at (−15, 15).

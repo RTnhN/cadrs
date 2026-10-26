@@ -1,5 +1,4 @@
-//! A component's 3D model meshes as a part's [`Solid`] with no kernel body (a **mesh part**,
-//! `docs/PCB_IN_PART_STUDIO.md` Q1): its triangles grouped into faces that behave like a
+//! A component's 3D model meshes as a part's [`Solid`] with no kernel body (a **mesh part**): its triangles grouped into faces that behave like a
 //! modelled part's where it matters for fitting a board into an enclosure.
 //!
 //! - Each mesh (one model shape, one colour) is welded (vertices within 0.1 µm) and split into

@@ -1,5 +1,5 @@
 //! Board edits by name and number (`cadrs_core::pcb::ops`, the MCP server's board tools) and a
-//! PCB Studio board inserted straight into an assembly (`docs/PCB_IN_PART_STUDIO.md` P6–P7), on
+//! PCB Studio board inserted straight into an assembly, on
 //! the mains-sensor sample: its AC sensor board derived onto "Board location" in the
 //! Enclosure, whose plug's Live, Earth and Neutral pins stand at (0, 8), (0, 0) and (0, −8).
 #![cfg(feature = "brep")]

@@ -124,7 +124,7 @@ fn sync_scale_notice(
         .as_ref()
         .and_then(|d| d.active_element())
         .and_then(|e| match e.kind {
-            // A derived board's components (mesh parts, `docs/PCB_IN_PART_STUDIO.md`) cost little
+            // A derived board's components (mesh parts) cost little
             // and aren't modelled: they don't count.
             ElementKind::PartStudio { .. } => {
                 let components = cache

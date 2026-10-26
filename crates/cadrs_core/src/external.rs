@@ -289,7 +289,7 @@ fn snap(
         ElementKind::Drawing(_) => {
             return Err(LinkError::NotLinkable(format!("The drawing {}", el.name)));
         }
-        // A board derived at a version (`docs/PCB_IN_PART_STUDIO.md`): the studio as it was.
+        // A board derived at a version: the studio as it was.
         ElementKind::PcbStudio(_) => {}
         // P3F.6: a Render Studio renders its source here; it isn't linked elsewhere.
         ElementKind::Render(_) => {

@@ -226,7 +226,7 @@ pub enum InstanceSource {
     Assembly { element: ElementId },
     /// A whole Part Studio inserted as one **rigid** instance (P3B.8, A2.4): the parts listed
     /// on the instance ([`Instance::parts`]) move as one; its Edit adds or removes parts. With
-    /// `board`, a PCB Studio's board (`docs/PCB_IN_PART_STUDIO.md` §9): `element` is the PCB
+    /// `board`, a PCB Studio's board: `element` is the PCB
     /// Studio, the parts the board's and its components'
     /// ([`crate::pcb::PcbStudio::part_features`]).
     Studio {

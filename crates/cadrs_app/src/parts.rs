@@ -537,7 +537,7 @@ pub struct PartCache {
     /// Parts made transparent from the Parts list (Make transparent…): a view state, as
     /// Isolate, not saved and not undone.
     pub transparent: HashSet<PartId>,
-    /// Derived boards shown as their layout (`docs/PCB_IN_PART_STUDIO.md` §6): their
+    /// Derived boards shown as their layout: their
     /// components are not drawn or picked ([`crate::board_in_studio`] keeps this).
     pub layout_hidden: HashSet<PartId>,
     /// Derived boards whose faces don't show their skins (shown as their layout).

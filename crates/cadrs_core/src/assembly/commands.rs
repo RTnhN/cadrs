@@ -72,7 +72,7 @@ impl Command for InsertInstance {
                     ));
                 }
             }
-            // A PCB Studio's board designed in cadrs (`docs/PCB_IN_PART_STUDIO.md` §9).
+            // A PCB Studio's board designed in cadrs.
             super::InstanceSource::Studio { board: Some(b), .. } => {
                 if doc
                     .element(src)

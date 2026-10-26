@@ -1,4 +1,4 @@
-//! A native board as parts of a Part Studio (`docs/PCB_IN_PART_STUDIO.md` §5): what the
+//! A native board as parts of a Part Studio: what the
 //! Derived feature's rebuild makes from a board's layout, in the **board frame** of
 //! [`crate::pcb::model`] (layout x and y in mm, the bottom face at z = 0).
 //!

@@ -75,13 +75,13 @@ pub enum Subject {
 /// The board or component whose view is shown this frame, and in which mode (`None`: not a
 /// native board, or not the PCB Studio). Read by the 3D viewport to keep its hands off in 2D.
 /// The second field is set when the Layout's tools run **on a board in the 3D view** instead
-/// (a derived board's layout edited in a Part Studio, `docs/PCB_IN_PART_STUDIO.md` §7): the
+/// (a derived board's layout edited in a Part Studio): the
 /// view stays 3D and the pointer is mapped onto the board's face
 /// ([`crate::board_in_studio`]).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct Eda2d(pub Option<(ElementId, Subject, Mode)>, pub LayoutHost);
 
-/// Where the Layout's tools work (`docs/PCB_IN_PART_STUDIO.md` §7.2): the PCB Studio's flat
+/// Where the Layout's tools work: the PCB Studio's flat
 /// view, or a board in a 3D view (a Part Studio's derived board, an assembly's board instance),
 /// the pointer mapped onto its face. Either way they commit `SetDesign` on the PCB Studio.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
