@@ -48,24 +48,7 @@ pub fn export(
             .into_bytes(),
     );
     for (hash, ext) in blobs::used_by(doc) {
-        let bytes = if let Some(bytes) = blobs::get(&hash) {
-            bytes.to_vec()
-        } else {
-            // A stored source file can outlive the in-memory cache, under a different extension.
-            let dir = store.blobs_dir(doc.id);
-            let path = std::fs::read_dir(&dir)
-                .ok()
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(hash.as_str()))
-                .ok_or_else(|| format!("Missing required asset {hash}"))?;
-            std::fs::read(path).map_err(|e| e.to_string())?
-        };
-        if blobs::hash_of(&bytes) != hash {
-            return Err(format!("Asset {hash} failed validation"));
-        }
+        let bytes = blobs::bytes_for(&hash, &store.blobs_dir(doc.id))?;
         entries.insert(format!("blobs/{}", blobs::file_name(&hash, &ext)), bytes);
     }
     for name in ["thumbnail.png", "thumbnail-large.png"] {

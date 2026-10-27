@@ -160,7 +160,7 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
         MenuItem::new("asm-hide", "Hide").icon("hidden")
     };
     let is_sub = inst.source.is_assembly();
-    // A PCB Studio's board (`docs/PCB_IN_PART_STUDIO.md` §9): its layout is edited in its studio.
+    // A PCB Studio's board: its layout is edited in its studio.
     let board = match inst.source {
         cadrs_core::assembly::InstanceSource::Studio {
             element,
@@ -315,7 +315,7 @@ pub fn open_instance_menu(world: &mut World, at: Vec2, instance: InstanceId, han
             .icon("pcb-studio")
             .submenu(items)
     } else if board.is_some() {
-        // (`docs/PCB_IN_PART_STUDIO.md` §9: here, the assembly around it, or in its PCB Studio.)
+        // In context (here, among the parts around it) or in its PCB Studio.
         MenuItem::new("asm-board-edit", "Edit layout").icon("pcb-studio").submenu(vec![
             MenuItem::new("asm-board-edit-in-context", "In context").icon("assembly").tooltip("Edit the board's layout here, its components moved among the parts around it (the instance follows)").into(),
             MenuItem::new("asm-board-edit-layout", "In its PCB Studio").icon("pcb-studio").tooltip("Edit the board's layout in its PCB Studio (the instance follows)").into(),

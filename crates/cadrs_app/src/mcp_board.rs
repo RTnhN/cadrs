@@ -1,4 +1,4 @@
-//! The MCP server's PCB board tools (`docs/PCB_IN_PART_STUDIO.md` P7): read a board, derive it
+//! The MCP server's PCB board tools: read a board, derive it
 //! into a Part Studio, make one from a sketch, and move, add or remove its footprints, the
 //! fitting done by name and number ([`cadrs_core::pcb::ops`]). Each change is one undo step of
 //! the open document.
@@ -101,7 +101,7 @@ pub fn get_board_fit(world: &mut World, p: &tools::BoardFit) -> Result<Value, St
     let f = ops::deriving_feature(d, ps, pcb, id)
         .ok_or("the board isn't derived into that Part Studio: derive_board first")?;
     let el = d.element(ps).ok_or("no Part Studio")?;
-    let build = cadrs_core::rebuild::build(el.features());
+    let build = cadrs_core::rebuild::build(&el.part_features());
     let copies = build.derived.get(&f).map_or(0, |o| o.boards.len());
     let k = copy_index(p.copy, copies)?;
     let frame = build
@@ -250,7 +250,7 @@ pub fn derive_board(world: &mut World, p: &tools::DeriveBoard) -> Result<Value, 
         },
     )?;
     let el = doc(world)?.doc.element(ps).ok_or("no Part Studio")?;
-    let build = cadrs_core::rebuild::build(el.features());
+    let build = cadrs_core::rebuild::build(&el.part_features());
     Ok(json!({
         "feature": el.feature(feature).map(|f| f.name.clone()),
         "error": build.error(feature),
@@ -342,7 +342,7 @@ pub fn move_footprint(world: &mut World, p: &tools::MoveFootprint) -> Result<Val
             let f = ops::deriving_feature(d, ps, pcb, id)
                 .ok_or("the board isn't derived into that Part Studio")?;
             let copies =
-                cadrs_core::rebuild::build(d.element(ps).ok_or("no Part Studio")?.features())
+                cadrs_core::rebuild::build(&d.element(ps).ok_or("no Part Studio")?.part_features())
                     .derived
                     .get(&f)
                     .map_or(0, |o| o.boards.len());
@@ -357,7 +357,7 @@ pub fn move_footprint(world: &mut World, p: &tools::MoveFootprint) -> Result<Val
             let f = ops::deriving_feature(d, ps, pcb, id)
                 .ok_or("the board isn't derived into that Part Studio")?;
             let copies =
-                cadrs_core::rebuild::build(d.element(ps).ok_or("no Part Studio")?.features())
+                cadrs_core::rebuild::build(&d.element(ps).ok_or("no Part Studio")?.part_features())
                     .derived
                     .get(&f)
                     .map_or(0, |o| o.boards.len());

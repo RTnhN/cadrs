@@ -19,6 +19,7 @@ pub mod boolean;
 pub mod cam;
 pub mod camera;
 pub mod change_preview;
+pub mod collab;
 pub mod composite_ui;
 pub mod create_selection;
 pub mod cursor;
@@ -116,6 +117,7 @@ pub mod tool_input;
 pub mod transform_ui;
 pub mod units_dialog;
 pub mod update;
+pub mod variable_studio_ui;
 pub mod variables_ui;
 pub mod view_cube;
 pub mod view_options;
@@ -317,6 +319,14 @@ pub struct ActiveDocument {
     pub read_only: Option<String>,
     /// How many edits were refused while read-only (the session says so each time).
     pub refused: u32,
+    /// Who made the last change that came from someone else ([`Self::apply_remote`]), until
+    /// the History panel records it as theirs.
+    pub remote_author: Option<String>,
+    /// Tabs someone else has open for themselves (`collab::locks`), with their name: commands
+    /// on them are refused.
+    pub locked_tabs: Vec<(ElementId, String)>,
+    /// Set when a command was refused for that, to say so.
+    pub lock_refused: Option<String>,
 }
 
 /// P3E.4: a workspace's undo and redo stacks, kept while another workspace is open.
@@ -333,7 +343,10 @@ pub const READ_ONLY: &str = "This version is open read-only: it can't be edited"
 impl ActiveDocument {
     /// A scratch document that is not saved.
     pub fn new(mut doc: Document) -> Self {
-        // Derived features take their sources' snapshots (not an edit).
+        // The Variable Studios' values, in case the file's copies in its Part Studios and
+        // Assemblies are stale (a tab pasted from another document, an older file), then
+        // Derived features take their sources' snapshots (neither is an edit).
+        cadrs_core::variable_studio::propagate(&mut doc, None);
         cadrs_core::derived::resolve_document(&mut doc);
         Self {
             saved: doc.clone(),
@@ -348,6 +361,9 @@ impl ActiveDocument {
             redo_active: Vec::new(),
             read_only: None,
             refused: 0,
+            remote_author: None,
+            locked_tabs: Vec::new(),
+            lock_refused: None,
         }
     }
 
@@ -366,6 +382,15 @@ impl ActiveDocument {
         if self.read_only.is_some() {
             self.refused += 1;
             return Err(cadrs_core::CommandError::Invalid(READ_ONLY.into()));
+        }
+        // A tab someone else has open for themselves (`collab::locks`).
+        if let cadrs_core::Scope::Element(id) | cadrs_core::Scope::ElementName(id) = cmd.scope()
+            && let Some((_, name)) = self.locked_tabs.iter().find(|(e, _)| *e == id)
+        {
+            self.lock_refused = Some(name.clone());
+            return Err(cadrs_core::CommandError::Invalid(format!(
+                "{name} has this tab open"
+            )));
         }
         self.remember_active_index();
         let before = self.active;
@@ -411,6 +436,21 @@ impl ActiveDocument {
         }
         self.fix_active();
         r
+    }
+
+    /// A change someone else made, editing together ([`collab`]): `doc` is the document with
+    /// it. The undo and redo steps take it in, so undoing one's own edits afterwards leaves
+    /// theirs; the History panel records it as `author`'s. Not refused while read-only (a
+    /// view-only copy follows the owner's).
+    pub fn apply_remote(&mut self, doc: Document, author: &str) {
+        if doc == self.doc {
+            return;
+        }
+        let change = cadrs_core::collab::sync::Change::between(&self.doc, &doc);
+        self.history.rebase(&change);
+        self.doc = doc;
+        self.remote_author = Some(author.to_string());
+        self.fix_active();
     }
 
     /// Undoes the last command. Returns its label.
@@ -654,6 +694,7 @@ impl Plugin for CadrsAppPlugin {
                 frame_stats::FrameStatsPlugin,
                 frame_profile::FrameProfilePlugin,
                 debug_tools::DebugToolsPlugin,
+                collab::CollabPlugin,
                 update::UpdatePlugin,
             ))
             .add_plugins((
@@ -740,6 +781,7 @@ impl Plugin for CadrsAppPlugin {
             ))
             .add_plugins((
                 variables_ui::VariablesPlugin,
+                variable_studio_ui::VariableStudioUiPlugin,
                 scale_ui::ScalePlugin,
                 threads_ui::ThreadsPlugin,
                 simulation_ui::SimulationPlugin,

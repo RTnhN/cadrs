@@ -562,6 +562,8 @@ fn moved_component_documents_stay_tracked() {
         name: "secondary board parts".into(),
         created: 2_100,
         owned_by: USER.into(),
+        parent: None,
+        trashed: None,
     };
     lib.folders.push(target.clone());
     let comps: Vec<DocumentId> = lib

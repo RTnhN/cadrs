@@ -307,6 +307,14 @@ fn move_plane(p: &Plane, m: &Affine) -> Plane {
 /// Sweeps the profile (faces and chains in `plane` coordinates) along one spine.
 /// The pieces, each with the corner it starts at (none for the first, or where the path is
 /// tangent: [`Join::None`] keeps the profile's placement round corners and records none).
+/// A spine swept: its pieces, the corner before each (None: a smooth joint) and each one's
+/// face group.
+type Spine = (Vec<Tagged>, Vec<Option<Corner>>, Vec<u32>);
+
+/// Also each piece's face group (from `next_group` on): the path's faces, one per line or arc
+/// and per tangent run of other curves; the quarter turns a sampled run is cut into continue
+/// its group.
+#[allow(clippy::too_many_arguments)]
 fn sweep_spine(
     faces: &[MergedFace],
     chains: &[Vec<Piece>],
@@ -315,8 +323,21 @@ fn sweep_spine(
     frames: Frames,
     join: Join,
     solid: bool,
-) -> Result<(Vec<Tagged>, Vec<Option<Corner>>)> {
+    next_group: &mut u32,
+) -> Result<Spine> {
     let control = frames.control();
+    let mut groups: Vec<u32> = Vec::new();
+    // The next sampled piece continues the last one's face (a quarter turn gathered).
+    let mut continues = false;
+    // Each piece made gets a group: the last one's if it continues it, else a new one.
+    let mut flushed = |out: &Vec<Tagged>, groups: &mut Vec<u32>, continues: &mut bool| {
+        while groups.len() < out.len() {
+            if !std::mem::take(continues) || groups.is_empty() {
+                *next_group += 1;
+            }
+            groups.push(*next_group - 1);
+        }
+    };
     let mut place = plane;
     let mut out = Vec::new();
     let mut corners: Vec<Option<Corner>> = Vec::new();
@@ -378,6 +399,7 @@ fn sweep_spine(
                     &mut pending,
                     run_helix,
                 )?;
+                flushed(&out, &mut groups, &mut continues);
                 let v = seg.start();
                 let end = place;
                 place = move_plane(&place, &least_turn(&d1, &d2, &v));
@@ -413,9 +435,8 @@ fn sweep_spine(
                     .map(|g| g.dir(0.0).angle(&g.dir(1.0)))
                     .sum::<f64>()
                     + seg.dir(0.0).angle(&seg.dir(1.0));
-                if last.dir(1.0).dot(&seg.dir(0.0)) < 1.0 - tol::ANGULAR
-                    || turned > PI / 2.0 + tol::ANGULAR
-                {
+                let tangent = last.dir(1.0).dot(&seg.dir(0.0)) >= 1.0 - tol::ANGULAR;
+                if !tangent || turned > PI / 2.0 + tol::ANGULAR {
                     flush(
                         &mut run,
                         &mut place,
@@ -424,6 +445,8 @@ fn sweep_spine(
                         &mut pending,
                         run_helix,
                     )?;
+                    flushed(&out, &mut groups, &mut continues);
+                    continues = tangent;
                 }
             }
             if run.is_empty() {
@@ -440,6 +463,8 @@ fn sweep_spine(
             &mut pending,
             run_helix,
         )?;
+        flushed(&out, &mut groups, &mut continues);
+        continues = false;
         match &seg.c {
             Curve::Line { d, .. } => {
                 let dir = d.normalize() * if seg.rev { -1.0 } else { 1.0 };
@@ -449,6 +474,7 @@ fn sweep_spine(
                 let b = sweep_full(faces, chains, &kind, 0.0, len, false, solid)?;
                 out.push(Tagged::from_built(b));
                 corners.push(pending.take());
+                flushed(&out, &mut groups, &mut continues);
                 place = move_plane(&place, &Affine::translation(dir * len));
             }
             Curve::Circle { c, x, y, .. } => {
@@ -476,6 +502,7 @@ fn sweep_spine(
                 )?;
                 out.push(Tagged::from_built(b));
                 corners.push(pending.take());
+                flushed(&out, &mut groups, &mut continues);
                 let r = nalgebra::Rotation3::from_axis_angle(
                     &nalgebra::Unit::new_normalize(axis),
                     span,
@@ -500,7 +527,8 @@ fn sweep_spine(
         &mut pending,
         run_helix,
     )?;
-    Ok((out, corners))
+    flushed(&out, &mut groups, &mut continues);
+    Ok((out, corners, groups))
 }
 
 /// The least rotation about `o` taking direction `a` to `b`.
@@ -647,8 +675,26 @@ pub(crate) fn sweep_spines(
     let mut backs: Vec<Tagged> = Vec::new();
     let mut back_corners: Vec<Option<Corner>> = Vec::new();
     let mut corners: Vec<Option<Corner>> = Vec::new();
+    // The path's faces so far (one per line or arc, per tangent run of other curves).
+    let mut next_group = 0;
     for (spine, backward) in sp {
-        let (mut these, mut at) = sweep_spine(faces, chains, plane, &spine, frames, join, solid)?;
+        let (mut these, mut at, groups) = sweep_spine(
+            faces,
+            chains,
+            plane,
+            &spine,
+            frames,
+            join,
+            solid,
+            &mut next_group,
+        )?;
+        for (p, g) in these.iter_mut().zip(&groups) {
+            p.tags.iter_mut().for_each(|t| {
+                if t.iter().any(|o| matches!(o, Origin::ProfileCurve { .. })) {
+                    t.push(Origin::PathSegment { segment: *g });
+                }
+            });
+        }
         if std::env::var("CADRS_SWEEP_DEBUG").is_ok() {
             for t in &these {
                 eprintln!(
@@ -723,6 +769,14 @@ pub(crate) fn sweep_spines(
     // a two-way sweep's halves, are united).
     if pieces.is_empty() {
         return Err(KernelError::InvalidParameter("Select a sweep path".into()));
+    }
+    // A path of one face: its sides are named as before, by their profile curves alone.
+    if next_group <= 1 {
+        for p in &mut pieces {
+            for t in &mut p.tags {
+                t.retain(|o| !matches!(o, Origin::PathSegment { .. }));
+            }
+        }
     }
     let mut acc = pieces.remove(0);
     corners.remove(0);

@@ -1,4 +1,4 @@
-//! PCB Studio boards in a Part Studio (`docs/PCB_IN_PART_STUDIO.md`): what the app adds to a
+//! PCB Studio boards in a Part Studio: what the app adds to a
 //! Derived feature of a board ([`cadrs_core::derived::DerivedBoard`]).
 //!
 //! - **3D model or layout** (§6): a Derived board shows its 3D model (the board with its skins
@@ -119,7 +119,7 @@ struct BoardRef {
 }
 
 /// A board instance of the active assembly, by its id taken as a feature's (Edit layout in
-/// context, `docs/PCB_IN_PART_STUDIO.md` §9): its PCB Studio, its board, and the board as the
+/// context): its PCB Studio, its board, and the board as the
 /// studio derives it for the assembly ([`cadrs_core::pcb::PcbStudio::part_features`]).
 /// (A board inside a subassembly goes by its board part's occurrence id.)
 pub fn instance_board(
@@ -143,9 +143,10 @@ pub fn instance_board(
             (*pcb, *b)
         }
     };
-    let f = doc
-        .doc
-        .element(element)?
+    let cadrs_core::ElementKind::PcbStudio(p) = &doc.doc.element(element)?.kind else {
+        return None;
+    };
+    let f = p
         .part_features()
         .iter()
         .find(|f| f.id == cadrs_core::pcb::board_feature(b))?;
@@ -565,7 +566,7 @@ pub fn sync_overlays(world: &mut World) {
     // (key: feature, copy, top face, the changes; signature, frame, thickness, name, what else it
     // shows, edited, parts off the board). While a tool previews an edit (a drag) the picture of
     // the stored layout stays and a small one of the changes lies over it: the whole layout is
-    // drawn again once, when the edit is done (`docs/PCB_IN_PART_STUDIO.md` §7.1).
+    // drawn again once, when the edit is done.
     type Key = (FeatureId, usize, bool, bool);
     type Want = (Key, u64, PlaneFrame, f64, String, OverlayView, bool, bool);
     let mut want: Vec<Want> = vec![];
@@ -2503,7 +2504,7 @@ mod tests {
             },
         )
         .unwrap();
-        let build = cadrs_core::rebuild::build(doc.element(pe::STUDIO).unwrap().features());
+        let build = cadrs_core::rebuild::build(&doc.element(pe::STUDIO).unwrap().part_features());
         let mut w = World::new();
         let mut ad = ActiveDocument::new(doc);
         ad.set_active(pe::STUDIO);

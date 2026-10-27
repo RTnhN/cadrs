@@ -557,7 +557,7 @@ pub(crate) fn prune(doc: &mut Document, candidates: &[ElementId]) {
             }
         }
         // P3G.4: Derived features' copies (CAM Studio components' too).
-        for f in el.part_features() {
+        for f in el.part_features().iter() {
             if let crate::document::FeatureKind::Derived(d) = &f.kind
                 && let Some(c) = d.copy
             {

@@ -72,7 +72,7 @@ impl Command for InsertInstance {
                     ));
                 }
             }
-            // A PCB Studio's board designed in cadrs (`docs/PCB_IN_PART_STUDIO.md` §9).
+            // A PCB Studio's board designed in cadrs.
             super::InstanceSource::Studio { board: Some(b), .. } => {
                 if doc
                     .element(src)
@@ -388,8 +388,12 @@ impl Command for AddMateFeature {
         asm.mates.push(self.feature.clone());
         // P3F.4: offsets naming variables follow them.
         let units = doc.units;
+        let base = doc
+            .element(self.element)
+            .map(|e| e.variable_base())
+            .unwrap_or_default();
         if let Ok(asm) = assembly_mut(doc, self.element) {
-            super::vars::refresh(asm, &units);
+            super::vars::refresh(&base, asm, &units);
         }
         super::structure::place(doc, self.element, &self.poses)
     }
@@ -419,8 +423,12 @@ impl Command for SetMateFeature {
         *slot = self.feature.clone();
         // P3F.4: a changed variable reaches the offsets that name it.
         let units = doc.units;
+        let base = doc
+            .element(self.element)
+            .map(|e| e.variable_base())
+            .unwrap_or_default();
         if let Ok(asm) = assembly_mut(doc, self.element) {
-            super::vars::refresh(asm, &units);
+            super::vars::refresh(&base, asm, &units);
         }
         super::structure::place(doc, self.element, &self.poses)
     }

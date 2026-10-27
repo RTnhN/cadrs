@@ -447,10 +447,12 @@ impl Rebuilder {
                 let (p0, t0) = path_at(&path, 0.0);
                 let normal = path_plane(&path);
                 for (i, o) in grid.into_iter().skip(1) {
+                    // (An instance a hair past the end, a distance typed rounded, is at the end.)
                     let s = spacing * o[0];
-                    if s < -1e-9 || s > total + 1e-6 {
+                    if s < -1e-9 || s > total + 1e-4 {
                         return Err("Instances run past the end of the path; reduce the count or the distance".into());
                     }
+                    let s = s.min(total);
                     let (p, t) = path_at(&path, s);
                     let mut motion = Motion::translation(p - p0);
                     if x.tangent_to_curve {
@@ -934,8 +936,83 @@ impl Rebuilder {
         self.finish(id, placed, next, op, geoms, PartKind::Solid)
     }
 
+    /// The state the feature `before[i]` was built on.
+    fn state_before(&self, before: &[Feature], i: usize) -> Arc<State> {
+        let earlier: HashSet<FeatureId> = before[..i].iter().map(|f| f.id).collect();
+        self.trail
+            .iter()
+            .rev()
+            .find(|(f, _)| earlier.contains(f))
+            .map(|(_, s)| s.clone())
+            .unwrap_or_default()
+    }
+
+    /// The tools of seed features that each add or remove one solid (an extrude, revolve,
+    /// sweep or loft), made as new parts on the state each was built on: their copies add or
+    /// remove the whole tool, as the seeds did. The parts' difference before and after the
+    /// seeds would miss what a seed overlapped (material already cut away, or already
+    /// there), which its copies elsewhere must still take out or add (issue #104: a pattern
+    /// of a hole that overlaps another hole). `None` when a seed is another kind of feature or
+    /// its tool can't be made: then the difference is what is copied.
+    fn seed_tools(
+        &mut self,
+        before: &[Feature],
+        features: &[FeatureId],
+    ) -> Option<Vec<(BooleanOp, BodyId, BodyNames)>> {
+        let mut out: Vec<(BooleanOp, BodyId, BodyNames)> = Vec::new();
+        for (i, f) in before.iter().enumerate() {
+            if !features.contains(&f.id) {
+                continue;
+            }
+            let mut g = f.clone();
+            let (op, body) = match &mut g.kind {
+                FeatureKind::Extrude(x) => (&mut x.op, x.body),
+                FeatureKind::Revolve(x) => (&mut x.op, x.body),
+                FeatureKind::Sweep(x) => (&mut x.op, x.body),
+                FeatureKind::Loft(x) => (&mut x.op, x.body),
+                _ => return self.give_up(out),
+            };
+            let seed_op = *op;
+            if body == BodyType::Surface || !matches!(seed_op, BooleanOp::Add | BooleanOp::Remove) {
+                return self.give_up(out);
+            }
+            *op = BooleanOp::New;
+            let seen = self.state_before(before, i);
+            let o = self.compute(before, &g, &seen);
+            let made: Vec<&PartState> = o
+                .state
+                .parts
+                .iter()
+                .filter(|p| seen.part(p.part.id).is_none() && p.part.kind == PartKind::Solid)
+                .collect();
+            let bodies: Vec<(BodyId, BodyNames)> = made
+                .iter()
+                .filter_map(|p| Some((p.body?, (*p.names).clone())))
+                .collect();
+            let ok = o.error.is_none() && !bodies.is_empty() && bodies.len() == made.len();
+            for b in &o.owned {
+                if !ok || !bodies.iter().any(|(t, _)| t == b) {
+                    self.kernel.release(*b);
+                }
+            }
+            if !ok {
+                return self.give_up(out);
+            }
+            out.extend(bodies.into_iter().map(|(b, n)| (seed_op, b, n)));
+        }
+        Some(out)
+    }
+
+    /// No seed tools after all: the ones made so far released.
+    fn give_up<T>(&mut self, made: Vec<(BooleanOp, BodyId, BodyNames)>) -> Option<T> {
+        for (_, b, _) in made {
+            self.kernel.release(b);
+        }
+        None
+    }
+
     /// Feature pattern without Reapply, or Feature mirror: the material the features removed
-    /// and added, copied.
+    /// and added, copied (their whole tools when they have them, [`Self::seed_tools`]).
     fn copy_feature_effect(
         &mut self,
         before: &[Feature],
@@ -949,14 +1026,8 @@ impl Rebuilder {
             .iter()
             .position(|f| features.contains(&f.id))
             .ok_or("The features to copy no longer exist")?;
-        let earlier: HashSet<FeatureId> = before[..first].iter().map(|f| f.id).collect();
-        let prior: Arc<State> = self
-            .trail
-            .iter()
-            .rev()
-            .find(|(f, _)| earlier.contains(f))
-            .map(|(_, s)| s.clone())
-            .unwrap_or_default();
+        let prior = self.state_before(before, first);
+        let tools = self.seed_tools(before, features);
         let mut next = (**state).clone();
         let mut changed: Vec<PartId> = Vec::new();
         // Bodies made here that a later step replaced.
@@ -1001,6 +1072,21 @@ impl Rebuilder {
                     }
                     continue;
                 };
+                let pid = after.part.id;
+                if let Some(tools) = &tools {
+                    for (seed_op, body, names) in tools {
+                        let copies = self.copies_of(id, *body, names, make)?;
+                        let joined = self.join(id, copies)?;
+                        let placed = if *seed_op == BooleanOp::Remove {
+                            self.cut(id, pid, BoolOp::Subtract, &[&joined], &mut next)
+                        } else {
+                            self.add(id, &joined, &[pid], &mut next)
+                        };
+                        self.kernel.release(joined.0);
+                        self.place_now(&mut next, placed?, &mut changed, &mut spare);
+                    }
+                    continue;
+                }
                 let prior_names = prior_part.map(|p| p.names.clone()).unwrap_or_default();
                 let inputs: Vec<(BodyId, &BodyNames)> =
                     vec![(prior_body, &prior_names), (after_body, &after.names)];
@@ -1031,7 +1117,6 @@ impl Rebuilder {
                 };
                 let removed = difference(self, prior_body, after_body)?;
                 let added = difference(self, after_body, prior_body)?;
-                let pid = after.part.id;
                 if let Some((b, names)) = removed {
                     let copies = self.copies_of(id, b, &names, make);
                     self.kernel.release(b);
@@ -1052,6 +1137,9 @@ impl Rebuilder {
             Ok(())
         })();
         for b in spare {
+            self.kernel.release(b);
+        }
+        for (_, b, _) in tools.into_iter().flatten() {
             self.kernel.release(b);
         }
         if let Err(e) = result {

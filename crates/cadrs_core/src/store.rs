@@ -784,6 +784,7 @@ mod migrate {
                 open_context: None,
                 simulation: Default::default(),
                 named_views: Vec::new(),
+                studio_variables: Vec::new(),
                 kind: match e.kind {
                     ElementKindV1::PartStudio { features } => cur::ElementKind::PartStudio {
                         features: features
@@ -1275,6 +1276,7 @@ mod tests {
                 name: "Jigs".into(),
                 user: "me".into(),
                 now: 6,
+                parent: None,
             },
         );
         let (on_disk, _) = store.list();

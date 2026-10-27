@@ -1,31 +1,19 @@
 # cadrs
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
+<!-- Download buttons: the latest release's files under their names without the version (see
+.github/workflows/release.yml), the version on each badge read from GitHub by shields.io. macOS
+goes to the releases page (its badge counts pre-releases) until a full release has the Mac
+build; then link it to https://github.com/rvdende/cadrs/releases/latest/download/cadrs-universal-macos.dmg like the others. -->
+<p>
+  <a href="https://github.com/rvdende/cadrs/releases/latest/download/cadrs-x86_64-windows.zip"><img alt="Download for Windows" src="https://img.shields.io/github/v/release/rvdende/cadrs?style=for-the-badge&label=Windows&color=0078d4&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHBhdGggZmlsbD0nd2hpdGUnIGQ9J00yIDQuNCAxMC4zIDMuM3Y4SDJ6TTExLjMgMy4xIDIyIDEuN3Y5LjZIMTEuM3pNMiAxMi40aDguM3Y4LjJMMiAxOS41ek0xMS4zIDEyLjRIMjJ2OS45bC0xMC43LTEuNXonLz48L3N2Zz4="></a>
+  <a href="https://github.com/rvdende/cadrs/releases"><img alt="Download for macOS" src="https://img.shields.io/github/v/release/rvdende/cadrs?style=for-the-badge&include_prereleases&label=macOS&color=444444&logo=apple"></a>
+  <a href="https://github.com/rvdende/cadrs/releases/latest/download/cadrs-x86_64-linux.tar.gz"><img alt="Download for Linux" src="https://img.shields.io/github/v/release/rvdende/cadrs?style=for-the-badge&label=Linux&color=e95420&logo=linux&logoColor=white"></a>
+</p>
+
 **A parametric, feature-based CAD app written in Rust**, with a Bevy UI and its own pure-Rust
-B-rep modeling kernel. Its workflow follows Onshape's: sketch on a plane, constrain and dimension,
+B-rep modeling kernel. Its workflow is sketch on a plane, constrain and dimension,
 build parts from features, put them together in assemblies, and make drawings from them.
-
-[![From sketch to solid, then a PCB in the same Part Studio: schematic, board layout and the routed board in 3D](.github/images/pcb-demo.gif)](https://youtu.be/qT1FKZqUAxA)
-
-*From sketch to part to PCB, in one document. [Watch the 90-second demo](https://youtu.be/qT1FKZqUAxA).*
-
-## Install
-
-Prebuilt Linux and Windows builds are on [GitHub Releases](https://github.com/rvdende/cadrs/releases).
-To install from source, with the [build prerequisites](#building) in place:
-
-```sh
-git clone https://github.com/rvdende/cadrs
-cd cadrs
-cargo install-local
-```
-
-This builds in release and copies the app and its libraries to `~/.local/opt/cadrs` with
-`~/.local/bin/cadrs` and a `cadrs.desktop` entry (Linux), to `~/Applications/cadrs.app` (macOS),
-or to `%LOCALAPPDATA%\Programs\cadrs` with a Start Menu shortcut (Windows). Run it again to
-update the installed copy.
-
-## Features
 
 - **Sketching**: lines, rectangles, circles, arcs, splines, Bézier curves, ellipses, polygons,
   slots, points and text. Snapping and inference to points, midpoints, centres, intersections,
@@ -48,103 +36,12 @@ update the installed copy.
   import them (EPS and PDF need Ghostscript and Poppler installed).
 - **Onshape import**: bring your own Onshape documents across with their feature history
   instead of dead STEP geometry ([tools/onshape](tools/onshape/README.md)).
-
-<p>
-  <img src=".github/images/part-studio.png" width="49%" alt="The cylinder's parts in their Part Studio, with the feature list">
-  <img src=".github/images/render.png" width="49%" alt="A path-traced render of a two-part control arm">
-</p>
-
-![cadrs: a pneumatic cylinder assembly with its instances, subassemblies and fasteners](.github/images/assembly.png)
-
-## Native documents
-
-Use the document menu’s **Export document…** to write a **cadrs native document (`.cadrs`)**.
-It includes the current editable tabs, features, settings, and embedded source assets,
-including edits not yet autosaved. Saved versions, undo history, and rebuild caches are excluded.
-Frozen linked content is included; the original external documents are not bundled.
-
-On the documents page, choose **Create ▸ Import files…**, or drop a `.cadrs` file onto the
-page. Import creates and opens a new library copy; edits autosave to the library, not back to
-the imported file. Export again to share an updated copy.
-
-The file is a ZIP containing `manifest.ron` (archive format `cadrs`, version 1), the existing
-versioned `document.ron`, required assets in `blobs/`, and optional thumbnails. Readers limit
-packages to 16,384 entries and 512 MiB of uncompressed data. Legacy plain text `.cadrs`
-documents remain importable. Existing destination files are never overwritten.
-
-## Building
-
-You need a stable Rust toolchain ([rustup](https://rustup.rs)) and a C compiler (a few
-dependencies, such as `ring`, compile small C files). The B-rep kernel is pure Rust: there is
-no C++ or CMake build.
-
-On Debian or Ubuntu, Bevy also needs these:
-
-```sh
-sudo apt install build-essential pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
-```
-
-Then:
-
-```sh
-git clone https://github.com/rvdende/cadrs
-cd cadrs
-cargo run --release
-```
-
-To install it instead, with a launcher entry, see [Install](#install).
-
-On macOS, the Xcode command line tools (`xcode-select --install`) are enough; it builds and runs natively on Apple Silicon (Metal).
-
-Documents are stored in your platform's data folder (on Linux, `~/.local/share/cadrs/`).
-
-A Windows build can be cross-compiled from Linux with MinGW:
-`cargo build --release --target x86_64-pc-windows-gnu`.
-
-## Using it
-
-The mouse and keys follow Onshape's: right-drag orbits, middle-drag pans, and the wheel zooms
-toward the cursor. **Shift+S** starts a sketch, **Shift+E** an extrude, **N** views normal to
-the sketch plane, **Shift+7** gives the isometric view, and **F** zooms to fit. **Shift+/**
-(or Help › Keyboard shortcuts) lists the rest.
-
-## AI assistants (MCP)
-
-cadrs has an MCP server (Model Context Protocol), so an AI assistant on your machine (Claude
-Code, Claude Desktop, Cursor, …) can drive the running app: create documents, draw sketches,
-add and edit features, read back faces and edges, export STEP and take screenshots. Turn it on
-in **Preferences › AI assistants (MCP)**; the app then serves Streamable HTTP on
-`http://127.0.0.1:7680/mcp` (loopback only; the port is a preference). Every tool call runs
-through the command layer, so the assistant's steps show in the feature list and undo like
-your own.
-
-The repository's `.mcp.json` registers the server with Claude Code for this project (approve
+- **AI assistants (MCP)**: So an AI assistant on your machine (Claude Code, Claude Desktop, Cursor, …) can drive the running app: create documents, draw sketches, add and edit features, read back faces and edges, export STEP and take screenshots. Turn it on in **Preferences › AI assistants (MCP)**; the app then serves Streamable HTTP on `http://127.0.0.1:7680/mcp` (loopback only; the port is a preference). Every tool call runs through the command layer, so the assistant's steps show in the feature list and undo like your own. The repository's `.mcp.json` registers the server with Claude Code for this project (approve
 it with `/mcp` the first time; `claude mcp list` shows whether it is connected). Elsewhere,
 `claude mcp add --transport http cadrs http://127.0.0.1:7680/mcp` does the same, and other
 clients take the URL in their MCP settings.
 
-The tools: `create_document`, `open_document` and `get_document`; `add_part_studio`;
-`add_sketch` (rectangles, circles, polygons, lines and arcs on a default plane, a part face or
-a Plane feature); `extrude`; `add_feature`, `edit_feature`, `get_feature` and `delete_feature`
-for any feature type from JSON; `list_faces` and `list_edges` for the references fillets,
-chamfers and sketches take; `import_step` and `export_step`; `screenshot`; `run_scenario` for
-scripted UI steps; and `undo`. `crates/cadrs_mcp` is the server and the tools' schemas;
-`crates/cadrs_app/src/mcp.rs` runs the calls on the app.
-
-## Development
-
-```sh
-cargo test --workspace                    # all tests
-cargo clippy --workspace --all-targets    # lints
-cargo run -- --headless --scenario <name> # run a scripted scenario, saving screenshots
-```
-
-Scenarios (`scenarios/*.ron`) drive the real app with synthetic input and write PNGs to
-`target/scenarios/<name>/`. The golden tests in `crates/cadrs/tests/golden.rs` compare them
-with baselines kept on your machine (`tests/golden/`, not committed); the first run records
-them, and `CADRS_BLESS=1` saves new ones.
-
-### Layout
+### Codebase
 
 | Crate | What it is |
 |---|---|
@@ -158,32 +55,12 @@ them, and `CADRS_BLESS=1` saves new ones.
 | `cadrs_fea` | Linear static finite-element analysis |
 | `cadrs_render` | A CPU path tracer for photorealistic renders |
 | `cadrs_idf`, `cadrs_pcb` | IDF files and PCB boards |
-| `cadrs_onshape` | The Onshape document importer |
 | `cadrs_harness` | Scripted scenarios, synthetic input and screenshots |
 | `cadrs_mcp` | The MCP server through which AI assistants drive the app |
 
-[crates/cadrs_kernel/README.md](crates/cadrs_kernel/README.md) describes the modeling layer:
-the kernel API, persistent face and edge naming, and the native kernel's design. The notes in
-`reference/onshape/` record how Onshape behaves, which is what cadrs is measured against.
+## Sponsors
+Thank you to: 
 
-## License
+[Sponsor cadrs on GitHub](https://github.com/sponsors/rvdende). 
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
-  <http://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
-
-at your option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion
-in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
-without any additional terms or conditions.
-
-Third-party parts keep their own licenses: the [Inter](https://rsms.me/inter/) font is under
-the SIL Open Font License ([assets/fonts/OFL.txt](assets/fonts/OFL.txt)).
-
-## Disclaimer
-
-cadrs is an independent project. It is not affiliated with, endorsed by or sponsored by PTC
-or Onshape. Onshape is a trademark of PTC Inc. cadrs uses its own icons, font and branding.
+<!-- sponsors --><a href="https://github.com/thomasfla"><img src="https:&#x2F;&#x2F;github.com&#x2F;thomasfla.png" width="60px" alt="User avatar: Thomas Flayols" /></a><!-- sponsors -->

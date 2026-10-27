@@ -1,4 +1,4 @@
-// docs/PCB_IN_PART_STUDIO.md P3: a derived board's layout edited in the Part Studio. The
+// A derived board's layout edited in the Part Studio. The
 // mains-sensor enclosure with its board derived onto Board location (`board derive`), the tube
 // and end plate see-through. The board's outline centre (15.5, 19.5) is on (0, 0, 12): J4 (Live
 // in, layout (14, 3.5)) is at (−1.5, −16, 13.6), the Live pin at (0, 8).

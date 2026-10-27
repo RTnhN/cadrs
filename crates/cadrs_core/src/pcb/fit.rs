@@ -1,5 +1,5 @@
-//! Fitting a board into the parts around it (`docs/PCB_IN_PART_STUDIO.md` §7.3), on display
-//! meshes (components are mesh parts, Q1), in the **board frame** of a board copy (layout x and
+//! Fitting a board into the parts around it, on display
+//! meshes (components are mesh parts), in the **board frame** of a board copy (layout x and
 //! y in mm on its bottom face, z up through it).
 //!
 //! - [`section`]: what of some parts lies between two heights above (or below) the board,

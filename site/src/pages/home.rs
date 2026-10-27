@@ -27,21 +27,28 @@ struct Release {
 /// Points the download links and the release label at the latest GitHub release when the page
 /// loads, so a release published, replaced or deleted since the export shows without a redeploy
 /// (kept for ten minutes per browser session, as unauthenticated calls are rate-limited). With no
-/// release left the links go to the releases page; a platform the release has no archive for
-/// goes to the release's own page.
+/// release left the links go to the releases page. A platform the latest release has no file for
+/// takes the newest pre-release's that has one, and shows its `data-release-pre` mark ("beta":
+/// macOS, while only betas have its disk image); with none it goes where its link's
+/// `data-release-fallback` says (macOS: the build notes), else to the release's own page.
 pub const RELEASE_SCRIPT: &str = "<script>(function(){\
-var key=\"cadrs-release\",releases=\"https://github.com/rvdende/cadrs/releases\";\
-var suffix={windows:\"-x86_64-windows.zip\",linux:\"-x86_64-linux.tar.gz\"};\
+var key=\"cadrs-releases\",releases=\"https://github.com/rvdende/cadrs/releases\";\
+var suffix={windows:\"-x86_64-windows.zip\",linux:\"-x86_64-linux.tar.gz\",macos:\"-universal-macos.dmg\"};\
 function show(r){var l=document.querySelectorAll(\"[data-release-label]\");for(var i=0;i<l.length;i++)\
 l[i].textContent=r?\"Latest release: \"+r.tag:\"Latest release\";\
-var a=document.querySelectorAll(\"[data-release-asset]\");for(var i=0;i<a.length;i++)\
-a[i].href=r?r.assets[a[i].getAttribute(\"data-release-asset\")]||r.page:releases}\
+var a=document.querySelectorAll(\"[data-release-asset]\");for(var i=0;i<a.length;i++){\
+var p=a[i].getAttribute(\"data-release-asset\"),f=a[i].getAttribute(\"data-release-fallback\");\
+a[i].href=r?r.assets[p]||f||r.page:f||releases;\
+var m=a[i].querySelector(\"[data-release-pre]\");if(m)m.classList.toggle(\"hidden\",!(r&&r.pre[p]))}}\
 function ready(f){if(document.readyState===\"loading\")document.addEventListener(\"DOMContentLoaded\",f);else f()}\
 try{var c=JSON.parse(sessionStorage.getItem(key));if(c&&Date.now()-c.t<6e5){ready(function(){show(c.r)});return}}catch(e){}\
-fetch(\"https://api.github.com/repos/rvdende/cadrs/releases/latest\").then(function(res){\
-return res.status===404?{}:res.ok?res.json():null}).then(function(j){if(!j)return;var r=null;\
-if(j.tag_name){r={tag:j.tag_name,page:j.html_url||releases,assets:{}};(j.assets||[]).forEach(function(x){\
-for(var p in suffix)if(x.name.slice(-suffix[p].length)===suffix[p])r.assets[p]=x.browser_download_url})}\
+fetch(\"https://api.github.com/repos/rvdende/cadrs/releases?per_page=20\").then(function(res){\
+return res.ok?res.json():null}).then(function(js){if(!js)return;var r=null,pre={};\
+js.forEach(function(j){if(j.draft)return;var as={};(j.assets||[]).forEach(function(x){\
+for(var p in suffix)if(x.name.slice(-suffix[p].length)===suffix[p])as[p]=x.browser_download_url});\
+if(!j.prerelease&&!r)r={tag:j.tag_name,page:j.html_url||releases,assets:as,pre:{}};\
+if(j.prerelease)for(var p in as)if(!pre[p])pre[p]=as[p]});\
+if(r)for(var p in pre)if(!r.assets[p]){r.assets[p]=pre[p];r.pre[p]=true}\
 try{sessionStorage.setItem(key,JSON.stringify({r:r,t:Date.now()}))}catch(e){}ready(function(){show(r)})})\
 .catch(function(){})\
 })()</script>";
@@ -205,8 +212,9 @@ fn link_button(size: ButtonSize, variant: ButtonVariant) -> ButtonStyle {
     })
 }
 
-/// One button per desktop platform: the latest release for Windows and Linux, and the build
-/// notes for macOS, which has no release build.
+/// One button per desktop platform: the latest release's archive for Windows and Linux, and the
+/// newest disk image for macOS (the page's script finds it, marked "beta" while it comes from a
+/// pre-release; the build notes until there is one).
 struct PlatformButtons;
 
 impl<L: DataLoader> WebRenderSync<L> for PlatformButtons {
@@ -239,13 +247,21 @@ impl<L: DataLoader> WebRenderSync<L> for PlatformButtons {
                     }}
                     "Linux"
                 </a>
-                <a href="#build" class={link_button(ButtonSize::Lg, ButtonVariant::Outline)}>
+                <a
+                    href="#build"
+                    data-release-asset="macos"
+                    data-release-fallback="#build"
+                    class={link_button(ButtonSize::Lg, ButtonVariant::Solid)}
+                >
                     {Icon {
                         icon: IconRs(icon_rs::PLATFORM_MACOS),
                         size: Some(IconSize::Sm),
                         class: None,
                     }}
                     "macOS"
+                    <span data-release-pre class="hidden text-xs font-normal opacity-80">
+                        "beta"
+                    </span>
                 </a>
             </div>
         }
@@ -286,7 +302,7 @@ impl<L: DataLoader> WebRenderSync<L> for Downloads {
                                 >
                                     "GitHub Releases"
                                 </a>
-                                ". On macOS, build from source: it runs natively on Apple Silicon."
+                                ". The macOS app is universal, one download for Apple silicon and Intel Macs. It isn't signed yet, so open cadrs the first time with right-click › Open. Or build from source."
                             </p>
                         }),
                     }}
@@ -589,7 +605,7 @@ impl<L: DataLoader, B: WriteBuf> MdRenderSync<L, B> for Downloads {
 
             [Linux (x86_64)]({linux}) · [Windows (x86_64)]({windows})
 
-            Every release, with SHA\-256 checksums, is on [GitHub Releases](https://github.com/rvdende/cadrs/releases)\. On macOS, build from source: it runs natively on Apple Silicon\.
+            Every release, with SHA\-256 checksums, is on [GitHub Releases](https://github.com/rvdende/cadrs/releases)\. The macOS app is universal, one download for Apple silicon and Intel Macs\. It isn't signed yet, so open cadrs the first time with right\-click › Open\. Or build from source\.
             "###
         }
         .render_md(cx)

@@ -722,6 +722,8 @@ pub fn create_folder(world: &mut World, name: &str) -> Option<cadrs_core::Folder
         name: free_name(name, &taken),
         created: now,
         owned_by: user,
+        parent: None,
+        trashed: None,
     };
     let mut after = before.clone();
     after.folders.push(entry.clone());

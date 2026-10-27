@@ -2036,6 +2036,12 @@ fn golden_section_view_planes() {
 
 #[test]
 #[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
+fn golden_assembly_section_default_plane() {
+    run_scenario("assembly_section_default_plane");
+}
+
+#[test]
+#[ignore = "headless screenshots; run with: cargo test -r -p cadrs -F app-tests --test golden -- --ignored"]
 fn golden_sheetmetal_collision() {
     run_scenario("sheetmetal_collision");
 }

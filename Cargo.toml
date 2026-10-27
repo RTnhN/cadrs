@@ -24,10 +24,11 @@ default-members = [
     "crates/cadrs_router_kernels",
     "crates/cadrs_sheetmetal",
     "crates/cadrs_sketch",
+    "crates/cadrs_vars",
 ]
 
 [workspace.package]
-version = "0.1.8"
+version = "0.1.9-beta"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rvdende/cadrs"
@@ -47,7 +48,7 @@ bytemuck = "1"
 slotmap = { version = "1", features = ["serde"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 resvg = "0.45"
-icon-rs = "0.4.5"
+icon-rs = "0.4.6"
 directories = "6"
 # Wayland file drops (`cadrs_app::file_drop`): winit has no Wayland drag-and-drop, so the app
 # reads drops off winit's own Wayland connection. The versions winit already pulls in.
@@ -91,11 +92,19 @@ rmcp = { version = "3.5", default-features = false, features = ["server", "macro
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
 tokio-util = "0.7"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+# Sharing and collaboration (cadrs_net): peers over iroh, no server. Only the transport, rooms
+# and typed messages; the voice and video features stay off (MIT/Apache-2.0).
+bevy_iroh = { version = "0.4.5", default-features = false }
+# Share links (cadrs_net): postcard, then base32 so a link survives a chat client.
+postcard = { version = "1.1", features = ["alloc"] }
+data-encoding = "2"
 
 cadrs_core = { path = "crates/cadrs_core" }
 cadrs_cam = { path = "crates/cadrs_cam" }
 cadrs_sketch = { path = "crates/cadrs_sketch" }
+cadrs_vars = { path = "crates/cadrs_vars" }
 cadrs_ui = { path = "crates/cadrs_ui" }
+cadrs_net = { path = "crates/cadrs_net" }
 cadrs_app = { path = "crates/cadrs_app" }
 cadrs_harness = { path = "crates/cadrs_harness" }
 cadrs_kernel = { path = "crates/cadrs_kernel" }

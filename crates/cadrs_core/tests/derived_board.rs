@@ -1,4 +1,4 @@
-//! A PCB Studio board derived into a Part Studio (`docs/PCB_IN_PART_STUDIO.md` P1): the board's
+//! A PCB Studio board derived into a Part Studio: the board's
 //! solid and its components' mesh parts, placed by the Derived feature's locations, following
 //! the board's layout live, with ids that survive layout edits.
 //!

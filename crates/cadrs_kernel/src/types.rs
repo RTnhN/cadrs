@@ -872,13 +872,21 @@ impl FilletSpec {
 /// Where a chamfer's distances are measured (P3.6, PS14.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ChamferMeasure {
-    /// Along each face from the edge.
+    /// Along each face from the edge: exact between faces straight across the edge (planes, a
+    /// cylinder's rim) and round a cylinder running along a straight edge. Where a face curves
+    /// across the edge otherwise (a cone along its line, a sphere, a torus), and along a tangent
+    /// chain any edge of which is such, the local chamfer puts its contacts where the ball whose
+    /// contacts on the faces' tangent planes lie that far touches the faces: off by more the
+    /// more a face curves within the distance (were it used on a cylinder of radius 10 meeting a
+    /// plane at 127°, 1 would land 1.07 along the plane and 1.20 round the cylinder). The
+    /// tool-and-boolean fallback measures round the faces.
     #[default]
     Offset,
     /// Along the faces' tangent planes at the edge, from where they meet. The same as Offset
     /// on a face that is straight across the edge (a plane, a cylinder's rim); on a face that
     /// curves across it (a sphere, a cylinder along a straight edge) of radius R a tangent
-    /// distance d is the chord `2R sin(atan(d/R)/2)` from the edge.
+    /// distance d lands at the angle `atan(d/R)` round it from the edge: the arc `R atan(d/R)`
+    /// (the chord `2R sin(atan(d/R)/2)`).
     Tangent,
 }
 
@@ -1036,6 +1044,13 @@ pub struct EdgeInfo {
     /// and Use projects the exact curve).
     #[serde(default)]
     pub circle: Option<Circle3>,
+    /// The faces either side meet tangentially along it (within [`crate::TANGENT_ANGLE`]): a
+    /// smooth edge, which tangent propagation doesn't run along. (Picked on its own, an edge
+    /// whose faces meet at a hair under that is still blended: only one whose faces' normals
+    /// agree to a point's tolerance has nothing to take off.) Only with the edges' lengths
+    /// ([`crate::Kernel::edges`]).
+    #[serde(default)]
+    pub smooth: bool,
 }
 
 impl EdgeInfo {
@@ -1157,6 +1172,14 @@ pub enum Origin {
         body: BodyId,
         /// Its vertex.
         vertex: VertexId,
+    },
+    /// Given besides [`Origin::ProfileCurve`] to a side face of a sweep along a path of
+    /// several pieces (its lines and arcs, a tangent run of other curves): the piece, 0, 1, …
+    /// along the path, it was swept along. A profile curve sweeps a face along each, as
+    /// Onshape's sweep has them (a cylinder, a torus, a cylinder), each a face of its own.
+    PathSegment {
+        /// The piece's place along the path.
+        segment: u32,
     },
 }
 

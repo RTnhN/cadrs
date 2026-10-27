@@ -916,7 +916,7 @@ fn source_text(doc: &cadrs_core::Document, d: &DerivedFeature) -> (String, Strin
 type SourceRow = (String, String, SourceRef, Option<BoardId>);
 
 /// What the picker offers: the Part Studios, then every board designed in cadrs of each PCB
-/// Studio (`docs/PCB_IN_PART_STUDIO.md` §4.1).
+/// Studio.
 fn studio_rows(world: &World, s: &DerivedSession) -> Vec<SourceRow> {
     let doc = &world.resource::<ActiveDocument>().doc;
     // (tab, its label, the board) per source.
@@ -1634,8 +1634,8 @@ fn spawn_body(
     });
 }
 
-/// The dialog's body under the source card for a PCB Studio board (`docs/PCB_IN_PART_STUDIO.md`
-/// §4.1): what it shows, which components come in, where it goes and how it sits there.
+/// The dialog's body under the source card for a PCB Studio board:
+/// what it shows, which components come in, where it goes and how it sits there.
 fn spawn_board_options(p: &mut ChildSpawnerCommands, t: &Theme, v: &View, b: &BoardRows) {
     section(p, t, "derived-board-view-label", "Show");
     p.spawn(
@@ -1951,7 +1951,7 @@ fn sync_source_list(world: &mut World, mut last: Local<Option<(Browse, u64)>>) {
 // The Feature list
 
 /// A Derived row's children (DV3.5): what the rebuild brought in, with names. A derived board
-/// (`docs/PCB_IN_PART_STUDIO.md` §6) lists each copy's board, then a row that switches it
+/// lists each copy's board, then a row that switches it
 /// between its 3D model and its layout (`view`), then "Components (n)", open (`components_open`)
 /// with the components under it.
 pub fn children(
@@ -2421,6 +2421,8 @@ pub fn script(world: &mut World, arg: &str) {
                     name: "Linked parts".into(),
                     created: now - 7_200,
                     owned_by: user.clone(),
+                    parent: None,
+                    trashed: None,
                 });
                 if let Err(e) = store.sync(&lib, &after) {
                     warn!("derived setup: {e}");

@@ -93,6 +93,15 @@ impl Snapshot {
         })
     }
 
+    /// Carries someone else's edit into the copy (see [`History::rebase`]).
+    fn rebase(&mut self, change: &crate::collab::sync::Change) {
+        match self {
+            Snapshot::Document(d) | Snapshot::Whole(d) => change.apply_to(d),
+            Snapshot::Element { element, .. } => change.apply_to_element(element),
+            Snapshot::ElementName { .. } => {}
+        }
+    }
+
     /// The element whose contents this snapshot holds.
     fn element_id(&self) -> Option<ElementId> {
         match self {
@@ -149,7 +158,15 @@ pub struct History {
     undo: Vec<Entry>,
     redo: Vec<Entry>,
     limit: usize,
+    /// See [`History::revision`].
+    revision: u64,
+    /// See [`History::id`].
+    id: u64,
 }
+
+/// The source of [`History::revision`]: one counter for every history, so two histories (two
+/// workspaces) never share a revision.
+static REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Default for History {
     fn default() -> Self {
@@ -164,7 +181,26 @@ impl History {
             undo: Vec::new(),
             redo: Vec::new(),
             limit: limit.max(1),
+            revision: 0,
+            id: REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
+    }
+
+    /// Which history this is (each workspace keeps its own): work started on one can tell it
+    /// is now looking at another.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Changes whenever the stacks do (a command, an undo or a redo, a merge): work started at
+    /// one revision (a solve running in the background) can tell whether anything happened
+    /// since, which the stacks' lengths can't (at the step limit an edit keeps the length).
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump(&mut self) {
+        self.revision = REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Applies `cmd` to `doc` and records it. On error the document is left unchanged and nothing
@@ -176,6 +212,9 @@ impl History {
             before.restore(doc);
             return Err(e);
         }
+        // The Variable Studios' variables reach every Part Studio and Assembly first, so the
+        // Derived features below copy their sources with the new values.
+        crate::variable_studio::propagate(doc, Some(scope));
         // P3G.4: Derived features that follow a tab of this document live.
         crate::derived::refresh(doc);
         let after = Snapshot::take(doc, scope)?;
@@ -192,16 +231,29 @@ impl History {
             self.undo.remove(0);
         }
         self.redo.clear();
+        self.bump();
         Ok(())
+    }
+
+    /// Carries an edit someone else made (editing together, [`crate::collab::sync`]) into
+    /// every undo and redo step's copies, so that undoing one's own edit afterwards takes back
+    /// only that: their features, tabs and changes stay.
+    pub fn rebase(&mut self, change: &crate::collab::sync::Change) {
+        for e in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            e.before.rebase(change);
+            e.after.rebase(change);
+        }
     }
 
     /// Undoes the last command. Returns its label, or `None` if there is nothing to undo.
     pub fn undo(&mut self, doc: &mut Document) -> Option<String> {
         let entry = self.undo.pop()?;
         entry.before.restore(doc);
+        crate::variable_studio::propagate(doc, None);
         crate::derived::refresh(doc);
         let label = entry.label.clone();
         self.redo.push(entry);
+        self.bump();
         Some(label)
     }
 
@@ -209,9 +261,11 @@ impl History {
     pub fn redo(&mut self, doc: &mut Document) -> Option<String> {
         let entry = self.redo.pop()?;
         entry.after.restore(doc);
+        crate::variable_studio::propagate(doc, None);
         crate::derived::refresh(doc);
         let label = entry.label.clone();
         self.undo.push(entry);
+        self.bump();
         Some(label)
     }
 
@@ -244,6 +298,7 @@ impl History {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.bump();
     }
 
     /// Merges every undo step above the first `mark` steps into one step called `label`, as
@@ -252,6 +307,7 @@ impl History {
     /// changes nothing, if the steps do not all edit the same scope; with no steps above
     /// `mark` it does nothing and returns true.
     pub fn squash_since(&mut self, mark: usize, label: impl Into<String>) -> bool {
+        self.bump();
         if self.undo.len() <= mark {
             self.redo.clear();
             return true;
@@ -298,6 +354,7 @@ impl History {
         element: ElementId,
         label: impl Into<String>,
     ) -> (Vec<usize>, bool) {
+        self.bump();
         self.redo.clear();
         let idx: Vec<usize> = (mark..self.undo.len())
             .filter(|i| self.undo[*i].before.element_id() == Some(element))
@@ -330,6 +387,7 @@ impl History {
         mark: usize,
         element: ElementId,
     ) -> Vec<usize> {
+        self.bump();
         self.redo.clear();
         let idx: Vec<usize> = (mark..self.undo.len())
             .filter(|i| self.undo[*i].before.element_id() == Some(element))
@@ -347,6 +405,7 @@ impl History {
     /// Drops the undo steps above the first `mark` steps without touching the document (the
     /// caller has already restored the state they started from) and clears the redo stack.
     pub fn discard_since(&mut self, mark: usize) {
+        self.bump();
         self.undo.truncate(mark);
         self.redo.clear();
     }
@@ -357,6 +416,26 @@ mod scope_tests {
     use super::*;
     use crate::commands::{AddSketch, RenameDocument, RenameElement};
     use crate::ids::FeatureId;
+
+    #[test]
+    fn the_revision_changes_at_the_step_limit() {
+        let mut doc = Document::new("Doc");
+        let mut h = History::new(1);
+        let rename = |n: &str| RenameDocument { name: n.into() };
+        h.execute(&mut doc, &rename("A")).unwrap();
+        let (len, rev) = (h.undo_len(), h.revision());
+        h.execute(&mut doc, &rename("B")).unwrap();
+        assert_eq!(h.undo_len(), len);
+        assert_ne!(h.revision(), rev);
+        let rev = h.revision();
+        h.undo(&mut doc);
+        h.redo(&mut doc);
+        assert_ne!(h.revision(), rev);
+        // Another history never has the same revision.
+        let mut other = History::new(1);
+        other.execute(&mut doc, &rename("C")).unwrap();
+        assert_ne!(other.revision(), h.revision());
+    }
 
     #[test]
     fn element_steps_merge_and_drop_around_a_rename() {

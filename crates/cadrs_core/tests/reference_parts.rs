@@ -24,14 +24,17 @@ use cadrs_core::advanced::{
     LoftFeature, LoftProfile, PathRef, SplitFeature, SplitToolRef, SweepFeature,
 };
 use cadrs_core::applied::{
-    ChamferFeature, EdgeOrFace, FilletFeature, HoleFeature, HolePoint, ShellFeature,
+    ChamferFeature, EdgeOrFace, EdgePoint, FilletFeature, FilletMeasurement, HoleFeature,
+    HolePoint, ShellFeature, VertexRadius,
 };
 use cadrs_core::commands::{
-    AddExtrude, AddFeature, AddRevolve, AddSketch, EditSketch, SetExtrude, SetRevolve,
+    AddExtrude, AddFeature, AddRevolve, AddSketch, DeleteFeature, EditSketch, ReplaceFeature,
+    SetExtrude, SetRevolve,
 };
 use cadrs_core::document::{
-    AxisRef, BooleanFeature, BooleanKind, BooleanOp, DirectionRef, Document, EdgeRef, EndCondition,
-    EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef, RevolveFeature, RevolveType,
+    AxisRef, BodyType, BooleanFeature, BooleanKind, BooleanOp, DeletePartFeature, DirectionRef,
+    Document, EdgeRef, EndCondition, EndType, ExtrudeFeature, FaceRef, FeatureKind, RegionRef,
+    RevolveFeature, RevolveType, ThinWall, VertexRef,
 };
 use cadrs_core::draft::{DraftFeature, ExtrudeDraft};
 use cadrs_core::hole::{HoleEnd, HoleSpec, HoleStyle, Length};
@@ -42,11 +45,19 @@ use cadrs_core::pattern::{MirrorFeature, MirrorPlane, PatternFeature, PatternKin
 use cadrs_core::plane::{PlaneEntity, PlaneFeature, PlaneType};
 use cadrs_core::rebuild::Rebuilder;
 use cadrs_core::rebuild::exchange::{ExportItem, ExportRequest, ModelFormat};
+use cadrs_core::sheetmetal::{
+    CurveRef as SmCurveRef, SheetMetalExprs, SheetMetalModelFeature, SheetMetalOp,
+};
+use cadrs_core::sheetmetal_features::{FlangeFeature, HemFeature, SheetMetalFeature};
+use cadrs_core::sheetmetal_flat::FlatExtrudeFeature;
+use cadrs_core::surfacing::{FillEdge, FillFeature, ThickenFeature};
 use cadrs_core::{ElementId, Feature, FeatureId, History, Part, PartId};
+use cadrs_sheetmetal::model::HemAlignment;
+use cadrs_sheetmetal::sharp_edit::{FlangeAlignment, HemKind};
 use cadrs_sketch::region::regions;
 use cadrs_sketch::{
-    ConstraintSpec, CurveId, CurveKind, CurveRef, CurveSpec, Dimension, DimensionKind, Orient,
-    PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchOp, Vec2,
+    ConstraintSpec, CurveId, CurveKind, CurveRef, CurveSpec, Dimension, DimensionKind,
+    FeaturePlane, Orient, PlaneRef, PointId, PointRef, PointSpec, Sketch, SketchOp, Vec2,
 };
 
 /// Volume and area: relative tolerance unless the case gives one (SolidCraft's default).
@@ -157,6 +168,48 @@ struct Recipe {
     offsets: Vec<(usize, f64, PlaneRef)>,
     params: HashMap<String, f64>,
     notes: Vec<String>,
+    /// Sketches of a fitted spline through points on a helix, made a Helix feature instead.
+    helices: HashMap<String, FeatureId>,
+    /// The sheet metal model and its rule as now edited.
+    sheet: Option<(FeatureId, Rule)>,
+    /// Unfolded: sketches parallel to the flat go on the flat pattern's plane, and cuts of them
+    /// are flat extrudes.
+    flat: Option<(PlaneRef, Frame)>,
+    flat_sketches: Vec<FeatureId>,
+}
+
+/// A sheet metal rule (SolidCraft's, as its recipes name and edit them).
+#[derive(Clone, Copy)]
+struct Rule {
+    thickness: f64,
+    /// The inner bend radius; `None`: the thickness.
+    bend_radius: Option<f64>,
+    k_factor: f64,
+}
+
+impl Rule {
+    /// "Steel (mm)": 2.5 thick, the bend radius the thickness, K 0.44 (reference part 74's
+    /// bend allowance (π/2)(R + K t) = 5.654866776), a minimal gap of 0.01 (73's flat hem,
+    /// 75's flange beside another).
+    fn named(name: &str) -> R<Rule> {
+        match name {
+            "Steel (mm)" => Ok(Rule {
+                thickness: 2.5,
+                bend_radius: None,
+                k_factor: 0.44,
+            }),
+            other => unsupported(format!("sheet metal rule `{other}`")),
+        }
+    }
+
+    fn params(&self) -> cadrs_sheetmetal::Params {
+        let mut p = SheetMetalModelFeature::default_params();
+        p.thickness = self.thickness;
+        p.bend_radius = self.bend_radius.unwrap_or(self.thickness);
+        p.k_factor = self.k_factor;
+        p.minimal_gap = 0.01;
+        p
+    }
 }
 
 impl Recipe {
@@ -174,6 +227,10 @@ impl Recipe {
             offsets: Vec::new(),
             params: HashMap::new(),
             notes: Vec::new(),
+            helices: HashMap::new(),
+            sheet: None,
+            flat: None,
+            flat_sketches: Vec::new(),
         }
     }
 
@@ -261,6 +318,75 @@ impl Recipe {
         Ok((p, frame))
     }
 
+    /// A plane `angle` degrees from `base_plane` about a world axis, as a Line angle plane: the
+    /// axis drawn as a construction line in a sketch on a default plane that holds it. The
+    /// angle's way round is the one that gives the recipe's `result_normal` when it has one.
+    fn angled_plane(&mut self, f: &Value) -> R<(PlaneRef, Frame)> {
+        let (on, end) = match f["axis"].as_str().unwrap_or("") {
+            "world X axis" => (PlaneRef::Top, Vec2::new(1.0, 0.0)),
+            "world Y axis" => (PlaneRef::Top, Vec2::new(0.0, 1.0)),
+            "world Z axis" => (PlaneRef::Front, Vec2::new(0.0, 1.0)),
+            other => return unsupported(format!("a plane at an angle about `{other}`")),
+        };
+        let base = self.plane_ref(&f["base_plane"])?;
+        let angle = self.num(f.get("angle"))?;
+        let sketch = FeatureId::new();
+        self.exec(&AddSketch {
+            element: self.el,
+            feature: sketch,
+            plane: Some(on),
+        })?;
+        self.exec(&EditSketch {
+            element: self.el,
+            feature: sketch,
+            op: SketchOp::AddPolyline {
+                points: vec![Vec2::new(0.0, 0.0), end],
+                closed: false,
+                construction: true,
+                label: "Add line",
+            },
+        })?;
+        let curve = self.geometry(sketch).curves.keys().next().unwrap();
+        let want = f.get("result_normal").and_then(v3).map(unit);
+        for flip in [false, true] {
+            let id = self.add(
+                "Plane",
+                FeatureKind::Plane(PlaneFeature {
+                    kind: PlaneType::LineAngle,
+                    entities: vec![
+                        PlaneEntity::SketchCurve { sketch, curve },
+                        PlaneEntity::Plane(base),
+                    ],
+                    angle,
+                    angle_expr: format!("{angle} deg"),
+                    flip,
+                    ..PlaneFeature::default()
+                }),
+            )?;
+            let Some(PlaneRef::Feature(fp)) =
+                cadrs_core::parts::plane_feature_ref(&self.features_now(), id)
+            else {
+                return failed("the angled plane didn't build");
+            };
+            let n = unit(cross(fp.u, fp.v));
+            if want.is_none_or(|w| dot(w, n).abs() > 1.0 - 1e-9) {
+                let frame = Frame {
+                    o: fp.origin,
+                    x: fp.u,
+                    y: fp.v,
+                    n,
+                };
+                return Ok((PlaneRef::Feature(fp), frame));
+            }
+            self.exec(&DeleteFeature {
+                element: self.el,
+                feature: id,
+                label: "Delete Plane".into(),
+            })?;
+        }
+        failed("no way round the angle gives the recipe's plane")
+    }
+
     /// A recipe plane (`{ref, origin, x_dir, y_dir, normal}`) as its frame.
     fn recipe_frame(&self, pl: &Value) -> R<Frame> {
         let r = pl.get("ref").and_then(Value::as_str).unwrap_or("");
@@ -291,14 +417,40 @@ impl Recipe {
 
     fn sketch(&mut self, f: &Value) -> R<()> {
         let name = f["name"].as_str().unwrap_or("").to_string();
+        // A spline fitted through points on a helix about the world Z axis (as SolidCraft
+        // replays it): the true helix, a Helix feature.
+        if let [e] = f["entities"].as_array().map_or(&[][..], Vec::as_slice)
+            && e["type"] == "fitted_spline"
+        {
+            let pts: Vec<V3> = e["fit_points"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(v3)
+                .collect();
+            let Some(h) = helix_through(&pts) else {
+                return unsupported("a fitted spline that isn't a helix");
+            };
+            let id = self.add("Helix", FeatureKind::Helix(h))?;
+            self.helices.insert(name, id);
+            return Ok(());
+        }
         let rf = self.recipe_frame(&f["plane"])?;
-        let (pr, cf) = self.cadrs_plane(rf.o, rf.n)?;
+        // While unfolded, on the flat pattern's plane (its coordinates the flat's, laid on the
+        // stationary wall).
+        let (pr, cf) = match self.flat {
+            Some((pr, cf)) if dot(cf.n, unit(rf.n)).abs() > 1.0 - 1e-9 => (pr, cf),
+            _ => self.cadrs_plane(rf.o, rf.n)?,
+        };
         let id = FeatureId::new();
         self.exec(&AddSketch {
             element: self.el,
             feature: id,
             plane: Some(pr),
         })?;
+        if self.flat.is_some_and(|(p, _)| p == pr) {
+            self.flat_sketches.push(id);
+        }
         // Recipe sketch coordinates → cadrs sketch coordinates, through world space.
         let map = |p: [f64; 2]| -> Vec2 {
             let w = add(add(rf.o, scale(rf.x, p[0])), scale(rf.y, p[1]));
@@ -427,6 +579,20 @@ impl Recipe {
         }
         let g = self.geometry(id);
         let mut specs = Vec::new();
+        // An entity's point that references the origin is the sketch's fixed origin, as
+        // SolidCraft's reader shares it: coincident with it, not only drawn there.
+        for e in f["entities"].as_array().into_iter().flatten() {
+            for end in ["start", "end", "center"] {
+                if e[end]["ref"].as_str() == Some("origin") {
+                    let eid = e["id"].as_str().unwrap_or("");
+                    let c = serde_json::json!({
+                        "type": "coincident",
+                        "refs": [format!("{eid}.{end}"), "origin"],
+                    });
+                    specs.push(constraint_spec(&info, &g, &c, turned)?);
+                }
+            }
+        }
         for c in f["constraints"].as_array().into_iter().flatten() {
             specs.push(constraint_spec(&info, &g, c, turned)?);
         }
@@ -610,17 +776,58 @@ impl Recipe {
     }
 
     fn extrude(&mut self, f: &Value) -> R<FeatureId> {
-        if f.get("thin").is_some_and(|t| !t.is_null()) {
-            return unsupported("thin extrude");
-        }
-        let profiles = self.profiles(f)?;
-        let sketch = profiles[0].0;
-        let regions: Vec<RegionRef> = profiles.into_iter().flat_map(|(_, r)| r).collect();
         let mut e = ExtrudeFeature {
-            regions,
             op: Self::op_of(f)?,
             ..ExtrudeFeature::default()
         };
+        let sketch;
+        let thin = &f["thin"];
+        if !thin.is_null() {
+            // A thin wall along a sketch's curves (all of them: cadrs' thin extrude takes whole
+            // sketches): `thickness` inside a closed profile, `thickness2` outside.
+            let sname = thin["sketch"].as_str().unwrap_or("");
+            let Some(info) = self.sketches.get(sname) else {
+                return unsupported(format!("thin wall of unknown sketch `{sname}`"));
+            };
+            let listed = thin["curves"].as_array().map_or(0, Vec::len);
+            if listed != self.geometry(info.id).curves.len() {
+                return unsupported("a thin wall along some of a sketch's curves");
+            }
+            sketch = info.id;
+            let t1 = self.num(thin.get("thickness"))?;
+            let t2 = match thin["side"].as_str().unwrap_or("one_side") {
+                "two_sides" => self.num(thin.get("thickness2"))?,
+                "one_side" => 0.0,
+                other => return unsupported(format!("a thin wall `{other}`")),
+            };
+            e.sketches = vec![sketch];
+            e.body = BodyType::Thin;
+            e.thin = ThinWall {
+                thickness1: t1,
+                thickness1_expr: format!("{t1} mm"),
+                thickness2: t2,
+                thickness2_expr: format!("{t2} mm"),
+                ..ThinWall::default()
+            };
+        } else {
+            let profiles = self.profiles(f)?;
+            sketch = profiles[0].0;
+            e.regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+            // A cut of a flat pattern sketch, while unfolded: out of the flat, then refolded.
+            if self.flat_sketches.contains(&sketch) {
+                if e.op != BooleanOp::Remove {
+                    return unsupported("a flat pattern extrude other than a cut");
+                }
+                return self.add(
+                    "Extrude",
+                    FeatureKind::FlatExtrude(FlatExtrudeFeature {
+                        remove: true,
+                        regions: e.regions,
+                        sketches: Vec::new(),
+                    }),
+                );
+            }
+        }
         let x = &f["extent"];
         let negative = x["direction"].as_str() == Some("negative");
         let against = self.against(sketch);
@@ -740,6 +947,110 @@ impl Recipe {
             }),
             _ => failed(format!("no edge at {p:?}")),
         }
+    }
+
+    /// A fillet's radius law with fit "taper" (SolidCraft's): a clamped cubic B-spline in u
+    /// (0 at the edge's recipe `start`, 1 at its end) on 8 equal spans, its control radii
+    /// min(r, 0.9 room) at the Greville abscissae, where the room at a point of the edge is
+    /// the narrower of its two faces across the edge (from the edge to the face's far side)
+    /// times tan(θ/2), θ the angle between the faces inside the part. One straight edge between
+    /// flat faces.
+    fn taper_law(&self, entities: &[EdgeOrFace], f: &Value, r: f64) -> R<(Vec<f64>, Vec<f64>)> {
+        let [EdgeOrFace::Edge(e)] = entities else {
+            return unsupported("a taper fillet of several edges");
+        };
+        let parts = cadrs_core::rebuild::build(&self.features_now())
+            .parts
+            .clone();
+        let part = parts.iter().find(|p| p.id == e.part).unwrap();
+        let (Some(p0), Some(p1)) = (v3(&f["edges"][0]["start"]), v3(&f["edges"][0]["end"])) else {
+            return unsupported("a taper fillet's edge without its ends");
+        };
+        let along = unit(sub(p1, p0));
+        let faces: Vec<&cadrs_core::solid::SolidFace> = e
+            .edge
+            .faces
+            .iter()
+            .filter_map(|n| part.solid.face(n))
+            .collect();
+        let planes: Vec<_> = faces.iter().filter_map(|x| x.plane).collect();
+        if faces.len() != 2 || planes.len() != 2 {
+            return unsupported("a taper fillet between faces that aren't flat");
+        }
+        // Outward normals, and the angle between the faces inside the part.
+        let normal = |pl: &cadrs_sketch::PlaneFrame| unit(cross(pl.u, pl.v));
+        let (n1, n2) = (normal(&planes[0]), normal(&planes[1]));
+        let theta = std::f64::consts::PI - dot(n1, n2).clamp(-1.0, 1.0).acos();
+        // How far across a face from point q on the edge: along the face, square to the edge,
+        // into it, to the first crossing of its boundary.
+        let across = |face: &cadrs_core::solid::SolidFace, pl: &cadrs_sketch::PlaneFrame, q: V3| {
+            let to2 = |p: V3| (dot(sub(p, pl.origin), pl.u), dot(sub(p, pl.origin), pl.v));
+            let d3 = cross(normal(pl), along);
+            let q2 = to2(q);
+            let (dx, dy) = (dot(d3, pl.u), dot(d3, pl.v));
+            let mut hits: Vec<f64> = Vec::new();
+            for lp in &face.loops {
+                for k in 0..lp.len() {
+                    let (a, b) = (to2(lp[k]), to2(lp[(k + 1) % lp.len()]));
+                    let (ex, ey) = (b.0 - a.0, b.1 - a.1);
+                    let den = dx * ey - dy * ex;
+                    if den.abs() < 1e-12 {
+                        continue;
+                    }
+                    let (wx, wy) = (a.0 - q2.0, a.1 - q2.1);
+                    let t = (wx * ey - wy * ex) / den;
+                    let s = (wx * dy - wy * dx) / den;
+                    if (-1e-9..=1.0 + 1e-9).contains(&s) && t.abs() > 1e-6 {
+                        hits.push(t);
+                    }
+                }
+            }
+            // Into the face: the side with the nearer crossing beyond the edge.
+            let fwd = hits
+                .iter()
+                .filter(|t| **t > 0.0)
+                .fold(f64::INFINITY, |m, t| m.min(*t));
+            let back = hits
+                .iter()
+                .filter(|t| **t < 0.0)
+                .fold(f64::INFINITY, |m, t| m.min(-*t));
+            fwd.min(back)
+        };
+        let room = |u: f64| {
+            let q = add(p0, scale(sub(p1, p0), u));
+            faces
+                .iter()
+                .zip(&planes)
+                .map(|(x, pl)| across(x, pl, q))
+                .fold(f64::INFINITY, f64::min)
+                * (theta / 2.0).tan()
+        };
+        const SPANS: usize = 8;
+        let mut knots = vec![0.0; 4];
+        knots.extend((1..SPANS).map(|k| k as f64 / SPANS as f64));
+        knots.extend([1.0; 4]);
+        let n = knots.len() - 4;
+        let cps = (0..n)
+            .map(|i| {
+                let xi = (knots[i + 1] + knots[i + 2] + knots[i + 3]) / 3.0;
+                r.min(0.9 * room(xi))
+            })
+            .collect();
+        Ok((cps, knots))
+    }
+
+    /// The part vertex at a world point.
+    fn vertex(&self, parts: &[Part], p: V3) -> R<VertexRef> {
+        parts
+            .iter()
+            .flat_map(|part| part.solid.vertices.iter().map(move |v| (part, v)))
+            .find(|(_, v)| norm(sub(v.point, p)) < 1e-4)
+            .map(|(part, v)| VertexRef {
+                part: part.id,
+                vertex: v.name,
+                point: v.point,
+            })
+            .map_or_else(|| failed(format!("no vertex at {p:?}")), Ok)
     }
 
     /// The part face nearest a world point.
@@ -873,6 +1184,11 @@ impl Recipe {
             "sketch" => return self.sketch(f),
             "extrude" => self.extrude(f)?,
             "revolve" => self.revolve(f)?,
+            "construction_plane" if f["method"].as_str() == Some("at_angle") => {
+                let plane = self.angled_plane(f)?;
+                self.planes.insert(name, plane);
+                return Ok(());
+            }
             "construction_plane" => {
                 if f["method"].as_str() != Some("offset") {
                     return unsupported(format!("construction plane `{}`", f["method"]));
@@ -885,21 +1201,91 @@ impl Recipe {
                 return Ok(());
             }
             "fillet" => {
-                if !matches!(f["type"].as_str(), None | Some("constant_radius")) {
-                    return unsupported(format!("fillet `{}`", f["type"]));
-                }
                 let entities = self.edges_of(f, None)?;
                 let r = self.num(f.get("radius"))?;
-                self.add(
-                    "Fillet",
-                    FeatureKind::Fillet(FilletFeature {
-                        entities,
-                        size: r,
-                        size_expr: format!("{r} mm"),
-                        tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
-                        ..FilletFeature::default()
-                    }),
-                )?
+                let mut x = FilletFeature {
+                    entities: entities.clone(),
+                    size: r,
+                    size_expr: format!("{r} mm"),
+                    tangent_propagation: f["tangent_chain"].as_bool().unwrap_or(false),
+                    ..FilletFeature::default()
+                };
+                let kind = match f["type"].as_str().unwrap_or("constant_radius") {
+                    "constant_radius" if f["fit"].as_str() == Some("taper") => "taper",
+                    other => other,
+                };
+                match kind {
+                    "constant_radius" => {}
+                    // The round's width across, kept along the edge.
+                    "chord_length" => x.measurement = FilletMeasurement::Width,
+                    // The radius along the edge from its `start`: straight from `radius` to
+                    // `radius2`, or a clamped B-spline of `radius` then `radii` on `knots`.
+                    // Fit "taper": the radius where it fits, else what fits (see `taper_law`).
+                    kind @ ("variable_radius" | "spline_radius" | "taper") => {
+                        let law: Box<dyn Fn(f64) -> f64> = if kind == "taper" {
+                            let (cps, knots) = self.taper_law(&entities, f, r)?;
+                            Box::new(move |u| bspline(&cps, &knots, 3, u))
+                        } else if kind == "variable_radius" {
+                            let r2 = self.num(f.get("radius2"))?;
+                            Box::new(move |u| r + (r2 - r) * u)
+                        } else {
+                            let mut cps = vec![r];
+                            for v in f["radii"].as_array().into_iter().flatten() {
+                                cps.push(self.num(Some(v))?);
+                            }
+                            let knots: Vec<f64> = f["knots"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(Value::as_f64)
+                                .collect();
+                            if knots.len() != cps.len() + 4 {
+                                return unsupported("a radius spline other than a cubic one");
+                            }
+                            Box::new(move |u| bspline(&cps, &knots, 3, u))
+                        };
+                        let [EdgeOrFace::Edge(e)] = entities.as_slice() else {
+                            return unsupported("a variable fillet of several edges");
+                        };
+                        let parts = cadrs_core::rebuild::build(&self.features_now())
+                            .parts
+                            .clone();
+                        let part = parts.iter().find(|p| p.id == e.part).unwrap();
+                        let edge = part.solid.edges.iter().find(|x| x.name == e.edge).unwrap();
+                        let (a, b) = (edge.points[0], *edge.points.last().unwrap());
+                        // The edge's start as cadrs has it, at the recipe's start or not.
+                        let start = v3(&f["start"])
+                            .or_else(|| v3(&f["edges"][0]["start"]))
+                            .unwrap_or(a);
+                        let forward = norm(sub(a, start)) <= norm(sub(b, start));
+                        let u = |t: f64| if forward { t } else { 1.0 - t };
+                        x.variable = true;
+                        x.smooth_transition = false;
+                        for (t, at) in [(0.0, a), (1.0, b)] {
+                            let radius = law(u(t));
+                            x.vertices.push(VertexRadius {
+                                vertex: self.vertex(&parts, at)?,
+                                radius,
+                                expr: format!("{radius} mm"),
+                            });
+                        }
+                        if kind != "variable_radius" {
+                            const N: usize = 48;
+                            for k in 1..N {
+                                let t = k as f64 / N as f64;
+                                let radius = law(u(t));
+                                x.edge_points.push(EdgePoint {
+                                    edge: *e,
+                                    location: t,
+                                    radius,
+                                    expr: format!("{radius} mm"),
+                                });
+                            }
+                        }
+                    }
+                    other => return unsupported(format!("fillet `{other}`")),
+                }
+                self.add("Fillet", FeatureKind::Fillet(x))?
             }
             "chamfer" => {
                 if f["type"].as_str() != Some("equal_distance") {
@@ -1024,6 +1410,314 @@ impl Recipe {
                 p.features = feats;
                 self.add("Pattern", FeatureKind::Pattern(p))?
             }
+            // A cosmetic thread is the hole's callout, no geometry (in cadrs a tapped Hole's).
+            "thread" if f["modeled"].as_bool() == Some(false) => {
+                self.notes
+                    .push("cosmetic thread: no geometry, not built".into());
+                return Ok(());
+            }
+            // A surface through a sketch's curves: a Fill.
+            "boundary_surface" => {
+                let sname = f["sketch"].as_str().unwrap_or("");
+                let Some(info) = self.sketches.get(sname) else {
+                    return unsupported(format!("boundary of unknown sketch `{sname}`"));
+                };
+                let sketch = info.id;
+                let edges = f["curves"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|c| {
+                        Ok(FillEdge::SketchCurve {
+                            sketch,
+                            curve: curve_ref(info, c)?,
+                        })
+                    })
+                    .collect::<R<Vec<_>>>()?;
+                let before = self.ids();
+                let id = self.add(
+                    "Fill",
+                    FeatureKind::Fill(FillFeature {
+                        edges,
+                        ..FillFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            // Surfaces made solid; they stay (a recipe removes them itself).
+            "thicken" => {
+                let parts = f["bodies"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|b| self.body(b))
+                    .collect::<R<Vec<_>>>()?;
+                let t = self.num(f.get("thickness"))?;
+                let before = self.ids();
+                let id = self.add(
+                    "Thicken",
+                    FeatureKind::Thicken(ThickenFeature {
+                        parts,
+                        mid_plane: f["symmetric"].as_bool().unwrap_or(false),
+                        thickness1: t,
+                        thickness1_expr: format!("{t} mm"),
+                        op: Self::op_of(f)?,
+                        keep_tools: true,
+                        ..ThickenFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            "remove" => {
+                let parts = f["bodies"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|b| self.body(b))
+                    .collect::<R<Vec<_>>>()?;
+                self.add(
+                    "Delete part",
+                    FeatureKind::DeletePart(DeletePartFeature { parts }),
+                )?
+            }
+            "sm_flange" => match f["type"].as_str().unwrap_or("") {
+                // The sheet metal model: a sketch region thickened, or open curves extruded.
+                kind @ ("base" | "contour") => {
+                    if self.sheet.is_some() {
+                        return unsupported("a second sheet metal model");
+                    }
+                    let rule = Rule::named(f["rule"].as_str().unwrap_or(""))?;
+                    let params = rule.params();
+                    let mut m = SheetMetalModelFeature {
+                        params,
+                        exprs: SheetMetalExprs::of(&params),
+                        ..SheetMetalModelFeature::default()
+                    };
+                    if kind == "base" {
+                        let profiles = self.profiles(f)?;
+                        m.operation = SheetMetalOp::Thicken;
+                        m.regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+                    } else {
+                        let sname = f["profile_sketch"].as_str().unwrap_or("");
+                        let Some(info) = self.sketches.get(sname) else {
+                            return unsupported(format!("contour of unknown sketch `{sname}`"));
+                        };
+                        let sketch = info.id;
+                        m.operation = SheetMetalOp::Extrude;
+                        m.curves = f["profile_curves"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .map(|c| {
+                                Ok(SmCurveRef {
+                                    sketch,
+                                    curve: curve_ref(info, c)?,
+                                })
+                            })
+                            .collect::<R<Vec<_>>>()?;
+                        let d = self.num(f.get("distance"))?;
+                        m.depth = d;
+                        m.depth_expr = format!("{d} mm");
+                        // The width runs along the recipe sketch's normal.
+                        m.flip_extrude = self.against(sketch);
+                    }
+                    let before = self.ids();
+                    let id = self.add("Sheet metal model", FeatureKind::SheetMetalModel(m))?;
+                    self.sheet = Some((id, rule));
+                    self.name_bodies(f, id, &before)?;
+                    id
+                }
+                "edge" => {
+                    let edges = self.edges_of(f, None)?;
+                    let h = self.num(f.get("height"))?;
+                    let a = self.num(f.get("angle"))?;
+                    if f["height_datum"]
+                        .as_str()
+                        .is_some_and(|d| !d.starts_with("Outer"))
+                        || f["bend_position"]
+                            .as_str()
+                            .is_some_and(|b| !b.starts_with("Inside"))
+                    {
+                        return unsupported("a flange other than outer-face height, bend inside");
+                    }
+                    self.add(
+                        "Flange",
+                        FeatureKind::SheetMetal(SheetMetalFeature::Flange(FlangeFeature {
+                            edges,
+                            // The flange's outside face on the edge; its height from the outer
+                            // virtual sharp.
+                            alignment: FlangeAlignment::Outer,
+                            distance: h,
+                            distance_expr: format!("{h} mm"),
+                            angle: a,
+                            angle_expr: format!("{a} deg"),
+                            flip: f["flip"].as_bool().unwrap_or(false),
+                            // Flanges meeting at a corner end square, their insides the
+                            // thickness apart (SolidCraft's corners): a 45° miter with that gap.
+                            auto_miter: false,
+                            corner_gap: Some(self.sheet.map_or(0.0, |(_, r)| r.thickness)),
+                            ..FlangeFeature::default()
+                        })),
+                    )?
+                }
+                other => return unsupported(format!("sm_flange `{other}`")),
+            },
+            "sm_hem" => {
+                if f["type"].as_str() != Some("flat") {
+                    return unsupported(format!("hem `{}`", f["type"]));
+                }
+                let edges = self.edges_of(&serde_json::json!({ "edges": [f["edge"]] }), None)?;
+                let l = self.num(f.get("length"))?;
+                self.add(
+                    "Hem",
+                    FeatureKind::SheetMetal(SheetMetalFeature::Hem(HemFeature {
+                        edges,
+                        kind: HemKind::Straight,
+                        // Flat, the rule's minimal gap inside.
+                        flattened: true,
+                        total: l,
+                        total_expr: format!("{l} mm"),
+                        // Its bend starts at the edge ("StartEdge").
+                        alignment: if f["bend_position"].as_str() == Some("StartEdge") {
+                            HemAlignment::InPlace
+                        } else {
+                            HemAlignment::Outer
+                        },
+                        // Unflipped, the recipe folds the hem inward, over the part (cadrs'
+                        // flip arrow).
+                        flip: !f["flipped"].as_bool().unwrap_or(false),
+                        ..HemFeature::default()
+                    })),
+                )?
+            }
+            "sm_unfold" => {
+                let Some((model, _)) = self.sheet else {
+                    return unsupported("an unfold with no sheet metal model");
+                };
+                if f["all_bends"].as_bool() != Some(true) {
+                    return unsupported("unfolding some of the bends");
+                }
+                // The flat pattern laid out from the stationary face's wall: cadrs lays its
+                // flat out from the model's anchor wall; check it is the same wall.
+                let plane = FeatureId(cadrs_core::sheetmetal_flat::flat_plane_id(model, 0));
+                let b = cadrs_core::rebuild::build(&self.features_now());
+                let Some(fr) = b.planes.get(&plane).copied() else {
+                    return failed("no flat pattern plane");
+                };
+                let n = unit(cross(fr.u, fr.v));
+                let stationary = f["stationary_face"]["point"]
+                    .as_array()
+                    .and_then(|_| v3(&f["stationary_face"]["point"]));
+                if let Some(q) = stationary
+                    && dot(sub(q, fr.origin), n).abs()
+                        > b.sheet_metal[0].model.params.thickness + 1e-6
+                {
+                    return unsupported("a flat pattern laid out from another wall");
+                }
+                self.flat = Some((
+                    PlaneRef::Feature(FeaturePlane::new(plane.0, fr)),
+                    Frame {
+                        o: fr.origin,
+                        x: fr.u,
+                        y: fr.v,
+                        n,
+                    },
+                ));
+                return Ok(());
+            }
+            "sm_refold" => {
+                self.flat = None;
+                return Ok(());
+            }
+            "sheet_metal_rule_edit" => {
+                let Some((id, mut rule)) = self.sheet else {
+                    return unsupported("a rule edit with no sheet metal model");
+                };
+                let mm = |v: &str| v.trim().trim_end_matches("mm").trim().parse::<f64>().ok();
+                let mut set = |k: &str, v: &str| -> R<()> {
+                    let x = mm(v).map_or_else(|| unsupported(format!("rule value `{v}`")), Ok)?;
+                    match k {
+                        "thickness" => rule.thickness = x,
+                        "bendRadius" => rule.bend_radius = Some(x),
+                        "kFactor" => rule.k_factor = x,
+                        other => return unsupported(format!("rule setting `{other}`")),
+                    }
+                    Ok(())
+                };
+                if let Some(m) = f["set"].as_object() {
+                    for (k, v) in m {
+                        set(k, v.as_str().unwrap_or(""))?;
+                    }
+                }
+                // Edits one after another: the last state stands.
+                for step in f["sequence"].as_array().into_iter().flatten() {
+                    let step = step.as_str().unwrap_or("");
+                    let (k, v) = step.split_once(' ').unwrap_or((step, ""));
+                    set(k, v)?;
+                }
+                let mut feature = self
+                    .features_now()
+                    .into_iter()
+                    .find(|x| x.id == id)
+                    .unwrap();
+                if let FeatureKind::SheetMetalModel(m) = &mut feature.kind {
+                    m.params = rule.params();
+                    m.exprs = SheetMetalExprs::of(&m.params);
+                }
+                self.exec(&ReplaceFeature {
+                    element: self.el,
+                    feature,
+                    label: "Edit rule".into(),
+                })?;
+                self.sheet = Some((id, rule));
+                id
+            }
+            "path_pattern" => {
+                if f["pattern_of"].as_str().unwrap_or("features") != "features" {
+                    return unsupported(format!("path_pattern of {}", f["pattern_of"]));
+                }
+                let sname = f["path"]["sketch"].as_str().unwrap_or("");
+                let Some(info) = self.sketches.get(sname) else {
+                    return unsupported(format!("path of unknown sketch `{sname}`"));
+                };
+                let sketch = info.id;
+                let path = f["path"]["curves"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|c| {
+                        Ok(PathRef::SketchCurve {
+                            sketch,
+                            curve: curve_ref(info, c)?,
+                        })
+                    })
+                    .collect::<R<Vec<_>>>()?;
+                let mut p = PatternFeature::new(PatternKind::Curve);
+                p.pattern_type = PatternType::Feature;
+                p.features = self.feature_list(&f["features"])?;
+                p.path = path;
+                p.first.count = f["count"].as_u64().unwrap_or(1) as u32;
+                // The instances `spacing` apart along the path from the seed (at its start), or
+                // spread evenly over it.
+                match f.get("spacing") {
+                    Some(d) => {
+                        let d = self.num(Some(d))?;
+                        p.equal_spacing = false;
+                        p.first.distance = d;
+                        p.first.distance_expr = format!("{d} mm");
+                    }
+                    None => p.equal_spacing = true,
+                }
+                p.tangent_to_curve = !f["orientation"]
+                    .as_str()
+                    .is_some_and(|o| o.starts_with("identical"));
+                self.add("Pattern", FeatureKind::Pattern(p))?
+            }
             "mirror" => {
                 let plane = MirrorPlane::Plane(self.plane_ref(&f["plane"])?);
                 let mut m = MirrorFeature {
@@ -1080,6 +1774,27 @@ impl Recipe {
                         profiles,
                         op: Self::op_of(f)?,
                         ..LoftFeature::default()
+                    }),
+                )?;
+                self.name_bodies(f, id, &before)?;
+                id
+            }
+            "sweep"
+                if f["path"]["sketch"]
+                    .as_str()
+                    .is_some_and(|s| self.helices.contains_key(s)) =>
+            {
+                let helix = self.helices[f["path"]["sketch"].as_str().unwrap()];
+                let profiles = self.profiles(f)?;
+                let regions = profiles.into_iter().flat_map(|(_, r)| r).collect();
+                let before = self.ids();
+                let id = self.add(
+                    "Sweep",
+                    FeatureKind::Sweep(SweepFeature {
+                        regions,
+                        path: vec![PathRef::Curve(helix)],
+                        op: Self::op_of(f)?,
+                        ..SweepFeature::default()
                     }),
                 )?;
                 self.name_bodies(f, id, &before)?;
@@ -1219,20 +1934,31 @@ impl Recipe {
             );
         }
         let face = &f["face"];
-        if face["type"].as_str().unwrap_or("plane") != "plane" {
-            return unsupported("a hole on a curved face");
-        }
-        let (Some(pos), Some(n)) = (
-            f.get("position").and_then(v3),
-            face.get("plane_normal_outward").and_then(v3),
-        ) else {
-            return unsupported("a hole without a position and face normal");
+        let Some(pos) = f.get("position").and_then(v3) else {
+            return unsupported("a hole without a position");
+        };
+        // The face's outward normal at the hole: a plane's, or a cylinder's radial direction
+        // there (the hole's sketch then lies on the plane touching the cylinder there).
+        let n = match face["type"].as_str().unwrap_or("plane") {
+            "plane" => face.get("plane_normal_outward").and_then(v3),
+            "cylinder" => match (
+                face.get("axis_origin").and_then(v3),
+                face.get("axis").and_then(v3),
+            ) {
+                (Some(o), Some(a)) => {
+                    let (a, d) = (unit(a), sub(pos, o));
+                    Some(sub(d, scale(a, dot(d, a))))
+                }
+                _ => None,
+            },
+            other => return unsupported(format!("a hole on a {other} face")),
+        };
+        let Some(n) = n else {
+            return unsupported("a hole without its face's normal");
         };
         let (pr, cf) = self.cadrs_plane(pos, n)?;
-        // cadrs drills against its sketch plane's normal: the face's outward normal must be it.
-        if dot(cf.n, unit(n)) < 0.0 {
-            return unsupported("a hole drilled along a default plane's normal");
-        }
+        // cadrs drills against its sketch plane's normal, or along it flipped: into the material.
+        let flip = dot(cf.n, unit(n)) < 0.0;
         let s = FeatureId::new();
         self.exec(&AddSketch {
             element: self.el,
@@ -1263,6 +1989,7 @@ impl Recipe {
             FeatureKind::Hole(HoleFeature {
                 points: vec![HolePoint { sketch: s, point }],
                 spec,
+                flip,
                 ..HoleFeature::default()
             }),
         )
@@ -1741,6 +2468,14 @@ fn measure(parts: &[Part]) -> Measured {
         volume += m.volume;
         area += m.surface_area;
         faces += p.solid.faces.len();
+        if std::env::var("DBG_FACES").is_ok() {
+            for f in &p.solid.faces {
+                eprintln!(
+                    "DBG {:?} r {:?} area {:?} c {:?} name {:?}",
+                    f.kind, f.radius, f.area, f.center, f.name
+                );
+            }
+        }
         let c = [m.center_of_mass.x, m.center_of_mass.y, m.center_of_mass.z];
         for k in 0..3 {
             moment[k] += m.volume * c[k];
@@ -2077,4 +2812,79 @@ fn reference_parts() {
         lost.is_empty(),
         "reference parts no longer passing: {lost:?}"
     );
+}
+
+/// A clamped B-spline of degree `p` with control values `cps` on `knots`, at u (de Boor).
+fn bspline(cps: &[f64], knots: &[f64], p: usize, u: f64) -> f64 {
+    let n = cps.len();
+    let u = u.clamp(knots[p], knots[n]);
+    // The span: knots[k] <= u < knots[k + 1], the last one at the end.
+    let k = (p..n)
+        .rfind(|&i| knots[i] <= u && (u < knots[i + 1] || i == n - 1))
+        .unwrap_or(p);
+    let mut d: Vec<f64> = (0..=p).map(|j| cps[j + k - p]).collect();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = j + k - p;
+            let den = knots[i + p + 1 - r] - knots[i];
+            let a = if den > 0.0 { (u - knots[i]) / den } else { 0.0 };
+            d[j] = (1.0 - a) * d[j - 1] + a * d[j];
+        }
+    }
+    d[p]
+}
+
+/// The helix about the world Z axis through `pts` in order, if they lie on one (a constant
+/// radius, the height rising evenly with the angle): a Helix feature of that radius, pitch,
+/// turns and start, turning the way the points do.
+fn helix_through(pts: &[V3]) -> Option<cadrs_core::surfacing::HelixFeature> {
+    use cadrs_core::surfacing::{HelixFeature, HelixPath, HelixType};
+    if pts.len() < 4 {
+        return None;
+    }
+    let r = pts[0][0].hypot(pts[0][1]);
+    // The angles unwrapped along the points.
+    let mut a = vec![pts[0][1].atan2(pts[0][0])];
+    for w in pts.windows(2) {
+        let d = (w[1][1].atan2(w[1][0]) - w[0][1].atan2(w[0][0]) + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        a.push(a.last().unwrap() + d);
+    }
+    let (a0, a1) = (a[0], *a.last().unwrap());
+    let (z0, z1) = (pts[0][2], pts.last().unwrap()[2]);
+    if r < 1e-9 || (a1 - a0).abs() < 1e-9 || (z1 - z0).abs() < 1e-9 {
+        return None;
+    }
+    let rise = (z1 - z0) / (a1 - a0);
+    let on = pts.iter().zip(&a).all(|(p, t)| {
+        (p[0].hypot(p[1]) - r).abs() < 1e-6 * r
+            && (p[2] - (z0 + rise * (t - a0))).abs() < 1e-6 * (1.0 + r)
+    });
+    if !on || z1 < z0 {
+        return None;
+    }
+    let turns = (a1 - a0).abs() / std::f64::consts::TAU;
+    let height = z1 - z0;
+    let pitch = height / turns;
+    Some(HelixFeature {
+        helix_type: HelixType::Axis,
+        axis: Some(AxisRef::Connector(ConnectorRef::Implicit(
+            ConnectorOrigin::Origin,
+        ))),
+        path: HelixPath::TurnsAndPitch,
+        revolutions: turns,
+        revolutions_expr: format!("{turns}"),
+        pitch,
+        pitch_expr: format!("{pitch} mm"),
+        height,
+        height_expr: format!("{height} mm"),
+        radius: r,
+        radius_expr: format!("{r} mm"),
+        start_angle: a0.to_degrees(),
+        start_angle_expr: format!("{} deg", a0.to_degrees()),
+        // Seen from its start looking up the axis, counter-clockwise from above is clockwise.
+        clockwise: a1 > a0,
+        ..HelixFeature::default()
+    })
 }

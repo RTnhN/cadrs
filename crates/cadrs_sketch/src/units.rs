@@ -107,8 +107,30 @@ enum Tok {
     Pi,
 }
 
-/// The functions an expression can call (P3F.4).
-const FUNCTIONS: [&str; 7] = ["sqrt", "sin", "cos", "tan", "min", "max", "abs"];
+/// The functions an expression can call (P3F.4; the Variable Studio adds Onshape's inverse
+/// trigonometry, rounding and logarithms).
+pub const FUNCTIONS: [&str; 17] = [
+    "sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "min", "max", "abs", "floor",
+    "ceil", "round", "log", "log10", "exp",
+];
+
+/// The operators of two characters, each read as one `Tok::Op` char.
+const OPS2: [(&str, char); 6] = [
+    ("<=", '≤'),
+    (">=", '≥'),
+    ("==", '≡'),
+    ("!=", '≠'),
+    ("&&", '∧'),
+    ("||", '∨'),
+];
+
+/// How an operator token is written (the two-character ones are stored as one char).
+fn op_text(c: char) -> String {
+    OPS2.iter()
+        .find(|(_, k)| *k == c)
+        .map(|(s, _)| s.to_string())
+        .unwrap_or_else(|| c.to_string())
+}
 
 fn tokenize(text: &str) -> Result<Vec<Tok>, ParseError> {
     let mut out = Vec::new();
@@ -178,10 +200,18 @@ fn tokenize(text: &str) -> Result<Vec<Tok>, ParseError> {
                 out.push(Tok::Func(lower));
             } else if lower == "pi" {
                 out.push(Tok::Pi);
+            } else if lower == "true" || lower == "false" {
+                out.push(Tok::Num(if lower == "true" { 1.0 } else { 0.0 }));
             } else {
                 out.push(Tok::Unit(word));
             }
-        } else if "+-*/(),×÷−".contains(c) {
+        } else if let Some((text, k)) = OPS2
+            .iter()
+            .find(|(t, _)| chars[i..].starts_with(&t.chars().collect::<Vec<_>>()[..]))
+        {
+            out.push(Tok::Op(*k));
+            i += text.len();
+        } else if "+-*/(),×÷−^%?:<>!".contains(c) {
             if c == '(' {
                 calls.push(matches!(out.last(), Some(Tok::Func(_))));
             } else if c == ')' {
@@ -301,6 +331,9 @@ struct Parser<'a> {
     /// What a plain number counts as (in mm) when it meets a length.
     default: f64,
     vars: &'a dyn Variables,
+    /// Above 0 while reading a branch that isn't taken (`? :`, `&&`, `||`): it is read and its
+    /// units checked, but its value errors (division by zero, out of range) don't count.
+    dry: u32,
 }
 
 /// A length unit a workspace can use (Onshape's "Workspace units" dialog).
@@ -669,7 +702,83 @@ impl Parser<'_> {
         })
     }
 
+    /// `cond ? a : b` (Onshape's conditional), the lowest precedence; `cond` is true when it
+    /// isn't 0.
     fn expr(&mut self) -> Result<Val, ParseError> {
+        let cond = self.or()?;
+        if self.peek() != Some(&Tok::Op('?')) {
+            return Ok(cond);
+        }
+        self.i += 1;
+        let take_a = cond.v != 0.0;
+        let a = self.branch(!take_a, Self::expr)?;
+        if self.peek() != Some(&Tok::Op(':')) {
+            return Err(ParseError::Incomplete);
+        }
+        self.i += 1;
+        let b = self.branch(take_a, Self::expr)?;
+        // Both branches must measure the same, whichever is taken.
+        let (a, b) = self.same(a, b)?;
+        Ok(if take_a { a } else { b })
+    }
+
+    /// Reads with `f`, dry (see [`Parser::dry`]) if `skip`.
+    fn branch(
+        &mut self,
+        skip: bool,
+        f: fn(&mut Self) -> Result<Val, ParseError>,
+    ) -> Result<Val, ParseError> {
+        self.dry += u32::from(skip);
+        let r = f(self);
+        self.dry -= u32::from(skip);
+        r
+    }
+
+    fn or(&mut self) -> Result<Val, ParseError> {
+        let mut acc = self.and()?;
+        while self.peek() == Some(&Tok::Op('∨')) {
+            self.i += 1;
+            // Short-circuit: once true, the rest isn't evaluated.
+            let rhs = self.branch(acc.v != 0.0, Self::and)?;
+            acc = Val::plain(f64::from(acc.v != 0.0 || rhs.v != 0.0));
+        }
+        Ok(acc)
+    }
+
+    fn and(&mut self) -> Result<Val, ParseError> {
+        let mut acc = self.comparison()?;
+        while self.peek() == Some(&Tok::Op('∧')) {
+            self.i += 1;
+            let rhs = self.branch(acc.v == 0.0, Self::comparison)?;
+            acc = Val::plain(f64::from(acc.v != 0.0 && rhs.v != 0.0));
+        }
+        Ok(acc)
+    }
+
+    /// `a < b` and the like: 1 (true) or 0 (false); `a` and `b` must measure the same.
+    fn comparison(&mut self) -> Result<Val, ParseError> {
+        let acc = self.sum()?;
+        let Some(Tok::Op(op @ ('<' | '>' | '≤' | '≥' | '≡' | '≠'))) = self.peek().cloned()
+        else {
+            return Ok(acc);
+        };
+        self.i += 1;
+        let rhs = self.sum()?;
+        let (a, b) = self.same(acc, rhs)?;
+        // Equality allows for the rounding of unit conversions (1 in == 25.4 mm).
+        let eq = (a.v - b.v).abs() <= 1e-9 * a.v.abs().max(b.v.abs()).max(1.0);
+        let r = match op {
+            '<' => a.v < b.v && !eq,
+            '>' => a.v > b.v && !eq,
+            '≤' => a.v < b.v || eq,
+            '≥' => a.v > b.v || eq,
+            '≡' => eq,
+            _ => !eq,
+        };
+        Ok(Val::plain(f64::from(r)))
+    }
+
+    fn sum(&mut self) -> Result<Val, ParseError> {
         let mut acc = self.term()?;
         while let Some(Tok::Op(op @ ('+' | '-'))) = self.peek().cloned() {
             self.i += 1;
@@ -685,17 +794,24 @@ impl Parser<'_> {
 
     fn term(&mut self) -> Result<Val, ParseError> {
         let mut acc = self.unary()?;
-        while let Some(Tok::Op(op @ ('*' | '/'))) = self.peek().cloned() {
+        while let Some(Tok::Op(op @ ('*' | '/' | '%'))) = self.peek().cloned() {
             self.i += 1;
             let rhs = self.unary()?;
-            acc = if op == '*' {
+            acc = if op == '%' {
+                // The remainder keeps the dividend's sign, as FeatureScript's `%`.
+                let (a, b) = self.same(acc, rhs)?;
+                if b.v == 0.0 && self.dry == 0 {
+                    return Err(ParseError::DivideByZero);
+                }
+                Val { v: a.v % b.v, ..a }
+            } else if op == '*' {
                 Val {
                     v: acc.v * rhs.v,
                     len: acc.len + rhs.len,
                     ang: acc.ang + rhs.ang,
                 }
             } else {
-                if rhs.v == 0.0 {
+                if rhs.v == 0.0 && self.dry == 0 {
                     return Err(ParseError::DivideByZero);
                 }
                 Val {
@@ -719,8 +835,39 @@ impl Parser<'_> {
                 self.i += 1;
                 self.unary()
             }
-            _ => self.atom(),
+            Some(Tok::Op('!')) => {
+                self.i += 1;
+                let v = self.unary()?;
+                Ok(Val::plain(f64::from(v.v == 0.0)))
+            }
+            _ => self.power(),
         }
+    }
+
+    /// `a ^ n`, right-associative and above the unary minus (`-2^2` is -4). A length or angle
+    /// takes a whole exponent only (`(2 mm)^2` is an area).
+    fn power(&mut self) -> Result<Val, ParseError> {
+        let base = self.atom()?;
+        if self.peek() != Some(&Tok::Op('^')) {
+            return Ok(base);
+        }
+        self.i += 1;
+        let e = self.unary()?;
+        if !e.is_plain() {
+            return Err(ParseError::Units);
+        }
+        if base.is_plain() {
+            return Ok(Val::plain(base.v.powf(e.v)));
+        }
+        if e.v.fract() != 0.0 || e.v.abs() > 8.0 {
+            return Err(ParseError::Units);
+        }
+        let n = e.v as i32;
+        Ok(Val {
+            v: base.v.powi(n),
+            len: base.len * n,
+            ang: base.ang * n,
+        })
     }
 
     /// The arguments of a function call, after its name: `( expr {, expr} )`.
@@ -759,7 +906,7 @@ impl Parser<'_> {
                 if a.len % 2 != 0 || a.ang % 2 != 0 {
                     return Err(ParseError::Units);
                 }
-                if a.v < 0.0 {
+                if a.v < 0.0 && self.dry == 0 {
                     return Err(ParseError::Domain(name.to_string()));
                 }
                 Ok(Val {
@@ -781,9 +928,76 @@ impl Parser<'_> {
                     _ => r.tan(),
                 }))
             }
+            "asin" | "acos" | "atan" => {
+                let a = one(&args)?;
+                if !a.is_plain() {
+                    return Err(ParseError::Units);
+                }
+                if name != "atan" && !(-1.0..=1.0).contains(&a.v) && self.dry == 0 {
+                    return Err(ParseError::Domain(name.to_string()));
+                }
+                let r = match name {
+                    "asin" => a.v.asin(),
+                    "acos" => a.v.acos(),
+                    _ => a.v.atan(),
+                };
+                Ok(Val {
+                    v: r.to_degrees(),
+                    len: 0,
+                    ang: 1,
+                })
+            }
+            "atan2" => {
+                let [y, x] = args[..] else {
+                    return Err(ParseError::Arguments(name.to_string()));
+                };
+                let (y, x) = self.same(y, x)?;
+                Ok(Val {
+                    v: y.v.atan2(x.v).to_degrees(),
+                    len: 0,
+                    ang: 1,
+                })
+            }
             "abs" => {
                 let a = one(&args)?;
                 Ok(Val { v: a.v.abs(), ..a })
+            }
+            // A plain number, or a value to a multiple of the same kind: `round(1.26 in, 0.1 in)`
+            // (rounding a length's millimetres would depend on the unit it was typed in).
+            "floor" | "ceil" | "round" => {
+                let (a, step) = match args[..] {
+                    [a] if a.is_plain() => (a, Val::plain(1.0)),
+                    [_] => return Err(ParseError::Units),
+                    [a, m] => self.same(a, m)?,
+                    _ => return Err(ParseError::Arguments(name.to_string())),
+                };
+                if step.v == 0.0 {
+                    if self.dry == 0 {
+                        return Err(ParseError::DivideByZero);
+                    }
+                    return Ok(a);
+                }
+                let q = a.v / step.v;
+                let q = match name {
+                    "floor" => q.floor(),
+                    "ceil" => q.ceil(),
+                    _ => q.round(),
+                };
+                Ok(Val { v: q * step.v, ..a })
+            }
+            "log" | "log10" | "exp" => {
+                let a = one(&args)?;
+                if !a.is_plain() {
+                    return Err(ParseError::Units);
+                }
+                if name != "exp" && a.v <= 0.0 && self.dry == 0 {
+                    return Err(ParseError::Domain(name.to_string()));
+                }
+                Ok(Val::plain(match name {
+                    "log" => a.v.ln(),
+                    "log10" => a.v.log10(),
+                    _ => a.v.exp(),
+                }))
             }
             _ => {
                 // min, max
@@ -841,7 +1055,7 @@ impl Parser<'_> {
                 v
             }
             Some(Tok::Unit(u)) => return Err(ParseError::Unexpected(u)),
-            Some(Tok::Op(c)) => return Err(ParseError::Unexpected(c.to_string())),
+            Some(Tok::Op(c)) => return Err(ParseError::Unexpected(op_text(c))),
             None => return Err(ParseError::Incomplete),
         };
         // A unit right after a number or a parenthesis applies to it.
@@ -895,13 +1109,14 @@ fn eval_with(
         i: 0,
         default,
         vars,
+        dry: 0,
     };
     let v = p.expr()?;
     if let Some(t) = p.peek() {
         return Err(ParseError::Unexpected(match t {
             Tok::Num(v) => v.to_string(),
             Tok::Unit(u) => u.clone(),
-            Tok::Op(c) => c.to_string(),
+            Tok::Op(c) => op_text(*c),
             Tok::Var(n) => format!("#{n}"),
             Tok::Func(n) => n.clone(),
             Tok::Pi => "pi".into(),
@@ -930,6 +1145,7 @@ pub fn eval_any(text: &str, default: f64, vars: &dyn Variables) -> Result<VarVal
         i: 0,
         default,
         vars,
+        dry: 0,
     };
     let v = p.expr()?;
     if p.peek().is_some() {
@@ -1078,6 +1294,105 @@ mod tests {
         assert!(matches!(len("5 $"), Err(ParseError::Unexpected(_))));
         assert!(matches!(len("mm"), Err(ParseError::Unexpected(_))));
         assert_eq!(len("5 mm mm"), Err(ParseError::Unexpected("mm".into())));
+    }
+
+    #[test]
+    fn powers_remainders_and_conditionals() {
+        let v = vars();
+        let e = |s: &str| eval_vars(s, Quantity::Length, &v);
+        let n = |s: &str| eval_any(s, 1.0, &v).map(|x| x.value);
+        // Onshape's `^`: right-associative, above the unary minus.
+        close(n("2^3"), 8.0);
+        close(n("2^3^2"), 512.0);
+        close(n("-2^2"), -4.0);
+        close(n("4^0.5"), 2.0);
+        close(e("sqrt((3 mm)^2 + (4 mm)^2)"), 5.0);
+        assert_eq!(e("(2 mm)^0.5"), Err(ParseError::Units));
+        assert_eq!(e("2 ^ 1 mm"), Err(ParseError::Units));
+        // `%` keeps the dividend's units and sign.
+        close(e("10 mm % 3 mm"), 1.0);
+        close(n("-7 % 3"), -1.0);
+        assert_eq!(n("5 % 0"), Err(ParseError::DivideByZero));
+        // Comparisons give 1 or 0 and compare across units.
+        close(n("1 in == 25.4 mm"), 1.0);
+        close(n("#piston_d > 30 mm"), 1.0);
+        close(n("#piston_d <= 30 mm"), 0.0);
+        close(n("#n != 3"), 0.0);
+        close(n("!(#n >= 3) || #n < 2"), 0.0);
+        close(n("#n > 2 && #n < 4"), 1.0);
+        assert_eq!(n("#piston_d > 30 deg"), Err(ParseError::Units));
+        // The conditional: both branches measure the same.
+        close(e("#piston_d > 30 mm ? 5 mm : 2 mm"), 5.0);
+        close(e("#n < 3 ? 5 mm : #n == 3 ? 7 mm : 9 mm"), 7.0);
+        close(e("max(#n > 1 ? 4 : 1, 2) * 1 mm"), 4.0);
+        assert_eq!(e("#n > 1 ? 4 mm : 1 deg"), Err(ParseError::Units));
+        assert_eq!(e("#n > 1 ? 4 mm"), Err(ParseError::Incomplete));
+        assert_eq!(n("1 = 1"), Err(ParseError::Unexpected("=".into())));
+        // The branch not taken isn't evaluated (only read and unit-checked).
+        let zero = vec![(
+            "z".to_string(),
+            VarValue {
+                value: 0.0,
+                quantity: Quantity::Count,
+            },
+        )];
+        let z = |s: &str| eval_any(s, 1.0, &zero).map(|x| x.value);
+        close(z("#z == 0 ? 0 : 1 / #z"), 0.0);
+        close(z("#z != 0 ? 1 / #z : -1"), -1.0);
+        close(z("#z != 0 && 1 / #z > 2"), 0.0);
+        close(z("#z == 0 || asin(2) > 0"), 1.0);
+        close(z("(#z == 0 ? 2 : sqrt(-1)) + 1"), 3.0);
+        assert_eq!(z("#z == 0 ? 1 / #z : 0"), Err(ParseError::DivideByZero));
+        assert_eq!(z("#z == 0 ? 1 mm : 1 / #z * 1 deg"), Err(ParseError::Units));
+        assert_eq!(
+            z("#z == 0 ? 1 : #nowhere"),
+            Err(ParseError::UnknownVariable("nowhere".into()))
+        );
+        // true and false read as 1 and 0.
+        close(n("true && !false"), 1.0);
+        close(e("false ? 1 mm : 2 mm"), 2.0);
+    }
+
+    #[test]
+    fn inverse_trigonometry_rounding_and_logarithms() {
+        let v = vars();
+        let a = |s: &str| eval_vars(s, Quantity::Angle, &v);
+        let n = |s: &str| eval_any(s, 1.0, &v);
+        close(a("asin(0.5)"), 30.0);
+        close(a("acos(0.5)"), 60.0);
+        close(a("atan(1)"), 45.0);
+        close(a("atan2(1 mm, -1 mm)"), 135.0);
+        close(a("atan2(1, 1 in / 25.4 mm)"), 45.0);
+        assert_eq!(n("asin(2)"), Err(ParseError::Domain("asin".into())));
+        assert_eq!(n("acos(1 mm)"), Err(ParseError::Units));
+        assert_eq!(n("asin(1)").unwrap().quantity, Quantity::Angle);
+        close(eval_vars("floor(2.7) * 1 mm", Quantity::Length, &v), 2.0);
+        close(
+            eval_vars("ceil(#piston_d / 3 mm) * 1 mm", Quantity::Length, &v),
+            14.0,
+        );
+        close(eval_vars("round(2.5)", Quantity::Count, &v), 3.0);
+        // A length rounds to a multiple of a length, whatever unit it was typed in.
+        close(
+            eval_vars("round(1.26 in, 0.1 in)", Quantity::Length, &v),
+            1.3 * 25.4,
+        );
+        close(
+            eval_vars("floor(#piston_d, 15 mm)", Quantity::Length, &v),
+            30.0,
+        );
+        close(eval_vars("ceil(#piston_d, 15)", Quantity::Length, &v), 45.0);
+        assert_eq!(n("floor(2.7 mm)"), Err(ParseError::Units));
+        assert_eq!(n("round(1 mm, 0 mm)"), Err(ParseError::DivideByZero));
+        close(n("log(exp(2))").map(|x| x.value), 2.0);
+        close(n("log10(1000)").map(|x| x.value), 3.0);
+        assert_eq!(n("log(0)"), Err(ParseError::Domain("log".into())));
+        assert_eq!(n("exp(1 mm)"), Err(ParseError::Units));
+        assert_eq!(n("atan2(1)"), Err(ParseError::Arguments("atan2".into())));
+        assert_eq!(
+            n("frob(1)"),
+            Err(ParseError::UnknownFunction("frob".into()))
+        );
     }
 
     fn vars() -> Vec<(String, VarValue)> {

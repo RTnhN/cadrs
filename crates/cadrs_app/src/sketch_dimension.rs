@@ -33,7 +33,10 @@ use cadrs_sketch::hit::hit_test;
 use cadrs_sketch::units;
 use cadrs_sketch::{Dimension, DimensionId, DimensionKind, SketchEntity, SketchOp};
 use cadrs_ui::inline_edit::DOUBLE_CLICK_TIME;
-use cadrs_ui::{DimEdit, DimEditBox, DimEditCancel, DimEditCommit, Theme};
+use cadrs_ui::{
+    DimEdit, DimEditBox, DimEditCancel, DimEditCommit, DimEditNewVariable, DimEditVariable,
+    DimEditVariables, Theme,
+};
 
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
 use crate::sketch_glyphs::SketchOverlay;
@@ -63,7 +66,8 @@ impl Plugin for SketchDimensionPlugin {
             .add_systems(OnExit(PartStudioMode::Sketching), reset_dimension_tool)
             .add_observer(on_commit)
             .add_observer(on_dimension_menu)
-            .add_observer(on_cancel);
+            .add_observer(on_cancel)
+            .add_observer(on_new_variable);
     }
 }
 
@@ -683,6 +687,7 @@ pub fn open_editor(world: &mut World, id: DimensionId) {
         return;
     };
     let q = d.kind.quantity();
+    let variables = listed_variables(world);
     let entity = world
         .spawn((
             // "50 mm" with the number selected, as Onshape opens it (typing replaces the
@@ -695,6 +700,7 @@ pub fn open_editor(world: &mut World, id: DimensionId) {
                 None => DimEdit::new("dimension-edit", u.with_unit(d.value, q))
                     .select_prefix(u.live_value(d.value, q).chars().count()),
             }
+            .variables(variables)
             .build(&theme),
             Visibility::Hidden,
             ZIndex(6),
@@ -759,8 +765,23 @@ fn value_for(world: &World, id: DimensionId, text: &str) -> Result<f64, String> 
         .and_then(|s| s.dimensions.get(id).copied())
         .ok_or("The dimension is gone")?;
     let q = d.kind.quantity();
-    // P3F.4: `#piston_d + #clearance` reads the Part Studio's variables.
-    let v = crate::variables_ui::eval_field(world, text, q).map_err(|e| e.to_string())?;
+    // P3F.4: `#piston_d + #clearance` reads the variables defined above the sketch.
+    let u = world.resource::<crate::WorkspaceUnits>().0;
+    let v = u
+        .eval_vars(text, q, &sketch_variables(world))
+        .map_err(|e| match e {
+            units::ParseError::UnknownVariable(n) if n.is_empty() => {
+                "Type a variable's name after #".to_string()
+            }
+            units::ParseError::Unexpected(t) if t == "#" => {
+                "Type a variable's name after #".to_string()
+            }
+            units::ParseError::UnknownVariable(n) if below_sketch(world, &n) => {
+                format!("#{n} is defined below this sketch; move it above the sketch to use it")
+            }
+            units::ParseError::UnknownVariable(n) => format!("There is no variable #{n}"),
+            e => e.to_string(),
+        })?;
     if v <= 0.0 {
         return Err("Enter a positive value".into());
     }
@@ -768,6 +789,76 @@ fn value_for(world: &World, id: DimensionId, text: &str) -> Result<f64, String> 
         return Err("Enter an angle less than 180°".into());
     }
     Ok(v)
+}
+
+/// The variables the sketch being edited can use: the Variable Studios' and those above it.
+fn sketch_variables(world: &World) -> Vec<(String, units::VarValue)> {
+    world
+        .get_resource::<SketchSession>()
+        .map(|s| crate::variables_ui::defined_before(world, s.element, s.feature))
+        .unwrap_or_default()
+}
+
+/// Whether a Variable below the sketch being edited defines `name`.
+fn below_sketch(world: &World, name: &str) -> bool {
+    world
+        .get_resource::<SketchSession>()
+        .is_some_and(|s| crate::variables_ui::defined_below(world, s.element, s.feature, name))
+}
+
+/// The variables the value editor lists when `#` is typed, with their values.
+fn listed_variables(world: &World) -> Vec<DimEditVariable> {
+    let u = world.resource::<crate::WorkspaceUnits>().0;
+    sketch_variables(world)
+        .into_iter()
+        .map(|(name, v)| DimEditVariable {
+            name,
+            value: u.with_unit(v.value, v.quantity),
+        })
+        .collect()
+}
+
+/// New variable… in the value editor: a Variable holding the dimension's value, inserted above
+/// the sketch (so the sketch can use it), and its name put in the editor.
+fn on_new_variable(ev: On<DimEditNewVariable>, mut commands: Commands) {
+    let field = ev.entity;
+    let wanted = ev.name.clone();
+    commands.queue(move |world: &mut World| {
+        let Some(open) = world.resource::<DimensionEditor>().open else {
+            return;
+        };
+        if editor_box(world, field) != Some(open.entity) {
+            return;
+        }
+        let Some(s) = world.get_resource::<SketchSession>() else {
+            return;
+        };
+        let (element, feature) = (s.element, s.feature);
+        let Some(d) = world_sketch(world).and_then(|s| s.dimensions.get(open.id).copied()) else {
+            return;
+        };
+        let u = world.resource::<crate::WorkspaceUnits>().0;
+        let q = d.kind.quantity();
+        let name = crate::variables_ui::free_name(world, element, &wanted);
+        let var_type = match q {
+            units::Quantity::Length => cadrs_core::variables::VariableType::Length,
+            units::Quantity::Angle => cadrs_core::variables::VariableType::Angle,
+            units::Quantity::Count => cadrs_core::variables::VariableType::Number,
+        };
+        let v = cadrs_core::variables::VariableFeature::typed(
+            var_type,
+            &name,
+            &u.with_unit(d.value, q),
+        );
+        if !crate::variables_ui::insert_variable_above(world, element, feature, v) {
+            return;
+        }
+        let listed = listed_variables(world);
+        if let Some(mut vars) = world.get_mut::<DimEditVariables>(open.entity) {
+            vars.0 = listed;
+        }
+        cadrs_ui::complete_variable(world, field, &name);
+    });
 }
 
 fn set_value(world: &mut World, id: DimensionId, value: f64, text: &str) {
@@ -963,5 +1054,122 @@ mod tests {
             dimension_text(&d(DimensionKind::Diameter { curve: c }, 25.4), false, &inch),
             "Ø1"
         );
+    }
+
+    /// A Part Studio of `#above`, a sketch with a 16 mm circle's diameter, and `#below`, with
+    /// the sketch open.
+    fn variables_app() -> (App, DimensionId) {
+        use cadrs_core::document::SketchFeature;
+        use cadrs_core::variables::VariableFeature;
+        use cadrs_core::{Document, Feature, FeatureId, FeatureKind};
+        let mut sketch = cadrs_sketch::Sketch::new();
+        SketchOp::AddCircle {
+            center: crate::sketch_tools::SVec2::new(0.0, 0.0),
+            radius: 8.0,
+            construction: false,
+        }
+        .apply(&mut sketch)
+        .unwrap();
+        let curve = sketch.curves.keys().next().unwrap();
+        let dim =
+            sketch
+                .dimensions
+                .insert(Dimension::new(DimensionKind::Diameter { curve }, 16.0, 0.0));
+        let var = |name: &str, expr: &str| {
+            Feature::new(
+                FeatureId::new(),
+                format!("#{name}"),
+                FeatureKind::Variable(VariableFeature::length(name, expr)),
+            )
+        };
+        let mut doc = Document::new("Variables");
+        let element = doc.elements[0].id;
+        let feature = FeatureId::new();
+        let features = doc.elements[0].features_mut().unwrap();
+        features.push(var("above", "10 mm"));
+        features.push(Feature::new(
+            feature,
+            "Sketch 1",
+            FeatureKind::Sketch(SketchFeature {
+                plane: Some(cadrs_sketch::PlaneRef::Top),
+                disable_imprinting: true,
+                geometry: sketch,
+            }),
+        ));
+        features.push(var("below", "4 mm"));
+        let mut app = App::new();
+        app.insert_resource(ActiveDocument::new(doc))
+            .init_resource::<crate::WorkspaceUnits>()
+            .init_resource::<DimensionEditor>()
+            .insert_resource(SketchSession {
+                element,
+                feature,
+                is_new: false,
+                mark: 0,
+                before: None,
+                waiting_for_plane: false,
+                plane_extent: Vec2::splat(100.0),
+                prompted: false,
+                show_final: false,
+            });
+        (app, dim)
+    }
+
+    #[test]
+    fn hash_lists_only_the_variables_above_the_sketch() {
+        let (app, _) = variables_app();
+        assert_eq!(
+            listed_variables(app.world()),
+            vec![DimEditVariable {
+                name: "above".into(),
+                value: "10 mm".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_variable_the_sketch_cannot_use_says_why() {
+        let (app, dim) = variables_app();
+        let w = app.world();
+        assert_eq!(value_for(w, dim, "#above + 2 mm"), Ok(12.0));
+        let below = value_for(w, dim, "#below").unwrap_err();
+        assert!(below.contains("below this sketch"), "{below}");
+        assert_eq!(
+            value_for(w, dim, "#nope"),
+            Err("There is no variable #nope".into())
+        );
+        assert_eq!(
+            value_for(w, dim, "#"),
+            Err("Type a variable's name after #".into())
+        );
+    }
+
+    #[test]
+    fn a_new_variable_goes_above_the_sketch_in_one_step() {
+        let (mut app, dim) = variables_app();
+        let w = app.world_mut();
+        let s = w.resource::<SketchSession>().clone();
+        let steps = w.resource::<ActiveDocument>().history.undo_len();
+        // Taken names fall back to var_N.
+        assert_eq!(
+            crate::variables_ui::free_name(w, s.element, "below"),
+            "var_1"
+        );
+        assert_eq!(crate::variables_ui::free_name(w, s.element, "d"), "d");
+        let v = cadrs_core::variables::VariableFeature::length("d", "16 mm");
+        assert!(crate::variables_ui::insert_variable_above(
+            w, s.element, s.feature, v
+        ));
+        let names = |w: &World| -> Vec<String> {
+            let doc = w.resource::<ActiveDocument>();
+            let el = doc.doc.element(s.element).unwrap();
+            el.features().iter().map(|f| f.name.clone()).collect()
+        };
+        assert_eq!(names(w), ["#above", "#d", "Sketch 1", "#below"]);
+        assert_eq!(value_for(w, dim, "#d"), Ok(16.0));
+        let mut doc = w.resource_mut::<ActiveDocument>();
+        assert_eq!(doc.history.undo_len(), steps + 1);
+        doc.undo();
+        assert_eq!(names(w), ["#above", "Sketch 1", "#below"]);
     }
 }

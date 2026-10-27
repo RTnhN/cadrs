@@ -26,7 +26,7 @@
 //!   expression names a variable that isn't defined above it (it then builds, with the error).
 
 use cadrs_sketch::SketchOp;
-use cadrs_sketch::units::{self, ParseError, Quantity, Units, VarValue};
+use cadrs_sketch::units::{self, Quantity, Units, VarValue};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{Feature, FeatureKind};
@@ -83,13 +83,18 @@ impl SuppressByVariable {
 
 /// The features (of a whole list, in order) their suppression variable suppresses (IR5.5),
 /// with the Variables' values as last evaluated; `suppressed` are the ones suppressed by
-/// Suppress. One whose expression can't be evaluated isn't suppressed ([`check`] fails it).
-pub fn suppressed_by_variables(features: &[Feature], suppressed: &[FeatureId]) -> Vec<FeatureId> {
+/// Suppress, `base` the variables defined above the list (the document's Variable Studios').
+/// One whose expression can't be evaluated isn't suppressed ([`check`] fails it).
+pub fn suppressed_by_variables(
+    base: &[(String, VarValue)],
+    features: &[Feature],
+    suppressed: &[FeatureId],
+) -> Vec<FeatureId> {
     let mut out = Vec::new();
     if features.iter().all(|f| f.suppress_by.is_none()) {
         return out;
     }
-    let mut env: Vec<(String, VarValue)> = Vec::new();
+    let mut env: Vec<(String, VarValue)> = base.to_vec();
     for f in features {
         if suppressed.contains(&f.id) {
             continue;
@@ -110,8 +115,10 @@ pub fn suppressed_by_variables(features: &[Feature], suppressed: &[FeatureId]) -
 }
 
 /// The variables a feature's suppression variable can name (IR5.5's picker): those defined
-/// above it among `features` (the ones that build), with their values.
+/// above it among `features` (the ones that build), after `base` (the Variable Studios'), with
+/// their values.
 pub fn in_scope(
+    base: &[(String, VarValue)],
     features: &[Feature],
     feature: FeatureId,
     units: &Units,
@@ -120,7 +127,7 @@ pub fn in_scope(
         .iter()
         .position(|f| f.id == feature)
         .unwrap_or(features.len());
-    let mut env = defined(&features[..end], units);
+    let mut env = defined_with(base, &features[..end], units);
     // The last definition of a name wins: list each name once.
     let mut seen: Vec<String> = Vec::new();
     env.reverse();
@@ -133,184 +140,7 @@ pub fn in_scope(
     env
 }
 
-/// A Variable's type (Onshape's Length, Angle, Number and Any).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum VariableType {
-    #[default]
-    Length,
-    Angle,
-    Number,
-    /// Whatever the expression gives.
-    Any,
-}
-
-impl VariableType {
-    pub const ALL: [VariableType; 4] = [
-        VariableType::Length,
-        VariableType::Angle,
-        VariableType::Number,
-        VariableType::Any,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            VariableType::Length => "Length",
-            VariableType::Angle => "Angle",
-            VariableType::Number => "Number",
-            VariableType::Any => "Any",
-        }
-    }
-}
-
-/// What a variable's value measures, once evaluated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum VariableKind {
-    /// Millimetres.
-    #[default]
-    Length,
-    /// Degrees.
-    Angle,
-    Number,
-}
-
-impl VariableKind {
-    pub fn quantity(self) -> Quantity {
-        match self {
-            VariableKind::Length => Quantity::Length,
-            VariableKind::Angle => Quantity::Angle,
-            VariableKind::Number => Quantity::Count,
-        }
-    }
-
-    fn of(q: Quantity) -> Self {
-        match q {
-            Quantity::Length => VariableKind::Length,
-            Quantity::Angle => VariableKind::Angle,
-            Quantity::Count => VariableKind::Number,
-        }
-    }
-}
-
-/// A Variable feature: `#name = expr`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct VariableFeature {
-    /// The name, without the `#`.
-    pub name: String,
-    #[serde(default)]
-    pub var_type: VariableType,
-    /// The expression as typed ("40 mm", "#piston_d + 0.5 mm").
-    pub expr: String,
-    /// Its value when last evaluated: mm, degrees or a plain number.
-    pub value: f64,
-    /// What the value measures.
-    #[serde(default)]
-    pub kind: VariableKind,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub description: String,
-}
-
-impl Default for VariableFeature {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            var_type: VariableType::Length,
-            expr: "0 mm".into(),
-            value: 0.0,
-            kind: VariableKind::Length,
-            description: String::new(),
-        }
-    }
-}
-
-impl VariableFeature {
-    /// A Length variable `#name = expr`, evaluated without other variables.
-    pub fn length(name: &str, expr: &str) -> Self {
-        let mut v = Self {
-            name: name.into(),
-            expr: expr.into(),
-            ..Self::default()
-        };
-        let _ = v.evaluate(&Units::default(), &Vec::new());
-        v
-    }
-
-    /// The value as expressions see it.
-    pub fn var_value(&self) -> VarValue {
-        VarValue {
-            value: self.value,
-            quantity: self.kind.quantity(),
-        }
-    }
-
-    /// Evaluates the expression with the variables above it (`vars`), setting the value.
-    pub fn evaluate(
-        &mut self,
-        units: &Units,
-        vars: &[(String, VarValue)],
-    ) -> Result<(), ParseError> {
-        let (value, kind) = eval_variable(self.var_type, &self.expr, units, vars)?;
-        self.value = value;
-        self.kind = kind;
-        Ok(())
-    }
-
-    /// Why it can't be defined, if it can't.
-    pub fn problem(&self) -> Option<&'static str> {
-        if self.name.is_empty() {
-            return Some("Enter a variable name");
-        }
-        if !units::is_variable_name(&self.name) {
-            return Some("A name is letters, digits and _ (starting with a letter)");
-        }
-        if self.expr.trim().is_empty() {
-            return Some("Enter a value");
-        }
-        None
-    }
-
-    /// The value with its unit, as the Variable table shows it ("40.5 mm").
-    pub fn display(&self, units: &Units) -> String {
-        match self.kind {
-            VariableKind::Length => format!(
-                "{} {}",
-                units.value(self.value, Quantity::Length),
-                units.length.symbol()
-            ),
-            VariableKind::Angle => format!("{} deg", units.value(self.value, Quantity::Angle)),
-            VariableKind::Number => {
-                let s = format!("{:.6}", self.value);
-                s.trim_end_matches('0').trim_end_matches('.').to_string()
-            }
-        }
-    }
-}
-
-/// A variable's expression evaluated as its type asks: its value and what it measures.
-pub fn eval_variable(
-    t: VariableType,
-    expr: &str,
-    units: &Units,
-    vars: &[(String, VarValue)],
-) -> Result<(f64, VariableKind), ParseError> {
-    Ok(match t {
-        VariableType::Length => (
-            units.eval_vars(expr, Quantity::Length, &vars)?,
-            VariableKind::Length,
-        ),
-        VariableType::Angle => (
-            units.eval_vars(expr, Quantity::Angle, &vars)?,
-            VariableKind::Angle,
-        ),
-        VariableType::Number => (
-            units.eval_vars(expr, Quantity::Count, &vars)?,
-            VariableKind::Number,
-        ),
-        VariableType::Any => {
-            let v = units::eval_any(expr, units.length.mm(), &vars)?;
-            (v.value, VariableKind::of(v.quantity))
-        }
-    })
-}
+pub use cadrs_vars::{VariableFeature, VariableKind, VariableType, eval_variable};
 
 /// One numeric field of a feature: its label, the text it was typed as, its value and what it
 /// measures. Counts are carried as `f64` and written back rounded.
@@ -784,10 +614,41 @@ pub fn uses(f: &Feature) -> Vec<String> {
     out
 }
 
+/// The variables a list names: those its features' expressions name, and their suppression
+/// variables' (what of the Variable Studios' a Part Studio needs, see
+/// [`crate::variable_studio`]).
+pub fn names_used(features: &[Feature]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for f in features {
+        if !has_hash(&f.kind) && f.suppress_by.is_none() {
+            continue;
+        }
+        let rule = f
+            .suppress_by
+            .as_ref()
+            .map(|r| units::variable_names(&r.expr));
+        for n in uses(f).into_iter().chain(rule.into_iter().flatten()) {
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+    }
+    out
+}
+
 /// The variables defined by the features, top to bottom, each evaluated with those above it
 /// (a later definition of a name wins below it).
 pub fn defined(features: &[Feature], units: &Units) -> Vec<(String, VarValue)> {
-    let mut env: Vec<(String, VarValue)> = Vec::new();
+    defined_with(&[], features, units)
+}
+
+/// [`defined`] after `base`: the variables defined above the list (the Variable Studios').
+pub fn defined_with(
+    base: &[(String, VarValue)],
+    features: &[Feature],
+    units: &Units,
+) -> Vec<(String, VarValue)> {
+    let mut env: Vec<(String, VarValue)> = base.to_vec();
     for f in features {
         if let FeatureKind::Variable(v) = &f.kind {
             if v.problem().is_some() {
@@ -929,13 +790,19 @@ fn has_hash(k: &FeatureKind) -> bool {
 /// values (P3F.4: a changed `#piston_d` reaches the bore dimension, the depths and the counts).
 /// Sketch dimensions that change are set through the sketch's own edit (and solve). Features
 /// that fail to evaluate keep their last values ([`check`] reports them). Returns whether
-/// anything changed.
-pub fn refresh(features: &mut [Feature], suppressed: &[FeatureId], units: &Units) -> bool {
+/// anything changed. `base` are the variables defined above the list (the document's Variable
+/// Studios', [`crate::variable_studio`]).
+pub fn refresh(
+    base: &[(String, VarValue)],
+    features: &mut [Feature],
+    suppressed: &[FeatureId],
+    units: &Units,
+) -> bool {
     if !features.iter().any(|f| has_hash(&f.kind)) {
         return false;
     }
     let mut changed = false;
-    let mut env: Vec<(String, VarValue)> = Vec::new();
+    let mut env: Vec<(String, VarValue)> = base.to_vec();
     for f in features.iter_mut() {
         if suppressed.contains(&f.id) {
             continue;

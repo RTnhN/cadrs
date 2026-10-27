@@ -791,8 +791,8 @@ fn run_drc(w: &mut World) {
     list_lines(w, "eda-drc-list", lines);
 }
 
-/// The board's components running into parts of the Part Studios it is derived into
-/// (`docs/PCB_IN_PART_STUDIO.md` §7.3 item 8): "J1 AC inlet runs into Tube in Enclosure (0.80 mm
+/// The board's components running into parts of the Part Studios it is derived into:
+/// "J1 AC inlet runs into Tube in Enclosure (0.80 mm
 /// in plan, 2.40 mm high)".
 fn mechanical_context(w: &World) -> Vec<String> {
     let Some((pcb, board, _)) = w.resource::<super::Eda2d>().board() else {
@@ -810,7 +810,7 @@ fn mechanical_context(w: &World) -> Vec<String> {
         if deriving.is_empty() {
             continue;
         }
-        let build = cadrs_core::rebuild::build(el.features());
+        let build = cadrs_core::rebuild::build(&el.part_features());
         let name = |p: cadrs_core::PartId| {
             build
                 .part(p)
@@ -1095,7 +1095,7 @@ struct CreateBoardOf {
     studios: Vec<cadrs_core::ElementId>,
 }
 
-/// Part Studio → a sketch's menu → **Create PCB board…** (`docs/PCB_IN_PART_STUDIO.md` §8.1):
+/// Part Studio → a sketch's menu → **Create PCB board…**:
 /// the board's name, the PCB Studio it goes to (or a new one), its thickness and which face lies
 /// on the sketch. The board's outline is the regions' (circles in them are holes) and follows
 /// the sketch.

@@ -1,4 +1,4 @@
-//! The frames a derived board lives in (`docs/PCB_IN_PART_STUDIO.md` §11), and the one place
+//! The frames a derived board lives in, and the one place
 //! that converts between them:
 //!
 //! - the **layout** (cadrs_eda): nm, y up, the board's origin;

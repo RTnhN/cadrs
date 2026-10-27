@@ -301,7 +301,7 @@ pub fn board_feature(board: BoardId) -> crate::ids::FeatureId {
 }
 
 impl PcbStudio {
-    /// The studio as a Part Studio for assemblies (`docs/PCB_IN_PART_STUDIO.md` §9, direct
+    /// The studio as a Part Studio for assemblies (direct
     /// insert): one Derived feature per board (an IDF one as its outline and package boxes), the
     /// board and its components as the layout has them (its origin on the origin), named after
     /// the board. An assembly's rigid
@@ -487,6 +487,7 @@ impl Element {
             open_context: None,
             simulation: Default::default(),
             named_views: Vec::new(),
+            studio_variables: Vec::new(),
         }
     }
 
@@ -511,11 +512,14 @@ impl Element {
 
     /// The features whose parts this tab has: a Part Studio's feature list, a PCB Studio's
     /// boards as Derived features ([`PcbStudio::part_features`]).
-    pub fn part_features(&self) -> &[crate::document::Feature] {
+    pub fn part_features(&self) -> std::borrow::Cow<'_, [crate::document::Feature]> {
         match &self.kind {
-            ElementKind::PcbStudio(p) => p.part_features(),
-            ElementKind::CamStudio(c) => c.part_features(),
-            _ => self.features(),
+            ElementKind::PcbStudio(p) => p.part_features().into(),
+            ElementKind::CamStudio(c) => c.part_features().into(),
+            // The Variable Studios' variables it names come first (see
+            // `Element::features_to_build`).
+            _ if self.studio_variables.iter().any(|v| v.used) => self.features_to_build().into(),
+            _ => self.features().into(),
         }
     }
 

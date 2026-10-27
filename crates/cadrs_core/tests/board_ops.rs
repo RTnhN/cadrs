@@ -1,5 +1,5 @@
 //! Board edits by name and number (`cadrs_core::pcb::ops`, the MCP server's board tools) and a
-//! PCB Studio board inserted straight into an assembly (`docs/PCB_IN_PART_STUDIO.md` P6–P7), on
+//! PCB Studio board inserted straight into an assembly, on
 //! the mains-sensor sample: its AC sensor board derived onto "Board location" in the
 //! Enclosure, whose plug's Live, Earth and Neutral pins stand at (0, 8), (0, 0) and (0, −8).
 #![cfg(feature = "brep")]
@@ -290,7 +290,7 @@ fn a_board_in_an_assembly_follows_its_layout_and_nests_in_the_bom() {
     };
     assert_eq!(count(&doc), parts.len());
     // The parts are the PCB Studio's rebuild's: the board's and its components'.
-    let build = cadrs_core::rebuild::build(doc.element(pe::PCB).unwrap().part_features());
+    let build = cadrs_core::rebuild::build(&doc.element(pe::PCB).unwrap().part_features());
     for p in &parts {
         assert!(build.part(*p).is_some(), "{p:?} is built");
     }
@@ -302,7 +302,7 @@ fn a_board_in_an_assembly_follows_its_layout_and_nests_in_the_bom() {
     // The structured BOM: the board, its components under it.
     let builds = |e: ElementId| {
         doc.element(e)
-            .map(|x| cadrs_core::rebuild::build(x.part_features()))
+            .map(|x| cadrs_core::rebuild::build(&x.part_features()))
     };
     let options = BomOptions {
         expand_all: true,
@@ -647,7 +647,7 @@ fn a_mate_to_a_board_component_holds_when_the_layout_moves_it() {
     );
     // J4's occurrence and its wire's end face (flat, facing up); the pin's top face.
     let solids = cadrs_core::assembly::document_occurrence_solids(&doc, asm_id);
-    let pcb_build = cadrs_core::rebuild::build(doc.element(pe::PCB).unwrap().part_features());
+    let pcb_build = cadrs_core::rebuild::build(&doc.element(pe::PCB).unwrap().part_features());
     let occ = occurrences(&doc, doc.element(asm_id).unwrap().assembly_model().unwrap());
     let j4 = occ
         .iter()

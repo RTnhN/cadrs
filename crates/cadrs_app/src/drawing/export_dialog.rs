@@ -120,6 +120,9 @@ fn row(name: &str) -> impl Bundle {
 
 /// Opens Export… for drawing `element`.
 pub fn open_drawing_export(world: &mut World, element: ElementId) {
+    if crate::collab::lacks(world, |r| r.export, "export") {
+        return;
+    }
     let Some((name, sheets, current)) = world.get_resource::<ActiveDocument>().and_then(|doc| {
         let el = doc.doc.element(element)?;
         let cadrs_core::ElementKind::Drawing(d) = &el.kind else {

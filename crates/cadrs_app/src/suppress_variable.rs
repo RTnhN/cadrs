@@ -71,7 +71,7 @@ pub fn open(world: &mut World, feature: FeatureId) {
         .filter(|g| g.id == feature || !suppressed.contains(&g.id))
         .cloned()
         .collect();
-    let scope = variables::in_scope(&building, feature, &units);
+    let scope = variables::in_scope(&el.variable_base(), &building, feature, &units);
     let current = f.suppress_by.clone();
     let feature_name = f.name.clone();
     let names: Vec<String> = scope.iter().map(|(n, _)| n.clone()).collect();

@@ -477,6 +477,7 @@ fn tab_icon(el: &cadrs_core::Element) -> &'static str {
         ElementKind::PcbStudio(_) => "pcb-studio",
         ElementKind::Render(_) => "render-studio",
         ElementKind::CamStudio(_) => "cam-studio",
+        ElementKind::VariableStudio(_) => "variable-studio",
     }
 }
 
@@ -793,7 +794,7 @@ fn write_thumbnail(world: &mut World, id: DocumentId) {
     else {
         return;
     };
-    let build = cadrs_core::rebuild::build(el.features());
+    let build = cadrs_core::rebuild::build(&el.part_features());
     let list: Vec<(&cadrs_core::Solid, [u8; 3])> = build
         .parts
         .iter()

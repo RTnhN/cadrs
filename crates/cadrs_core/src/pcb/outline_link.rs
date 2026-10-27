@@ -1,4 +1,4 @@
-//! A board's outline driven by a Part Studio sketch (`docs/PCB_IN_PART_STUDIO.md` §8): the
+//! A board's outline driven by a Part Studio sketch: the
 //! sketch regions picked make the board's outline (their outer boundaries) and cut-outs (their
 //! holes), in the sketch's coordinates (board mm = sketch mm, both y up), and follow the sketch
 //! **live**: after every command, undo and redo ([`refresh`], run with the Derived features'

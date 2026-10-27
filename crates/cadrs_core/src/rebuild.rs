@@ -244,7 +244,7 @@ struct State {
 }
 
 /// Why a feature can't change a part with no kernel body: a derived board's component is a mesh
-/// (`docs/PCB_IN_PART_STUDIO.md` Q1), which modelling features leave alone.
+/// part, which modelling features leave alone.
 fn no_body(p: &PartState) -> String {
     format!(
         "{} is a board component (a mesh, no solid): modelling features can't change it",
@@ -1118,8 +1118,8 @@ impl Rebuilder {
         HashMap::new()
     }
 
-    /// A derived board's component part as its model's solids (`docs/PCB_IN_PART_STUDIO.md` P7:
-    /// a STEP export carries real solids, not the mesh the Part Studio shows), where the board
+    /// A derived board's component part as its model's solids
+    /// (a STEP export carries real solids, not the mesh the Part Studio shows), where the board
     /// copy puts it now. The caller releases them.
     #[cfg(feature = "brep")]
     fn component_solids(

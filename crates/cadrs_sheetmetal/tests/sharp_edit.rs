@@ -115,6 +115,7 @@ fn flange_on(
             alignment,
             radius: None,
             miter,
+            gap: None,
             hold_adjacent: hold,
             per_chain: false,
         },
@@ -337,7 +338,9 @@ fn flanges_without_automatic_miter_are_cut_at_the_miter_angle() {
     assert_eq!(m.joints.len(), 2, "no rip");
     let f = flatten(&m);
     assert!(f.is_ok(), "{:?}", f.errors);
-    // 45°: both stop at their edges' ends (the plate's corner).
+    // 45°, Outer (the flanges' outsides on the plate's edges): the miter plane runs through the
+    // plate's corner, so each stops where its inside meets it, T short of the corner, the two
+    // insides meeting there.
     let reach = |m: &Model, id: u64, axis: usize| {
         m.wall(stable(id))
             .unwrap()
@@ -347,7 +350,7 @@ fn flanges_without_automatic_miter_are_cut_at_the_miter_angle() {
             .map(|q| m.wall(stable(id)).unwrap().surface.point(*q)[axis])
             .fold(f64::MIN, f64::max)
     };
-    assert!(close(reach(&m, 100, 1), 40.0) && close(reach(&m, 101, 0), 50.0));
+    assert!(close(reach(&m, 100, 1), 40.0 - T) && close(reach(&m, 101, 0), 50.0 - T));
     // 30° (Inner, so the flanges' insides are on the plate's edges and the corner's outside is
     // at (52, 42)): the miter plane through the outside corner at 30° to the east flange cuts its
     // inside (x = 50) at y = 42 − T·cot 30°; the north flange's inside (y = 40) at
@@ -703,6 +706,7 @@ fn flange_along(def: &mut SharpDef, m: &Model, pick: EdgePick, key: u64, dir: V3
             alignment: FlangeAlignment::Inner,
             radius: None,
             miter: None,
+            gap: None,
             hold_adjacent: true,
             per_chain: false,
         },
@@ -900,6 +904,7 @@ fn flange_on_a_sloping_edge_stays_joined() {
                 alignment: align,
                 radius: None,
                 miter: None,
+                gap: None,
                 hold_adjacent: true,
                 per_chain: false,
             },

@@ -346,7 +346,7 @@ mod course {
 }
 
 /// An IDF board (no layout of its own, imported from another tool) as a layout a Part Studio can
-/// derive (`docs/PCB_IN_PART_STUDIO.md` P7): its outline and cut-outs, its drilled holes, and
+/// derive: its outline and cut-outs, its drilled holes, and
 /// each placed package as a footprint whose model is a box over the package's outline, its
 /// height tall. Read-only: there is nothing to edit it from.
 pub fn idf_layout(pcb: &PcbBoard) -> cadrs_eda::board::Board {

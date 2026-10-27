@@ -412,7 +412,7 @@ pub fn form_studio(
                     }
                 }
             }
-            crate::variables::refresh(&mut fs, &[], &cadrs_sketch::units::Units::default());
+            crate::variables::refresh(&[], &mut fs, &[], &cadrs_sketch::units::Units::default());
             Ok(fs)
         }
     }

@@ -53,6 +53,9 @@ Usage:
   cadrs --install
       Installs this build for the current user, with a launcher entry (Linux, macOS, Windows;
       `cargo install-local`).
+  cadrs --bundle <cadrs.app> [--libraries <dir>]
+      Makes the macOS app bundle of this build, as --install would, without installing it (the
+      macOS release, tools/release/package.sh).
 
 Documents live in --data-dir, else $CADRS_DATA_DIR, else the platform data dir
 (~/.local/share/cadrs/documents on Linux).";
@@ -75,6 +78,28 @@ fn main() -> AppExit {
     if args.iter().any(|a| a == "-h" || a == "--help") {
         println!("{HELP}");
         return AppExit::Success;
+    }
+    // `--bundle <app>`: the macOS app bundle of this build (`install.rs`).
+    if let Some(i) = args.iter().position(|a| a == "--bundle") {
+        let Some(app) = args.get(i + 1) else {
+            eprintln!("--bundle needs the bundle's path (cadrs.app)");
+            return AppExit::from_code(2);
+        };
+        let libraries = args
+            .iter()
+            .position(|a| a == "--libraries")
+            .and_then(|k| args.get(k + 1))
+            .map(std::path::PathBuf::from);
+        return match install::bundle(std::path::Path::new(app), libraries.as_deref()) {
+            Ok(()) => {
+                println!("Made {app}");
+                AppExit::Success
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                AppExit::from_code(1)
+            }
+        };
     }
     // `--install`: installs this build for the user, with a launcher entry (`install.rs`;
     // `--install-desktop` is its older name).
@@ -169,6 +194,18 @@ fn main() -> AppExit {
     if !scripted && !opts.headless {
         // Only a person's own runs ask GitHub for a newer release.
         app.insert_resource(cadrs_app::update::CheckForUpdates);
+    }
+    // Sharing and collaboration: only a person's own runs are a peer (`CADRS_NET=0` keeps
+    // one off the network). The identity lives with the documents, so each data dir is a peer.
+    if !scripted && !opts.headless && std::env::var_os("CADRS_NET").is_none_or(|v| v != "0") {
+        app.add_plugins(cadrs_net::NetPlugin {
+            identity: data_dir
+                .clone()
+                .or_else(Store::default_root)
+                .map(|d| d.join(cadrs_net::IDENTITY_FILE)),
+            display_name: UserProfile::system().display_name,
+            relays: Default::default(),
+        });
     }
     if scripted || opts.headless {
         // The same light (or `CADRS_COLOR_SCHEME`) look on every machine.

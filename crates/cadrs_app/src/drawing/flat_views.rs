@@ -228,7 +228,7 @@ pub fn is_sheet_metal_part(doc: &cadrs_core::Document, element: ElementId, part:
     let Some(el) = doc.element(element) else {
         return false;
     };
-    let build = cadrs_core::rebuild::build(el.features());
+    let build = cadrs_core::rebuild::build(&el.part_features());
     cadrs_core::flat_drawing::flat_parts(&build.sheet_metal).contains(&part)
 }
 

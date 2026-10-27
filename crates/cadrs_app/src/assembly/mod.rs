@@ -791,7 +791,7 @@ pub fn shown_points(doc: &ActiveDocument) -> Vec<Vec3> {
         let Some(el) = doc.doc.element(o.element) else {
             continue;
         };
-        let build = cadrs_core::rebuild::build(el.part_features());
+        let build = cadrs_core::rebuild::build(&el.part_features());
         let Some(p) = build.part(o.part) else {
             continue;
         };

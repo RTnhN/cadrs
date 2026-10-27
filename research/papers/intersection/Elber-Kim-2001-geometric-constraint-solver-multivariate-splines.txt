@@ -1,969 +1,0 @@
-                                          Solving Geometric Constraints
-                                                       using
-                                       Multivariate Rational Spline Functions
-                               Gershon Elber                                            Myung-Soo Kim
-                      Department of Computer Science                       School of Computer Science and Engineering
-                   Technion, Israel Institute of Technology                         Seoul National University
-                             Haifa 32000, Israel                                      Seoul 151-742, Korea
-                     E-mail: gershon@cs.technion.ac.il                            E-mail: mskim@cse.snu.ac.kr
-
-
-
-
-Abstract                                                                    main to a much smaller subdomain; however, the cost of this do-
-                                                                            main clipping is high and there is a trade-off against the reduction
-We present a new approach to building a solver for a set of geomet-         of domain size.
-ric constraints represented by multivariate rational functions. The            Although starting with many subdivisions is inevitable, we are
-constraints are formulated using inequalities as well as equalities.        able to eliminate redundant subdivisions at the final stage if we can
-When the solution set has dimension larger than zero, we approx-            guarantee that there is at most one root in each subdomain. Do-
-imate it by fitting a hypersurface to discrete solution points. We          main clipping has no explicit mechanism to guarantee such a con-
-also consider a variety of constraint solving problems common in            dition. Sederberg and his colleagues’ concepts [Sede88, Sede96]
-geometric modeling. These include computing ray-traps, bisectors,           of the normal cone and the surface bounding cone are more suit-
-sweep envelopes, and regions accessible during 5-axis machining.            able to this purpose. In this paper, we generalize these tools to
-                                                                            higher dimensions for the intersection of multivariate implicit hy-
-                                                                            persurfaces. Note that normal cones and surface bounding cones are
-1    Introduction                                                           easier to compute for implicit surfaces than for parametric surfaces;
-                                                                            this fact greatly simplifies our algorithm. When we have isolated all
-Computing the solution of a set of non-linear equations has been            the different roots using the surface bounding cones, we terminate
-considered a very difficult task. Even for the univariate case, the         the subdivision procedure and switch to Newton-Raphson iterations
-root-finding procedure can be unstable and prone to errors. Lane            which approximate each separate root with quadratic convergence.
-and Riesenfeld [Lane81] propose a subdivision-based approach,                  The test for this termination condition usually fails at the initial
-using the Bernstein-Bézier basis function, for the computation of          stage of the algorithm. So, to start with we subdivide the domain
-roots of univariate polynomial functions. The numerical stabil-             without checking the rather costly termination condition. More-
-ity of the Bernstein-Bézier basis functions [Farouki88] makes this         over, we speed up this procedure by employing a trivial subdivison
-approach attractive and robust. Following this lead, many effi-             scheme that checks only the signs of control coefficients of each
-cient methods have been developed for a large variety of root-              multivariate function over a domain. When the signs of control
-finding problems in geometric modeling, including ray-surface,              coefficients of a multivariate function are all positive (or all nega-
-curve-curve, and surface-surface intersections. The same approach           tive), by the convex hull property the function is also positive (or
-has also been applied to the more general B-spline representation.          negative) throughout the domain. Consequently, we can eliminate
-    Nishita et al. [Nish90] introduced a Bézier clipping technique         such a domain since it contains no common root for a given set of
-that can compute the roots of univariate Bézier functions very             multivariate equations. Many subdomains are thus eliminated early
-efficiently. Looking at higher dimensions, Sherbrook and Pa-                since many of them have at least one function strictly greater than,
-trikalakis [Sher93] presented an approach to solving a set of mul-          or strictly less than, zero in the subdomain. This further justifies
-tivariate polynomial equations given in the Bernstein-Bézier form.         our use of a simple subdivision scheme.
-When the problem has many roots, a large number of subdivision                 When the number of equality constraints is smaller than the num-
-steps are required at an early stage of the algorithm; thus, the cost of    ber of variables, the solution set has dimension larger than zero.
-each subdivision is an important factor in the overall performance.         We approximate the solution set by fitting a hypersurface to some
-At each subdivision, Sherbrook and Patrikalakis can reduce the do-          discrete points sampled from the solution set. These discrete solu-
-                                                                            tion points are also generated by recursive subdivision followed by
-                                                                            Newton-Raphson iteration with quadratic convergence. Although
-                                                                            we cannot separate roots (since they are continuous in this case),
-                                                                            the surface bounding cones are still useful to guarantee that the hy-
-                                                                            persurfaces intersect each other transversally in the domain and thus
-                                                                            to ensure that each domain contains a connected component of the
-                                                                            solution set. A simple subdivision scheme may also be used effi-
-                                                                            ciently to generate a dense distribution of discrete points across the
-                                                                            solution set.
-                                                                               In this paper, we also consider a variety of constraint-solving
-                                                                            problems common in geometric modeling. These include com-
-                                                                            puting ray-traps, bisectors, sweep envelopes, and accessible re-
-Solving Geometric Constraints                                                                                            Elber and Kim                                                                                  2
-
-
-gions in 5-axis machining. (See also the authors’ other publica-                                               this subdivision stage. This upper bound is realized only when the
-tions [Heo99, Kim00], which apply a similar approach to comput-                                                entire space is contained in the zero-set, which is unlikely to happen
-ing the intersection of two ruled surfaces, the intersection of two                                            in typical cases.
-ringed surfaces, and the Minkowski sum of two surfaces.) We show                                                  As we mentioned above, this approach can be easily extended to
-how to convert each of these problems into the search for a solution                                           support constraints represented by inequalities as well as equalities.
-to a set of multivariate rational equations. To simplify the solution                                          In Algorithm 2.1, 78 we can handle inequalities properly by slightly
-procedure, we eliminate some variables such as  from the                                               modifying line        as follows:
-given equations and solve equations in the remaining input param-                                                                                      ; < ;=> ? 
-eters. Since the geometric problem is originally given in Euclidean                                            if ( 9 such that 5 : ; < :                           and     is equality constraint6 or
-                                                                                                                                                               
-space, the solution set must be computed in this space, and not in                                                 9 such that 5 : ;@?
-                                                                                                                                        => A                     and   is negative constraint 6 or
-the space of other input parameters. When the solution set has di-                                                  9 such that :                                  and        is positive constraint ) then
-mension larger than zero, we generate some discrete solution points
-in Euclidean space and fit a curve or surface through these points.
-Our implementation as well as all the examples shown in this paper
-are based on the IRIT solid modeling system [Irit00] that has been                                             2.2 Numerical Improvement for Zero-Set Finding
-developed at the Technion, Israel Institute of Technology.
-   This paper is organized as follows. In Section 2, we present                                                This section discusses the numerical improvement of the approxi-
-the zero-set finding procedure, including the subdivision as well as                                           mated solutions. While this is essentially a Newton-Raphson pro-
-the numerical improvement stage. In Section 3, we present some                                                 cess, we take a more geometrically intuitive approach. Moreover,
-examples, and we conclude the paper in Section 4.                                                              only equality constraints are considered in this section, under the
-                                                                                                               assumption that the (strict) inequality constraints may always be
-                                                                                                               satisfied by /      a sufficient
-                                                                                                                                                    number
-                                                                                                                                                          of subdivisions if necessary.
-                                                                                                                                   B B  B .be an  approximate
-                                                                                                                             taking
-                                                                                                                  Let ';B                                                         solution as
-2       Zero-Set Finding for Multivariate Func-                                                                                                                                 C 
-                                                                                                               computed in Section 2.1. That is,             ' B 3 , for  0    .
-        tions                                                                                                              space of the multivariate      graph surface '           ' is a
-                                                                                                               The normal                            
-                                                                                                               line in IR , and at ' B           ' B this line is parallel to
-We consider the problem of zero-set finding for a set of multivariate
-functions. One can subdivide the multivariate function(s) until the
-                                                                                                                  D                 ,FE;G                B   G  ' B   G  ' B   % H 
-function values are bounded within a certain resolution. Section 2.1                                                      ' B                      G  '        G                   G                              (1)
-discusses this subdivision stage, which ends up with a set of discrete
-points approximating the zero-set. We then apply a numerical im-                                                                                                                                            .
-provement to this set of points, which is explained in Section 2.2.                                            where IJK                 ' B         denotes the partial derivative of each                      with
-                                                                                                                                   ILM ON
-If the dimension of the solution set is greater than zero, then we can                                         respect to            , evaluated at ' B . Complementing          the normal’s
-fit a multivariate surface to the set of discrete solution points, which
-                                                                                                                    space
-                                                                                                               one-dimensional                       at ' B      ' B yields the tangent to
-                                                                                                                           P     ' 0 , an # -variate hyperplane with param-
-produces an approximation to the solution set. This fitting stage is
-discussed in Section 2.3. Finally, in Section 2.4 we consider the                                              eters '                                      , that is equal to
-case where the zero-set has dimension zero, thus forming a set of
-discrete points. We investigate the conditions for which a subdo-                                               Q ';R              TS                     G          B ,U-G  ' B ;U 
-main of the problem contains a single solution to the multivariate                                                             '                            G  '                 G
-problem.                                                                                                                                                   UVG                B               
-                                                                                                                                                               G  '               %      %W D ' B  ' B8X
-                                                                                                                                                                                               $ 
-2.1 Subdivision for Zero-Set Finding                                                                                                                        WD ' B ' X % WD ' B ' B X
-      
-Consider      
-                              multivariate              
-                                                   (piecewise)    rational constraints,
-                                                                                                 
-                                              ,    (                    ),     in     IR       , where   where                                                              
-"!$#&% . And let a point in (                    the # &%
-                                                                       
-                                                                          -dimensional       parameter     ' B                             B B                 B         B                B B
-space of                be denoted by '                                                   . Now let us      B            ' B .                                                    0
-consider    ,
-                all    simultaneous  - 
-                                          solution        points,        ' )+* IR , such that                        Using a first-order approximation, each function
-                                                                                                                                                                    Q        
-                                                                                                                                                                                           constrains
-                                                                                                                                                                                              Q 'R 
-    ')                , for all        . /         .                                                      the solution toY be on the hyperplane ';R ' . The planes                .Z 02' 
-   We will assume that ,                                     , are represented as B-                                                                                             '
-                                                                                                               [also contain           as a free variable and we recall that                          ,
-spline or Bézier multivariate scalar surfaces. Then, the0domain of                                               . So thisrequirement
-                                                                                                                                $           can be simply embedded     U$      as the additional
-     ' contains zeros only if the control coefficients of have dif-                                             constraint              . The final  results    UPare        linear constraints.
-ferent signs; this is because the value of zero must                          0 be contained in                      Consider the case that #                         , which leads to a fully con-
-the convex hull of the control coefficients of . Using this con-                                               strained system of # linear equations formulated from the  tan-
-                                                                                                                                 Q                                      . 
-vex hull property, a subdivision-based approach, as described in                                                gent planes ';R ' of the functions            Y/\ ' , and also one addi-
-Algorithm 2.1, will generate a set of discrete       0 points
-                                                           - that   robustly
-                                                                        .                                  tional constraint formulated as                            , the zero being sought.
-converges to the simultaneous zero-set of ,                                                                   Therefore, we have # linear equations                and # unknowns. Note that
-      Let 1 be a subdivision tolerance that determines the maximum                                              # planes, in general position in IR , intersect at a single point,
-number  of points
-                 to be &    in the subdivision stage. We may
-                           generated                                                                           which corresponds to the result of one  iteration of a multidimen-
-assume !           ! ,                    ; then the parameter domain is a                                  sional Newton-Raphson procedure in IR , with a quadratic conver-
-unit hypercube of dimension #2% , which is sliced into 3 4 seg-
-                        direction. The result of this subdivision
-                                                                                                               gence rate near simple roots [Luen84].
-ments in each coordinate
-                                                                                                                                               ^2 ,  ( _ ; additionally, let  C
-                                                                                                                     For example, consider the          case of two scalar bivariate constraints
-will be a total of 5 46        cells. Each such cell may generate one                                         in IRQ;] , written `asP -     _
-point(i.e.
-         the center of each cell); thus, we will end up with at most                                        and               ,             ; the whole amounting to three linear
- 5 4 6       approximate solution points to the zero-set at the end of                                         constraints and three unknowns. Three planes in general position
-Solving Geometric Constraints                                                                               Elber and Kim                                                3
-
-     Algorithm 2.1
-     Input:       P 
-               ,                ,  multivariate rational constraints;
-          1 , tolerance of subdivision process;
-     Output:                                                        0
-             , a set of points in the parametric space of               0 that each point '
-                                                                        such                                 );*   yields
-               an approximated      <           ;
-                                                
-                                      simultaneous<    ;
-                                                         
-                                                          = >
-                                                         zero   all ;
-                                                              over
-                             .           N   N  N  
-     ZeroSetSubdiv(                   ,                              ,1 )
-     begin
-                                      ;=>
-                                                   ; <
-                                                      N
-                                          5 N
-                  
-                                          %         6;
-                     A
-           if (         1 ) then begin
-                                        
-                                            
-                                                                          
-                                                                                    %$
-                                                                                                 
-                                                                                                  %$
-                                K                " K   "        
-                                                                       
-                                                                         
-                                                                           
-                                                                              L       K   
-                                                                                                L  &(' ;
-                return  L           L           L          L
-                               !                    #
-
-
-         end
-         else ;
-             begin    < ;=>                                                        0
-             :          ,:           ; <
-                                    minimal ;=>and? maximal
-                                                              control coefficients of ;
-     (*)       if ( 9 such that :       :             ) then
-                       return ) ;
-                                                                  
-               else begin                                             K
-                                        
-                                      subdivided        L M  L M , along the * th parametric direction,
-                                                  at <                   P 
-                                    where              been detected, 
-                                                   has                                   ;
-                         return ZeroSetSubdiv 5           
-                                                             ,                         
-                                                  ; <   ;=>    N ; <  L M K   L M &   ;< <   ;
-                                                                                                                            < =>   '  1 &
-                                                    B      
-                                                             B <          
-
-                                                                   
-                                      ZeroSetSubdiv 5 
-                                    +
-                                                                       ,                 
-                                                   ; <   ;=>   L M K   L M   N ;=> &   ;
-                                                                                                                    < <   ;
-                                                                                                                             < =>   '  1 & ;
-                                               
-                                                      B       B               
-
-                  end
-           end
-
-
-
-in IR] intersect at a single point, which is also the result of one                                     In contrast to the problem of regular scattered data interpolation,
-
-    Now let #
-                   ?  U& , and theprocedure.
-iteration of the Newton-Raphson                                                                      this problem permits a simple solution to the parameterization of
-                                          UCsystem of equations will
-                                      linear                                                         data points. In typical cases, we can easily parameterize the zero-
-              
-be under-determined.       Note that             planes intersect in an                             set using the parameterization of one of the given input constraints.
-  # %- %         -dimensional variety , . At this juncture, we may                                  This approach has been taken in some examples presented in Sec-
-need to find the solution in , that minimizes a certain additional                                   tion 3.
-optimality criterion. For this purpose, we employ a linear system
-solver that yields a least-squares solution in an - -norm, in order
-to find the closest solution to the current position ' B from the pos-                               2.4 Conditions for the Uniqueness of a Solution
-sible solution set , . Singular-value decomposition and QR fac-                                      One solution point is generated (or sampled) for each subdomain
-torization [Golu96] are two options we can take for solving this                                     we obtain at the final resolution of the subdivision procedure. If
-       
-under-determined      problem while producing a solution with a mini-                                a subdomain contains more than one connected component of the
-mal - -norm, and thus minimizing the displacement from ' B .                                         solution set, generating only one sample point may not be suffi-
-    A QR factorization procedure was used in preparing the exam-                                     cient to construct a good continuous approximation. Conversely,
-ples in this paper. The tolerance employed in the numerical im-                                      if a subdomain at some intermediate resolution contains only one
-provement stage is several magnitudes smaller than that of the sub-                                  connected component, we may need to stop the subdivision process
-division stage. In the case of a solution space of dimension greater                                 and switch to a more efficient (numerical) procedure for generating
-than zero, the vast majority of points were successfully improved                                    one or more solution points.
-to that tolerance in very few iterations, becoming more than an or-                                     An efficient method for checking whether there is more than one
-der of magnitude closer to the solution at each iteration. Thus, we                                  connected component in a subdomain is also important when the
-are not required to improve all points from the subdivision stage;                                   solution space has dimension zero (thus forming a set of discrete
-those few points that fail to improve can simply be purged away.                                     points). When it is known that only one solution exists in a sub-
-Examples are presented in Section 3.                                                                 domain, we can stop the subdivision and change to a numerical
-                                                                                                     procedure. In many cases, we can stop the subdivision at a higher
-2.3 Fitting a HyperSurface to the Solution Set                                                       level (and thus at a lower resolution). Moreover, this capability can
-                                                                                                     be used in isolating different solution points no matter how close
-Once a set of discrete points that satisfy the simultaneous zeros has                                together they are. That is, we can repeat the subdivision process
-been constructed (and assuming that the dimension of the solution                                    until each region contains at most one solution point.
-space is greater than zero), we fit a smooth hypersurface to it, thus                                   Sederberg and Meyers [Sede88] use the hodograph as the ba-
-approximating the solution set.                                                                      sis of such a termination condition in the intersection of two pla-
-Solving Geometric Constraints                                                                                                                                                            Elber and Kim                                                                                                                                     4
-
-
-nar Bézier curves. Two sub-curves intersect at most once if their                                                                                                                       most one common solution if
-hodographs share no common direction vector. Sederberg and                                                                                                                                                                                
-his colleagues [Sede88, Sede96] also develop a similar condition                                                                                                                                                                          +                                           
-                                                                                                                                                                                                                                                     !
-for the intersection of two parametric surfaces, where the surface                                                                                                                                                                            
-                                                                                                                                                                                                                                              
-                                                                                                                                                                                                                                                                   ,
-
-bounding (or tangent) cone plays an important role. In this pa-
-per, we generalize this approach                        0Z 02prob-
-                                         to the higher-dimensional                                                                                                                       where , is the origin ofthe
-                                                                                                                                                                                                                     coordinate system.
-  /of intersecting
-lem                      #C% 
-                                  implicit hypersurfaces    '        , for                                                                                                                                                                                                                                                                 
-           # % , in IR . The normal vector of an implicit                                                                                                                  Proof: Assume Z `   '  B0* &IR is a common
-                                                                                                                                                                                                      that                                                    # %
-                                                                                                                                                                                                                                                solution of the
-hypersurface is considerably easier to compute than that of a para-
-                                                                                                                                                                                   equations       '            `$  #2%  . Consider &! ' B . From
-                                                                                                                                                                                   the relation '       '                       ! '`B , we have
-metric hypersurface. This fact greatly simplifies our algorithm for                                                                                                                                                                                     
-              
-computing        the normal and surface bounding cones.                                                                                                                                        +                                 Z ,                    +                                         `                    
-   Let               denote
-                      
-                             the cone with the axis in the direction of a
-                                                                                                                                                                                                    '
-                                                                                                                                                                                                   
-                                                                                                                                                                                                                                  '                                
-                                                                                                                                                                                                                                                                   
-                                                                                                                                                                                                                                                                                            !      ' B              ' B
-                                                                                                                                                                                                                                                                                                                    
-non-zero vector and an opening angle  :
-                                                                                                                                                  
-                                         , 'Z'                                                         ! '
-                                                                                                                                                                 
-                                                                                                                                                                                   Thus, there is no other common solution except '                                                                             B.
-                                                                                                                                                                                      The fact that one can detect subdomains with at most one root
-The normal space of an implicit   .Z  hypersurface
-                                          P         has dimension one.
-For an < implicit  <  <
-              
-                  hypersurface        '       , we  can  define its normal                                                                                                       is of great importance. Under this condition, Algorithm 2.1 can be
-                                                                                                                                                                                   terminated early, and we can significantly improve the performance
-cone         Z              IR           as the set of all possible normal
-vectors       ' and their scalar multiples. Clearly, we have                                                                                                                      of our solver.
-                           
-                  '                                                                                                                                                               3 Examples of Geometric Constraint
-                              E G                      G
-                                                          G                H
-                                     G  ' G  '                 G  '
-                                                                                                                                                                                     Solving
-                                                                       "                                                                                      This section considers a variety of constraint-solving problems that
-                                                      L  "           L  "    
-                                                                           %$                       %$
-                                                                                                         
-                                                               %$                                                                                                                 are common in geometric modeling and computation. These prob-
-                                           "                                
-                                                                                                                                                   %$
-                                                                                                                                                                                   lems can greatly benefit from the multivariate rational solver in-
-                                                                                                                                                                                  troduced in the previous section. In particular, we present some
-                                                                                                                                          L  "     %$  &               interesting results from classical geometry (Sections 3.1 and 3.2),
-                                      
-                                           
-                                                                               "
-                                                                                                                            %$
-                                                                                                                                              
-                                                                                                                                                     %$                 from modern computational geometry (Section 3.3), from geomet-
-                                                                                                                                                                            (2)
-                                                  K                                        K"                                                     K                              ric modeling (Section 3.4), and from accessibility analysis used to
-                                                                                                                                                                                   support multi-axis NC machining (Section 3.5).
-where the terms  LM  "    
-                                                                                                          %$
-                                      .  denote< the coefficients
-                                                              N
-                                          with respect to  <,    <ele-
-                                                                  
-of the partial derivative of
-vated to a common degree. <             Then,
-                                                                                                                                                                                   3.1 Ray-Traps or Bouncing Billiard-Balls
-                                                                                                                                                                                                                                                                           (                                
-can be derived by letting              be the average % of$ the vec-                                                                                                              Consider  curve segments -                                                                                                "%              , in the  -
-                      0L  "    
-                                                                        %$             
-                                                                                        0L  "    
-                                                                                                              "
-                                                                                                             %$     L  "     %$  & ,               
-                                                                                                                                                                                   plane.
-tors
-[ <                        <                                                                    
-
-                         , and                                                         be the maximum angle between                                                                 Definition 1 Given a set of  planar curves,
-                                                                                                                                                                                                                                        itsZray-trap
-                                                                                                                                                                                                                                                 
-      and these   < vectors.                                                                                                                                                             of length  is a set of  points         -
-                                                                                                                                                                                                                                         /.0,<
-                                                                                                                                                                                                                                                    such
-   Given , we can define its complementary cone< "! , which con-                                                                                                                         that a ray bouncing from /.0`< .
-                                                                                                                                                                                                                         toward                   will
-tains all vectors that are orthogonal to vectors in :                                                                                                                                    be reflected toward  
-                                                                                                    <                                                                           We consider how to compute all ray-traps of length  for a given
-           !                   $#   C*          IR                  9O'$*%
-                                                                                                                     such that Z'                   # `$              (3)   configuration of  freeform curves. In the context of piecewise lin-
-                                                                                                                                                                                   ear curves, this problem is quite well-known under various differ-
-                                                       0 ,
-  ! is also called the tangent cone [Sede88] and it contains all pos-                                                                                                              ent names. In particular, Tabachnikov [Taba95] discussed the entire
-                        of the implicit hypersurface < '
-sible tangent directions                                         . &!                                                                                                              topic of bouncing billiard-balls, which includes the case of (the in-
-is of dimension #$%      and can easily be derived from   as follows                                                                                                               side of) polygonal objects. For example, every triangle has one such
-(see Figure 1):                                                                                                                                                                    ray-trap path of length three (a billiard ball bouncing off every edge
-                                                                                                                                                                                 once). This path is the pedal triangle that is formed out of the feet
-                                                                                                                  <  !
-                                                                                                 
-                                                          !
-                                                                         
-                                                                                                                  !                        <                                    of the three altitudes, a fact also pointed out by Wells [Well91].
-                                                                                                                   ' %         
-                                                                                                                                                                             (4)      We now consider the problem of ray-traps in the world of
-                                                                                 <                                                                                                 freeform rational curves. The incoming ray from              and the
-In other words, "! and        share the same axis, but have comple-                                                                                                                outgoing ray toward          should form an identical angle with the
-mentary angles.         (                                                                                                                                                   normal of - at  . This angular equality can be written as
-    Finally, let &! ' B                                                                                                                                                                                                                2 3                                                      2      
-                                                                                                                                                                                                                               %*                                                             %*
-                             IR +(    * the translation
-                                     denote            [    of "! by
-' B . Then                                     &! ' B , ' B such that
-                                                                                                                                                                                                             1
-                                                                                                                                                                                                                                                           
-                                                                                                                                                                                                                                                                                                                      
-              have ')
-         0&we                 '                                                                                                                                                                                                   %(                                                            %(
-                                                                                                                                                                                                                                                                                                                                         (5)
-     ' B       . (Based on the mean value theorem, we can provide
-                                                                                                                                                                                                                                                                         
-
-a rigorous proof that is similar to Sederberg and Meyers’ [Sede88];                                                                                                                or, in terms of the original curves, as follows:
-but we omit the details here.)                                                                                                                                                                                                         Z 2 Z
-                                                                                                                                                                                                                              %(- 
-                                                                                                                                                                                                       1-
-    We are now ready to state the main result of this section:                                                                                                                                                                                         Z
-                                                                                                                                                                                                                      -                        %(-
-                                                                                                                                                                                                                                  
-                                                                                                                                                                                                                                       
-                                                                                                                                                                                                                                                
-                                                                                                                                                                                                                                                           Z 2 Z 
-                                                                                      # %          implicithypersurfaces                                                                                      
-                C1 Given
-                         F                                                          #C%  , in IR , there is at                                                                                                                      %(-
-           Theorem                                                                                                                                                                                                         1-
-                       '                                                                                                                                                                                                                                        Z                                                                  (6)
-                                                                                                                                                                                                                                  -                       %(-
-Solving Geometric Constraints                                                                                     Elber and Kim                                                                5
-
-
-
-
-                                                              (a)                                                                         (b)
-                                                                          <
-                    Figure 1: (a) The normal cone,                              (in gray) and (b) the complementary tangent cone,         !   (in gray) of a freeform surface.
-
-
-  Equation (6) Z"is/     Z 0 however,
-                       non-rational;        its square is rational.
-Now,Zlet -                                . Because the normal field
-2
-          appears in both sides of Equation (6), it need not be nor-
-malized, and may be formulated as:
-                                           Z`P  Z ,                  Z
-                               2
-                                                  %
-                                                                                                      
-    The  curves have  degrees of freedom, represented by the
-parameters. The ray-trap problem imposes  rational constraints on
-the  curves, each in the form of the square of Equation (6). Hence,
-we have  degrees of freedom and  constraints, and the solution
-set is finite. Nevertheless, the solution set of these squared rational
-constraints may contain some extraneous solutions. For example, if
-the incoming ray and the outgoing ray lie on the same line (but not
-on each other’s reflected lines), they will satisfy Equation (6), since
-it is squared. Therefore, once a finite solution set is computed, one
-must examine and eliminate all extraneous solutions.
-    Figure 2 shows all ray-traps of length three among three circles.
-This solution was computed in several seconds on a modern work-
-station within a tolerance of        .
-                                                                                
-3.2 Singular Skeleton Points in IR
-                                                       8O       
-                                                in the  -plane. We
-                                                                                                            Figure 2: Ray-traps of length three of bouncing bouncing among
-Consider three curves -       ,-       ,-
-                                          ]
-consider how to compute all locations  on the plane from which
-                                                                                                            three circles.
-the distances to the three curves are the same. These locations are,
-for example, topologically crucial to the formation of the skeleton
-                                                                                                            measured along the curves’ normals. This problem is also exactly
-of the configuration discussed by de Berg et al. [deBerg98].
-   Point  must satisfy the following five rational constraints:                                                                                                  P   from
-                                                                                                            constrained, having five degrees of freedom, one parameter
-                                                             OO          OO         each curve and the other two as the coordinates of             .
-  1$%(-            $%*-                                        1%(-           $%(-             (7)     The first two constraints of distance equality (Equations (7)
-                                                                              1 
-  1$%(-             $%*-                                       1%(-            %(-
-                                                                                                            and (8)) can be reduced to linear equations in  as follows:
-                                                                          ]                ]         (8)                                                             
-                  -                                                                                     _ 1- OO %*-     ` -  O %(-   
-                                                                                                                                                                        
-       %(-                                                                                                                                                                                (12)
-                                                                                                                       _ -   %(-     ` -   %*-  
-                                                                                                      (9)
-                                   
-                                                                                                                             ]                             ]                                (13)
-                       OO  - OO                       
-                $%(-
-                                                                                                 (10)     The point   can be obtained
-                                                                                                                                                  as a rational function   of the
-                                                                                                                                                                                    three
-                                                                                                                                                                                         "pa-
-                                                                                                                                                                                               
-                                       
-                                                                                                                       
-                                                                                                            rameters       ,    , and     ,  which  we   denote   as         
-                           - ]                             $                                                                    .
-            %(- ]
-                                                                                                 (11)
-                                                                                                                O 
-                                                                                                                Given    three points  general position on the three curves,
-                                                                                                                                        in
-
-Equations (7) and (8) ensure that the point
-                                                                                                            -
-                                                                                                                   B , -
-                                                                                                                             B , -
-                                                                                                                                   ]    B ,  them.
-                                                                                                                                                 provides the point in the plane that
-                                          8Ois at an equal
-                                                                    dis-                                   is at an equal distance from     OThat is,  is the center of the
-tance from the three curve points -        , -         , -
-                                                           ]
-tions (9)–(11) guarantee that the distance to the curves is indeed
-                                                                  . Equa-                                   circle passing through -
-                                                                                                                                               B ,-
-                                                                                                                                                       B  , and -
-                                                                                                                                                                  ] B . Clearly, the
-                                                                                                            three radii are not normals to the curves: Equations (9)–(11) have
-Solving Geometric Constraints                                                                         Elber and Kim                                                                                               6
-
-
-                                                                                              Elbe99]. Nevertheless, in general the bisector surface between two
-                                                                                                          O in IR ] 8is not
-                                                                                              rational surfaces
-                                                                                                                                     
-                                                                                                                                        rational.
-                                                                                                               -and                                                     in IR ] .
-                                                                                                                    on the bisector surface of  and  must
-                                                                                                                               
-                                                                                                 Let                                    be two regular rational surfaces
-                                                                                              The points 
-                                                                                              satisfy the following constraints (see also [Elbe00]):
-                                                                                                                                                                                        O
-                                                                                                                                                                    O  G                       
-                                                                                                                                                 T%
-                                                                                                                                                 
-                                                                                                                                                                                        G                      (17)
-                                                                                                                                                                                         O
-                                                                                                                                                                    O  G   
-                                                                                                                                                 T%
-                                                                                                                                                 
-                                                                                                                                                                    G
-                                                                                                                                                                                                               (18)
-                                                                                                                                 
-                                                                                                                                           O    G O   
-                                                                                                                                     T%                                                                      (19)
-                                                                                                                                                               G
-                                                                                                                                   
-                                                                                                                                            O    G O   
-                                                                                                                                      T%                                                                      (20)
-                                                                                                                                                                  G 
-                                                                                                                                            O                     O
-                                                                                                                                T%                     T%                       %
-                                                                                                                                                                 8              O   
-                                                                                                                                                      T%                     T%                            (21)
-
-                                                                                                  Equations (17)–(20) mean that the distance is measured along the
-                                                                                              orthogonal lines at the bisector’s      foot points. Equation (21) guar-
-                                                                                              antees that the distances to              and   are the same. The problem
-                                                                                              is formulated using seven variables , , ,  ,  , and five con-
-                                                                                              straints. Hence, the solution space forms a bivariate surface.
-                                                                                                          O`
-                                                                                                  Let     O I
-                                                                                                                                           
-                                                                                                                              L        I  L be the unnormalized normal
-                                                                                                                         I
-                                                                                                                           L               I
-                                                                                              field of        . Then,
-                                                                                                                     OU if  thesolution
-                                                                                                                                          O  to the bisector surface is of
-                                                                                              the form                                         , ( is a real-valued function),
-                                                                                              Equations (17) and (18) are automatically satisfied. By substituting
-Figure 3: The classical Apollonius problem of finding the circle                              this proposed bisector surface point into Equation (21), we have,
-tangent to three given circles (in gray) is identical to the problem of
-                                                                                                                                                   O     O
-finding the singular points of the planar skeleton, and the solution                                                                         
-                                                                                                                                                         
-                                                                                                                                                                 
-of the latter yields the eight circles in the solution set.                                                                                             OU     O      O  
-                                                                                                                                             %                               %
-                                                                                                                                                       OU     O      O   
-                                                                                                                                                                              %
-not been considered yet.                                                               or equivalently,
-   However, it is now possible to substitute                  , which
-                                                                                                                                    O         O    O                 O  1
-already satisfies Equations (7) and (8), into the orthogonality con-                                       `                       % O     O  %                          
-                                                                                                
-                                                                                                                                                                            
-                                                                                                                                                                              O     
-                     (9)–(11),
-                              yielding three rational (orthogonal-                                                                % _                           %
-straints of Equations                                                                                                                                                                                (22)
-ity) constraints in , , and as follows:
-                                                                                                                                                                OU     O
-                                              -             $           Finally, we substitute                                     into                                            ,
-                                              %*-                                    (14)   and update Equations
-                                                                                                                        be defined as follows
-                                                                                                                                    (19)    and    (20)      with    this new   representation             of
-                                                                                              . Let
-                                                                OO
-                                            OO   -                 $                       
-                                            %*-                                      (15)
-                                                                                                                        O         O       O     O                 O   
-                                                                                                        % _                     %                                               %
-                                                     - ]            $                       U    O    O                      8       O         8   
-                                              %(- ]                                  (16)                                                    %                             %
-                                                                  
-                                                                                              Then, Equations (19)–(20) are reduced to
-We can solve the above system of three constraint equations using                                                                        
-the rational constraints solver introduced in Section 2. The resulting                                                ^                                                G O       
-                                                                                                                                                                                      G 
-solutions provide all locations in the plane that are at equal distance                                                                                                                                         (23)
-from the three curves.                                                                                                                                                                   
-      Figure 3 shows the eight solutions corresponding to all such sin-                                                   ^                                         G                            
-                                                                                                                                                                                                                (24)
-gular points among three circles. These results are identical to the                                                                                                                    G 
-solution of the classical Apollonius problem of finding a circle that
-is tangent to given three circles. All eight solutions are computed                              The common zero-set of Equations (23) and (24) satisfies all five
- a dozen seconds on a modern workstation within a tolerance of
-in                                                                                            constraints of Equations (17)–(21). Therefore, we have reduced the
-         .                                                                                    surface-surface bisector problem of IR ] into the problem of find-
-                                                                                              ing the common zero-set of the two four-variate functions of Equa-
-3.3 Surface-Surface Bisectors                                                                 tions (23) and (24).
-                                                                                                 Figure 4 shows a surface that bisects a plane and a biquadratic
-The bisector surface in IR ] between two rational space curves, or                            surface. The points on this bisector surface were computed from
-between a point and a rational surface is itself rational [Elbe98b,                           the zero-set of Equations (23) and (24). This is an underconstrained
-Solving Geometric Constraints                                                                                      Elber and Kim                                                                                                                                                           7
-
-
-                                                                                                      trajectory. Here, the solution is approximated using an approach
-                                                                                                      similar to the Marching Cubes scheme [Lore87]. Both solutions in
-                                                                                                      Figures 5(a) and 5(b) were computed in few seconds on a modern
-                                                                                                      workstation.
-
-                                                                                                      3.5 Accessibility in 5-Axis Machining
-                                                                                                                                                                                        O
-                                                                                                      Consider a surface                      , and let                   be the specification of                    O
-                                                                                                      an orientation vector         Ofield    which       will    allow      an NC machine tool to
-                                                                                                      cut the surface
-                                                                                                                  the cutter must be positioned so that its axis is parallel
-                                                                                                                                             in   a  5-axis     configuration.                 In other words, at
-                                                                                                             B    B  
-                                                                                                      to          B B . For example,            O0if the cutter
-                                                                                                                                                                    O is to be aligned          O^ with the
-                                                                                                      surface normal, then                                       , where                                    I
-                                                                                                                                                                                                                   IL
-                                                                                                       I .                                                                       O 
-                                                                                                        I Let                 be a check surface        O above
-                                                                                                                                                                                    
-                                                                                                                                                                                             . We consider how
-
-                                                                                                                                                                                           
-                                                                                                      to compute the regions of                                  where one can machine the sur-
-
-                                                                                                                                                                                                          
-                                                                                                      face from the direction without gouging into the check surface
-                                                                                                                                                                                                          
-                                                                                                                                                                                                                                                     
-                                                                                                            [Elbe98a]. By offsetting                        by the radius of the cutter,                    we can
-                                                                                                                                           
-                                                                                                      transform the cutter. into
-                                                                                                                                                               
-                                                                                                                                                a   line   and     the   check         surface                         into
-                                                                                                          offset
-                                                                                                               surface.                                    we    must compute all solutions            
-                                                                                                                                                                                                                                                                 
-                                                                                                      an                                          . Hence,
-                                                                                                                                  
-                                                                                                           B B for which                                       B B in the direction                           B B
-                                                                                                                                    a ray from
-Figure 4: The bisector surface (in gray) between a plane and a
-                                                                                                                                                                           O
-                                                                                                                                                                                                                       
-                                                                                                      is tangent to                      .
-quadratic surface. The points on the bisector were derived by a
-simultaneous solution of Equations (23) and (24).
-                                                                                                            Assume that the direction vector
-                                                                                                      tangent plane of
-                                                                                                                                       O
-                                                                                                                                              . Then,
-                                                                                                                                                                   O
-                                                                                                                                                                              I L
-                                                                                                                                                                                     is not parallel to the
-                                                                                                                                                                                                
-                                                                                                                                                                                                      and we can                               
-                                                                                                      define                                                                        IL
-                                                                                                                                                                                                                                        O
-problem, and so we can fit a bivariate surface to discrete points sam-
-                                                                                                                                              O                                         
-                                                                                                                                                                                                                  O G G  
-                          O space, which
-pled on the bivariate solution               O is  the
-                                                       O bisector. Either the
-parameterization of               or that of               can be employed to                                                               8   O                                            
-                                                                                                                                                                                                                   O     O                                               (25)
-                                                                                                                                                                                                                                                                               O
-                                                                                                                                                                                                                                                             
-define the parameterization of the sampled points. See the authors’
-                                                                                                                      Ofields
-                                                                                                                          + that    Ospan
-                                                                                                                                           the plane orthogonal to                                                                                                               Oin
-                                                                                                                                                                                                                                                                    
-previous paper [Elbe00] for more details, including a discussion of                                   as two vector
-curve-surface bisectors in IR ] .                                                                     IR] . If
-                                                                                                             8   O           , then we can simply choose
-                                                                                                      and               to be the partial derivatives of , namely I and I .
-                                                                                                                                                                         IL      I
-                                                                                                                                                     O for isolating the bound-
-                                                                                                                                                                                 O
-                                                                                                                                                                                                                                                                         
-3.4 Boundary Determination of Trivariate Solids                                                           The necessary and sufficient conditions
-                                                    O                                                                          
-                                                                                                                                                       
-                                                                                                      ary of the accessible         regions   of           in the direction
-                                  swept through an affine trans-
-                                                  S                                                   while tangent to                  can be formulated as follows [Elbe98a]:
-                                                                                             
-Consider a freeform surface
-                                                    IR ]      IR ] ,                                                                                                                                                               .
-formation so as to generate a trivariate function
-which may be written:
-                                                                                                                                                  
-                                                                                                                                                                                8   OO 
-                                                                                                                                                                               
-                                                                                                                                                                                                                       O
-                                                                                                                                                                                                                        O
-                                                                                                                                                                                                                               % .  
-                                                                                                                                                                                                                                             
-                                                                                                                                                                                                                                                
-                                                                                                                                                                                                                                                                                      (26)
-                            ,^                    OU                                                                       
-                                                                                                                                                                                  
-                                                                                                                                                                               
-                                                                                                                                                                                                                      O
-                                                                                                                                                                                                                                % .  
-                                                                                                                                                                                                                                       
-                                                                                                                                                                                                                                          
-                                                                                                                                                                                                                                                                                      (27)
-                                                                                                                                                                                                                         %
-                                                                                                                                                                                               
-                                                                                -
-
-      ^ ,P NO                                                                                                                                                                                                                                                                (28)
-                                / a>linear
-                                             8    8  
-                                                                                                                                                                                                                                                                                       .
-where                    
-                       ] 8] represents            transformation (e.g. a                              where            
-                                                                                                                   is the normal field of surface  (and
-                                                                                                                                                                      O %
-                                                                                                                                                                             also that of                                                                                     
-                                                                                                                                                                                                                                         
-                                                                                                                                                                                                 ).
-rotation or shearing) and -                                       denotes a                          Equations (26)  and                                                             is in the
-                                                                                                                             O . Equation (28) means that the axis of the cutter
-                                                                                                                                 
-                                                                                                                                  (27)     guarantee         that
-translation of the coordinate system.
-                                                                                                                                        O
-                                                                                                                                                                   
-                                                                                                      direction of
-    The extraction of the boundary of the sweep is an important
-                                                                                                                                
-                                                                                                      (in the direction of                    ) is also orthogonal to the normal field of
-problem in geometric modeling and computation with many inter-                                           , namely  ; equivalently,     .
-                                                                                                                                                                           
-                                                                                                                                                     the axis of the cutter is indeed tangent
-esting applications, for example, in computing the swept volume of                                    to the offset surface  O.;                    O
-                                  
-an NC cutter path in 3- or 5-axis machining.
-                                                                                                                    Oof
-                                                                                                                                                          
-                                                                                                                                                     O , we can
-                                                                                                                                                         and O   O . Thus we have                                     
-                                                                                                          In the case                                                   use the partial deriva-
-                         !  ! , the boundary surface              of the  swept
-                                                                                     
-                                                                                                  
-    Assuming
-                                                                          ,     ,
-                                                                                                      tives of             instead of
-volume consists of the surface patches of
-                                                                                                                                                                     
-                                                                                                                                                                          G   O    O
-                                                                                                                                                                                                          .
-and> the
-          envelope
-                 O       8      that satisfies the following                                                                                                                              
-                          surface, which is the set of points
-                                                                                                                                                                               G                  %                                                   
-condition [Abdel97, Joy99, Martin90]:                                                                                                                                   
-                          I                                                                                                                                         G   O    O               .
-                                                                                                                                                                                                                  
-                                                                                                                                                                                                      
-                                                                 
-                                                                                                                                                                                                                                                         
-                          IL          I               I                                                                                                                                %
-                                           I                   I                                                                                                              G
-                            I I                   I          $                                                               
-                                                                                                                                                                        
-                                                                                                                                                                                    O
-                                                                                                                                                                                                 %
-                                                                                                                                                                                                         .
-                                                                                                                                                                                                              
-
-                              IL I                           I    
-                                I I                  I
-                                                                 I
-                                                                                                         Figure 6 shows regions where Equations (26)–(28) are simul-
-                                 IL   I
-                                                                                                taneously satisfied in the case of a cuboid component to be ac-
-That is, the Jacobian of           must vanish on the envelope sur-                                   cessed and a spherical check surface. There are four degrees of
-face.                                                                                                 freedom and three rational constraints, and thus we get a univariate
-   Having a single constraint and three degrees of freedom, the so-                                   solution manifold. In Figure 6, these univariate curves are shown
-lution space has a dimension of two. Figure 5 shows the envelope                                      as the boundary curves of the accessible region. In a recent pa-
-surface for a scaled ellipsoid moving along a linear and a circular                                   per [Elbe98a], the authors presented an example similar to, but
-Solving Geometric Constraints                                                    Elber and Kim                                                          8
-
-
-
-
-                              
-
-
-
-                                                                                                               
-
-
-
-
-                          Figure 5: The envelope of a scaled ellipsoid along (a) a linear and (b) a circular trajectory.
-
-
-somewhat simpler than, that of Figure 6. This previous example              scale up the method to larger size and higher dimension. We foresee
-required a couple of hours of computation time, whereas the new             two ways of attacking this scalability problem:
-example shown in Figure 6 took about a minute and a half on a                   Decompose a problem of size  into smaller subproblems.
-modern workstation. Even if we allow a speed-up of three or four
-times in computation over the last few years, our new approach                    Such a decomposition is feasible if one can detect indepen-
-provides an improvement that is significantly more than an order of               dence among different constraints. An example could be
-magnitude.                                                                        found in the singular skeleton example of Section 3.2, where
-   In Figure 7, additional inequality constraints are introduced. Ac-             the first two equations were solved independently of the last
-cess to the surface is limited to a hemisphere of directions centered             three equations.
-along a prescribed vector.                                                      Reduce a constraint space into a lower-dimensional uncon-
-                                                                                                               . `we
-                                                                                  strained space. In some cases,         $may
-                                                                                                                                  start with certain par-
-4    Conclusions                                                                  tial solutions that satisfy        '        , for some values of  . An
-                                                                                  example of such a case can be found in the surface-surface
-                                                                                  bisector of Section 3.3. In this
-                                                                                                                   O`U      O , which automat-
-In this paper, we have presented a scheme that can robustly solve                                                       example, we employed an ini-
-a set of multivariate rational constraints. The effectiveness of this             tial solution of 
-approach has also been demonstrated through practical examples                    ically satisfies the first two equations, and greatly simplified
-and we believe that our method has considerable potential as a basic              the overall computation.
-component in geometric modeling systems. Nevertheless, there is
-also plenty of room for further improvement. In particular, when            5 Acknowledgment
-dealing with geometric problems in higher dimensions, we need
-to improve the computational efficiency with which the zero-set is          The authors are grateful to Tony Woo who introduced them the
-found.                                                                      problem of ray-traps.
-   Feasible computation of simultaneous solutions of sets of non-
-linear constraints has largely been restricted to lower-dimensional
-cases—where it has been attempted at all. Here, as the number of            References
-constraints,  , increases, the complexity of the solution rises ex-
-ponentially with  . Problems with four or five constraints could           [Abdel97] K. Abdel-Malek and H.-J. Yeh. Geometric repre-
-be practically solved in minutes, but clearly it would be difficult to                sentation of the swept volume using Jacobian rank-
-Solving Geometric Constraints                                                   Elber and Kim                                                9
-
-
-
-
-Figure 6: A cuboid surface and a spherical check surface (in gray). The cuboid surface is trimmed using the locus of points that simultaneously
-satisfy Equations (26)–(28). These 26 trimmed regions are the locations where the normals of the cuboid surface are tangent to the spherical
-check surface.
-
-
-
-
-                                          (a)                                                   (b)
-
-
-Figure 7: An inequality constraint is added to the accessibility constraints of the configuration in Figure 6. In (a), the access is limited to
-                           O ?                                                                          ? 
-direction such that W    X            whereas in (b), the access is limited to direction such that W    X
-                                                                                                      
-
-
-
-
-                                                                                                                          .
-Solving Geometric Constraints                                               Elber and Kim                                             10
-
-
-           deficiency conditions. Computer-Aided Design, Vol 29,        [Martin90] R. Martin and P. Stephenson. Sweeping of three-
-           pp 457–468, 1997.                                                       dimensional objects. Computer-Aided Design, Vol 22,
-                                                                                   pp 223–234, 1990.
-[deBerg98] M. de Berg, M. van Kreveld, M. Overmars and
-           O. Schwarzkopf. Computational Geometry, Algorithms           [Nish90]   T. Nishita, T. W. Sederberg and M. Kakimoto. Ray
-           and Applications. Springer, New York, Second Edition,                   tracing trimmed rational surface patches. Computer
-           1998.                                                                   Graphics, Vol 24, No 4 (Proc. ACM Siggraph 90),
-                                                                                   pp 337–345, August 1990.
-[Elbe98a] G. Elber and E. Cohen. A unified approach to
-          verification in 5-axis freeform milling environments.         [Taba95]   S. Tabachnikov. Billiards. Paris: Societe Mathema-
-          Computer-Aided Design, Vol 31, No 13, pp 795–804,                        tique de France, 1995.
-          November 1999.
-                                                                        [Sede88]   T. W. Sederberg and R. J. Meyers. Loop detection in
-[Elbe98b] G. Elber and M.-S. Kim. The bisector surface of                          surface patch intersections. Computer Aided Geomet-
-          freeform rational space curves. ACM Transactions on                      ric Design, Vol 5, No 2, pp 161–171, 1988.
-          Graphics, Vol 17, No 1, pp 32–50, January 1998.               [Sede96]   T. W. Sederberg and A. K. Zundel. Pyramids that
-                                                                                   bound purface patches. Graphical Models and Image
-[Elbe99]   G. Elber and M.-S. Kim. Computing rational bisec-                       Processing, Vol 58, No 1, pp 75–81, 1996.
-           tors. IEEE Computer Graphics & Applications, Vol 19,
-           No 6, pp 76–81, November-December 1999.                      [Sher93]   E. C. Sherbrooke and N. M. Patrikalakis. Computation
-                                                                                   of the solutions of nonlinear polynomial systems. Com-
-[Elbe00]   G. Elber and M.-S. Kim. A computational model                           puter Aided Geometric Design, Vol 10, No 5, pp 379–
-           for nonrational bisector surfaces: curve-surface and                    405, October 1993.
-           surface-surface bisectors. Proc. of Geometric Modeling
-           and Processing 2000, Hong Kong, pp 364–372, April            [Well91]   D. Wells. The Penguin Dictionary of Curious and In-
-           10-12, 2000.                                                            teresting Geometry Penguin Books, New York, 1991.
-
-[Faux85]   I. D. Faux and M. J. Pratt. Computational Geometry
-           for Design and Manufacture. Halsted Press, New York,
-           1985.
-
-[Farouki88] R. Farouki and V. Rajan. On the numerical condition
-           of polynomials in Bernstein form. Computer Aided Ge-
-           ometric Design, Vol 4, No 3, pp 191–216, 1987.
-
-[Golu96]   G. H. Golub and C. F. Van Loan. Matrix Computa-
-           tion. The Johns Hopkins University Press, Baltimore
-           and London, Third Edition, 1996.
-
-[Heo99]    H.-S. Heo, M.-S. Kim, and G. Elber. The intersection
-           of two ruled surfaces. Computer-Aided Design, Vol 31,
-           No 1, pp 33–50, January 1999.
-
-[Kim00]    M.-S. Kim and G. Elber. Problem reduction to param-
-           eter space. The Mathematics of Surfaces IX, R. Cipolla
-           and R. Martin (Eds), Springer, London, 2000, pp 82–
-           98.
-
-[Irit00]   IRIT 8.0 User’s Manual, September 2000, Technion.
-           www.cs.technion.ac.il/ irit.
-
-[Joy99]    K. Joy and M. Duchaineau. Boundary determination
-           for trivariate solid. Proc. of Pacific Graphics 99, Seoul,
-           Korea, October 5–7 1999, pp 82–91.
-
-[Lane81]   J. Lane and R. Riesenfeld. Bounds on a polynomial.
-           BIT, Vol 21, pp 112–117, 1981.
-
-[Lore87]   W.E. Lorensen and H.E. Cline. Marching Cubes:
-           a high resolution 3D surface construction algorithm.
-           Computer Graphics, Vol 21, No 4 (Proc. ACM Sig-
-           graph 87), pp 163–169, July 1987.
-
-[Luen84]   D. G. Luenberger. Linear and Nonlinear Program-
-           ming. Second Edition, Addison-Wesley, Menlo Park,
-           California, 1984.
-

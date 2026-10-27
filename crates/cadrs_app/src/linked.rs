@@ -656,6 +656,8 @@ pub enum Owner {
     Move,
     /// P3G.4: the Derived dialog's Other documents (the source Part Studio).
     Derived,
+    /// Insert Variable Studio's Other documents (a version's Variable Studio).
+    VariableStudio,
 }
 
 impl Owner {
@@ -666,6 +668,7 @@ impl Owner {
             Owner::InsertView => "insert-view-other",
             Owner::Move => "move-other",
             Owner::Derived => "derived-other",
+            Owner::VariableStudio => "vs-insert-other",
         }
     }
 }
@@ -872,7 +875,12 @@ pub fn browser_list(world: &mut World, b: &Browse) -> BrowserList {
         };
     };
     let lib = &data.lib;
-    let folders = lib.folders.iter().map(|f| (f.id, f.name.clone())).collect();
+    let folders = lib
+        .folders
+        .iter()
+        .filter(|f| !lib.folder_hidden(f.id))
+        .map(|f| (f.id, f.name.clone()))
+        .collect();
     let labels = lib
         .labels_by_name()
         .into_iter()
@@ -1175,6 +1183,9 @@ pub fn with_browse<R>(
             .map(|mut s| f(&mut s.browse)),
         Owner::Derived => world
             .get_resource_mut::<crate::derived_ui::DerivedSession>()
+            .map(|mut s| f(&mut s.browse)),
+        Owner::VariableStudio => world
+            .get_resource_mut::<crate::variable_studio_ui::InsertSession>()
             .map(|mut s| f(&mut s.browse)),
     }
 }

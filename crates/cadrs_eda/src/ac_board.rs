@@ -1,4 +1,4 @@
-//! A stand-in for an AC current-sensing board (the `docs/PCB_IN_PART_STUDIO.md` scenarios): a
+//! A stand-in for an AC current-sensing board (for the `pcb_*` scenarios): a
 //! 31 × 39 mm board with its top corners cut, three wire pads for mains in and out (J4 live
 //! in, J5 neutral in, J3 live out after the sensor), the current sensor U2 (SOIC-8), two
 //! 2 × 10 headers for a microcontroller board (J1, J2), a few 0805 parts, a large AC/DC module

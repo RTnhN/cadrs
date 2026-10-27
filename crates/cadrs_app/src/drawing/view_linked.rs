@@ -67,7 +67,7 @@ fn lists(
         let Some(to) = id(el.id) else { continue };
         match &el.kind {
             ElementKind::PartStudio { .. } => {
-                let build = cadrs_core::rebuild::build(el.features());
+                let build = cadrs_core::rebuild::build(&el.part_features());
                 let props = el.part_props();
                 let parts: Vec<(PartId, String)> = build
                     .parts
