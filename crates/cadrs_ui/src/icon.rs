@@ -45,10 +45,9 @@ pub fn has_icon(name: &str) -> bool {
     data::ICON_DATA.iter().any(|(n, ..)| *n == name)
 }
 
-/// The accent colour of icon-rs icons.
+/// The accent colour of icons' details: the theme's cyan (icon-rs draws them blue).
 pub fn accent_color() -> Color {
-    let [r, g, b] = data::ACCENT;
-    Color::srgb_u8(r, g, b)
+    Color::srgb_u8(0x12, 0x9e, 0xa8)
 }
 
 /// Handles to every rasterized icon, by name and pixel size.
@@ -100,7 +99,8 @@ impl IconAtlas {
             .find(|(_, h)| *h == base)
             .map_or(0, |(s, _)| *s);
         let px = (built as f32 * scale).round().clamp(1.0, 512.0) as u32;
-        if px == built && !dark {
+        // A tool family's colour is painted in at runtime.
+        if px == built && !dark && (accent || family_accent(name).is_none()) {
             return Some(base);
         }
         let key = (name.to_owned(), px, accent, dark);
@@ -134,11 +134,52 @@ fn render(name: &str, size: u32, px: u32, accent: bool, dark: bool) -> Option<Ve
     if dark {
         icon.svg = icon.svg_dark;
     }
+    // A solid tool icon in its family's colour. On light, its accent (what the tool makes)
+    // takes the colour; on dark the two swap, so the outlines and arrows are coloured (lighter,
+    // as icon-rs's own dark accent is) and what the tool makes is drawn in the line colour,
+    // since white outlines around a coloured shape read as noise.
+    if let Some([r, g, b]) = family_accent(name)
+        && !accent
+        && !icon.kind.is_tintable()
+    {
+        let family = icon_rs::Rgb(r, g, b);
+        let svg = if dark {
+            let (ink, accent) = (icon_rs::Palette::DARK.ink, icon_rs::Palette::DARK.accent);
+            // Through a placeholder, so the accent turned ink isn't coloured again.
+            icon.svg
+                .replace(&accent.to_hex(), "#\0")
+                .replace(&ink.to_hex(), &family.mix(icon_rs::Rgb::WHITE, 30).to_hex())
+                .replace("#\0", &ink.to_hex())
+        } else {
+            icon.svg
+                .replace(&icon_rs::Palette::LIGHT.accent.to_hex(), &family.to_hex())
+        };
+        return crate::icon_raster::rasterize(&svg, px)
+            .inspect_err(|e| warn!("cannot render icon {name:?} at {px} px: {e}"))
+            .ok();
+    }
     let (base, accent_svg) = crate::icon_raster::layers(&icon, weight, size);
     let svg = if accent { accent_svg? } else { base };
     crate::icon_raster::rasterize(&svg, px)
         .inspect_err(|e| warn!("cannot render icon {name:?} at {px} px: {e}"))
         .ok()
+}
+
+/// The colour of a tool family, for its icons' accent, so the eye finds a tool by its colour:
+/// adding material blue, revolving orange, sweeps and lofts purple, edge treatments green,
+/// cuts red, patterns magenta, combining amber, construction teal.
+pub fn family_accent(name: &str) -> Option<[u8; 3]> {
+    Some(match name {
+        "extrude" | "thicken" | "rib" | "enclose" => [0x25, 0x63, 0xeb],
+        "revolve" => [0xee, 0x7d, 0x1c],
+        "sweep" | "loft" => [0x93, 0x52, 0xe0],
+        "fillet" | "chamfer" | "draft" => [0x1f, 0xa8, 0x5e],
+        "shell" | "hole" | "thread" | "split" => [0xdc, 0x3f, 0x4a],
+        "linear-pattern" | "circular-pattern" | "curve-pattern" | "mirror" => [0xd0, 0x3c, 0xa0],
+        "boolean" | "transform" | "composite-part" => [0xd9, 0x96, 0x12],
+        "plane" | "mate-connector" => [0x12, 0x9e, 0xa8],
+        _ => return None,
+    })
 }
 
 fn rgba_image(px: u32, rgba: Vec<u8>) -> Image {

@@ -22,7 +22,8 @@ Scenario(
     steps: [
         WaitFor("document-shell"),
         Custom("linked-fixture store move_to_document_standin"),
-        Click(ui("back-to-documents")),
+        Click(ui("app-menu")),
+        Click(ui("app-documents")),
         WaitFor("landing"),
         Click(ui("search-field")),
         Type("Move to Document"),
@@ -68,9 +69,9 @@ Scenario(
         Wait(3),
         Screenshot("07-hexapod-mass"),
         Click(ui("mass-dialog-cancel")),
-        Click(ui("back-to-documents")),
+        Click(ui("app-menu")),
+        Click(ui("app-documents")),
         WaitFor("landing"),
-        Click(ui("filter-created")),
         // Sorted by name: documents made in the same minute would otherwise be ordered by
         // their (random) ids.
         Click(ui("col-name")),

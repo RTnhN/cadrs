@@ -197,19 +197,24 @@ fn main() -> AppExit {
     }
     // Sharing and collaboration: only a person's own runs are a peer (`CADRS_NET=0` keeps
     // one off the network). The identity lives with the documents, so each data dir is a peer.
+    // The identity in use (the account menu switches it) picks the key and the name.
     if !scripted && !opts.headless && std::env::var_os("CADRS_NET").is_none_or(|v| v != "0") {
+        let root = data_dir.clone().or_else(Store::default_root);
+        let ids = root.as_deref().map(cadrs_app::identity::load);
         app.add_plugins(cadrs_net::NetPlugin {
-            identity: data_dir
-                .clone()
-                .or_else(Store::default_root)
-                .map(|d| d.join(cadrs_net::IDENTITY_FILE)),
-            display_name: UserProfile::system().display_name,
+            identity: root.zip(ids.as_ref()).map(|(d, i)| i.key_path(&d)),
+            display_name: ids.map_or_else(
+                || UserProfile::system().display_name,
+                |i| i.active().name.clone(),
+            ),
             relays: Default::default(),
         });
     }
     if scripted || opts.headless {
         // The same light (or `CADRS_COLOR_SCHEME`) look on every machine.
         app.insert_resource(cadrs_ui::Appearance::without_system());
+        // Everything drawn where it rests, so steps never act on a moving button.
+        app.insert_resource(cadrs_ui::spring::MotionSettings { enabled: false });
         app.insert_resource(cadrs_app::ExportDirOverride(Some(
             opts.resolved_out_dir().join("exports"),
         )));

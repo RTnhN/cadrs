@@ -544,13 +544,13 @@ fn sync_edit_banner(
     commands.entity(area).add_child(banner);
 }
 
-/// The top bar says which version is shown ("V1") instead of the workspace's name ("Main", or
-/// the branch open, P3E.4).
+/// The top bar says which version is shown ("V1") or which branch is open (P3E.4); in Main it
+/// says nothing.
 fn sync_branch_label(
     session: Option<Res<LinkedSession>>,
     doc: Option<Res<ActiveDocument>>,
     log: Option<Res<crate::history_panel::DocLog>>,
-    mut q: Query<(&Name, &mut Text)>,
+    mut q: Query<(&Name, &mut Text, &mut Node)>,
 ) {
     let want = match (&session, &doc) {
         (Some(s), Some(d)) if d.read_only.is_some() => s.version_name.clone(),
@@ -559,9 +559,20 @@ fn sync_branch_label(
             .and_then(|l| l.log.as_ref())
             .map_or_else(|| "Main".to_string(), |l| l.current_name()),
     };
-    for (n, mut t) in &mut q {
-        if n.as_str() == "branch-label" && t.0 != want {
+    let display = if want == "Main" {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    for (n, mut t, mut node) in &mut q {
+        if n.as_str() != "branch-label" {
+            continue;
+        }
+        if t.0 != want {
             t.0 = want.clone();
+        }
+        if node.display != display {
+            node.display = display;
         }
     }
 }

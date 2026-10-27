@@ -433,19 +433,26 @@ fn sync_mode_bar(
                         left: Val::Percent(50.0),
                         margin: UiRect::left(Val::Px(-120.0)),
                         column_gap: Val::Px(2.0),
-                        padding: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        padding: UiRect::all(Val::Px(3.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
                         ..default()
                     },
-                    BackgroundColor(t.background),
-                    BoxShadow::default(),
+                    cadrs_ui::glass::panel(&t),
                 ))
                 .with_children(|b| {
                     for (mode, name, label) in modes.iter().copied() {
+                        // A segmented control's segments: no outlines, the mode shown tinted.
                         b.spawn((
-                            cadrs_ui::Button::new(name).label(label).small().build(&t),
+                            cadrs_ui::Button::new(name)
+                                .label(label)
+                                .small()
+                                .ghost()
+                                .build(&t),
                             ModeButton(mode),
-                        ));
+                        ))
+                        .entry::<Node>()
+                        .and_modify(|mut n| n.border = UiRect::ZERO);
                     }
                 });
             });
@@ -1067,9 +1074,12 @@ const HAIRLINE_PX: f32 = 1.5;
 #[derive(Component)]
 struct GridMesh(bool);
 
+#[allow(clippy::too_many_arguments)]
 fn draw_grid_mesh(
     eda: Res<Eda2d>,
     ui: Res<EdaUi>,
+    rect: Res<ViewportRect>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut q: Query<(
         &GridMesh,
         &Mesh2d,
@@ -1118,11 +1128,14 @@ fn draw_grid_mesh(
         *last = None;
         return;
     };
+    let window = window_size(&windows);
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (
         v.center.map(f64::to_bits),
         v.scale.to_bits(),
         v.size.map(f64::to_bits),
+        window.map(|w| (w.x.to_bits(), w.y.to_bits())),
+        (rect.0.min.x.to_bits(), rect.0.min.y.to_bits()),
     )
         .hash(&mut h);
     let key = (h.finish(), true);
@@ -1134,7 +1147,7 @@ fn draw_grid_mesh(
     while (step as f64 / 1e6) * v.scale < 12.0 {
         step *= 2;
     }
-    let vis = v.visible();
+    let vis = window_bounds(&v, &rect, window);
     let (x0, x1) = (vis.min.x.div_euclid(step), vis.max.x.div_euclid(step) + 1);
     let (y0, y1) = (vis.min.y.div_euclid(step), vis.max.y.div_euclid(step) + 1);
     let mm = |nm: i64| nm as f32 / 1e6;
@@ -1187,13 +1200,36 @@ fn draw_grid_mesh(
     }
 }
 
+/// What the window shows of `v`: its own rect and the gaps and panels around it, since the
+/// canvas runs on under the floating panels (`crate::document`).
+fn window_bounds(v: &View, rect: &ViewportRect, window: Option<Vec2>) -> Bounds {
+    let Some(w) = window else {
+        return v.visible();
+    };
+    let o = rect.0.min;
+    let a = v.to_design([-o.x as f64, -o.y as f64]);
+    let b = v.to_design([(w.x - o.x) as f64, (w.y - o.y) as f64]);
+    Bounds {
+        min: cadrs_eda::units::Pt::new(a[0].min(b[0]) as i64, a[1].min(b[1]) as i64),
+        max: cadrs_eda::units::Pt::new(a[0].max(b[0]) as i64, a[1].max(b[1]) as i64),
+    }
+}
+
+/// The primary window's logical size.
+fn window_size(q: &Query<&Window, With<bevy::window::PrimaryWindow>>) -> Option<Vec2> {
+    q.iter().next().map(|w| Vec2::new(w.width(), w.height()))
+}
+
 /// The schematic grid as dots (every grid point, or every 2nd, 4th, … when they'd be closer
 /// than 10 px), and the placing crosshair ([`Crosshair`]).
+#[allow(clippy::too_many_arguments)]
 fn draw_overlay(
     eda: Res<Eda2d>,
     ui: Res<EdaUi>,
     scene: Res<EdaScene>,
     cross: Res<Crosshair>,
+    rect: Res<ViewportRect>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut dots: Gizmos<EdaDots>,
     mut cg: Gizmos<EdaCross>,
 ) {
@@ -1209,7 +1245,7 @@ fn draw_overlay(
     while (step as f64 / 1e6) * v.scale < 10.0 {
         step *= 2;
     }
-    let vis = v.visible();
+    let vis = window_bounds(&v, &rect, window_size(&windows));
     let (x0, x1) = (vis.min.x.div_euclid(step), vis.max.x.div_euclid(step) + 1);
     let (y0, y1) = (vis.min.y.div_euclid(step), vis.max.y.div_euclid(step) + 1);
     // A dot is a 2 px stroke a pixel and a half long.

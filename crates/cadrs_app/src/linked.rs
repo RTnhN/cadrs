@@ -49,12 +49,7 @@ impl Plugin for LinkedPlugin {
             .init_resource::<LibrarySnapshot>()
             .add_systems(
                 Update,
-                (
-                    sync_versions_counter,
-                    refresh_link_status,
-                    land_library_reads,
-                )
-                    .run_if(in_state(AppState::Document)),
+                (refresh_link_status, land_library_reads).run_if(in_state(AppState::Document)),
             )
             .add_systems(
                 Update,
@@ -63,7 +58,6 @@ impl Plugin for LinkedPlugin {
             .add_systems(OnExit(AppState::Document), |mut s: ResMut<LinkStatus>| {
                 *s = LinkStatus::default()
             })
-            .add_observer(on_top_bar)
             .add_observer(on_version_dialog_button)
             .add_observer(on_browser_location)
             .add_observer(on_browser_document);
@@ -1512,51 +1506,4 @@ fn create_current_version(world: &mut World, name: &str, description: &str) {
         let _ = log.save(&store);
     }
     l.generation += 1;
-}
-
-fn on_top_bar(a: On<Activate>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(a.entity)
-        .is_ok_and(|n| n.as_str() == "document-create-version")
-    {
-        commands
-            .queue(|world: &mut World| open_create_version_dialog(world, VersionTarget::Current));
-    }
-}
-
-/// The top bar's versions counter follows the document's versions (ER2.2), and its branches
-/// counter the branches (P3E.4).
-fn sync_versions_counter(
-    log: Res<DocLog>,
-    q: Query<(&Name, &Children)>,
-    mut q_text: Query<&mut Text>,
-) {
-    if !log.is_changed() {
-        return;
-    }
-    let versions = log
-        .log
-        .as_ref()
-        .map(|l| l.versions().len())
-        .unwrap_or(0)
-        .to_string();
-    let branches = log
-        .log
-        .as_ref()
-        .map(|l| l.branches().len())
-        .unwrap_or(0)
-        .to_string();
-    for (name, children) in &q {
-        let n = match name.as_str() {
-            "document-versions" => &versions,
-            "document-branches" => &branches,
-            _ => continue,
-        };
-        for c in children.iter() {
-            if let Ok(mut t) = q_text.get_mut(c)
-                && t.0 != *n
-            {
-                t.0 = n.clone();
-            }
-        }
-    }
 }

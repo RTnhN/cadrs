@@ -138,7 +138,12 @@ impl SelectionField {
                 let field = p.target_entity();
                 p.spawn((
                     FieldCaption(field),
-                    t.text(placeholder, 10.0, FontWeight::NORMAL, t.muted_foreground),
+                    t.text(
+                        placeholder,
+                        t.font_xs,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(6.0),

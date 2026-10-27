@@ -48,7 +48,7 @@ Scenario(
         Click(ui("tab-cylinder-assembly")),
         Key("F"),
         // A21.1: the workspace units are Inch / Pound.
-        Click(ui("document-menu")),
+        Click(ui("app-menu")),
         WaitFor("document-menu-units"),
         Click(ui("document-menu-units")),
         WaitFor("workspace-units-dialog"),

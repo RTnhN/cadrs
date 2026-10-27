@@ -40,8 +40,8 @@ Scenario(
         Wait(3),
         Screenshot("01-standin-base-features"),
         // Step 1 (PS17.1): the units.
-        Click(ui("document-menu")),
-        WaitFor("document-menu-popup"),
+        Click(ui("app-menu")),
+        WaitFor("app-menu-popup"),
         Click(ui("document-menu-units")),
         WaitFor("workspace-units-dialog"),
         MoveTo(1420, 900),

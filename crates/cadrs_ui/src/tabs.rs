@@ -1,6 +1,5 @@
-//! Document tabs, modeled on gpui-component's `TabBar`/`Tab` (underline variant) and Onshape's
-//! bottom tab bar: fixed-width grey tabs with a type icon and a name; the selected tab is white
-//! with a blue underline.
+//! Document tabs, modeled on gpui-component's `TabBar`/`Tab` (pill variant): fixed-width tabs
+//! with a type icon and a name, on the tab bar's glass; the selected tab is a tinted pill.
 //!
 //! A [`Tab`] is [`DoubleClickable`], an [`InlineEdit`] (its label is an [`InlineEditLabel`], so
 //! double-click-to-rename is one [`crate::begin_inline_edit`] call away) and a
@@ -19,6 +18,9 @@ use crate::inline_edit::{DoubleClickable, InlineEdit, InlineEditLabel};
 use crate::menu::ContextMenuTarget;
 use crate::style::{InheritFg, InitState, StateColors, VisualState, Visuals};
 use crate::theme::Theme;
+
+/// The narrowest a tab is (a short name still makes a good target).
+pub const MIN_TAB_WIDTH: f32 = 120.0;
 
 /// Builder for a tab.
 pub struct Tab {
@@ -39,7 +41,7 @@ impl Tab {
             icon: None,
             selected: false,
             force: None,
-            width: 183.0,
+            width: 240.0,
             marked: false,
         }
     }
@@ -59,6 +61,7 @@ impl Tab {
         self
     }
 
+    /// The widest the tab gets: it is as wide as its name, from [`MIN_TAB_WIDTH`] up to this.
     pub fn width(mut self, w: f32) -> Self {
         self.width = w;
         self
@@ -74,18 +77,17 @@ impl Tab {
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let visuals = Visuals {
             background: StateColors::new(
-                theme.tab_inactive,
-                theme.tab_hover,
-                theme.tab_hover,
-                theme.tab_inactive,
+                if self.marked {
+                    theme.control
+                } else {
+                    Color::NONE
+                },
+                theme.control_hover,
+                theme.control_hover,
+                Color::NONE,
             )
-            .with_selected(theme.background),
-            border: StateColors::all(if self.marked {
-                theme.tab_underline.with_alpha(0.55)
-            } else {
-                Color::NONE
-            })
-            .with_selected(theme.tab_underline),
+            .with_selected(theme.list_selected),
+            border: StateColors::all(Color::NONE),
             foreground: StateColors::new(
                 theme.tool_foreground,
                 theme.foreground,
@@ -109,14 +111,13 @@ impl Tab {
         (
             Name::new(self.name.into_owned()),
             Node {
-                width: Val::Px(self.width),
+                min_width: Val::Px(MIN_TAB_WIDTH.min(self.width)),
+                max_width: Val::Px(self.width),
                 flex_shrink: 0.0,
-                margin: UiRect::top(Val::Px(2.0)),
                 padding: UiRect::new(Val::Px(10.0), Val::Px(8.0), Val::ZERO, Val::ZERO),
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(5.0),
-                border: UiRect::bottom(Val::Px(2.0)),
-                border_radius: BorderRadius::top(Val::Px(theme.radius)),
+                column_gap: Val::Px(6.0),
+                border_radius: BorderRadius::all(Val::Px(theme.radius)),
                 overflow: Overflow::clip(),
                 ..default()
             },

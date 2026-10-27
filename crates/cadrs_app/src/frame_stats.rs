@@ -160,21 +160,23 @@ pub fn spawn_frame_stats(p: &mut ChildSpawnerCommands, t: &Theme) {
     p.spawn((
         Name::new("frame-stats"),
         FrameStatsPanel,
+        // A small glass chip at the view's bottom left, like the view tools at its right.
         Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(t.space[3]),
-            left: Val::Px(t.space[3]),
+            bottom: Val::Px(0.0),
+            left: Val::Px(0.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(2.0),
-            padding: UiRect::axes(Val::Px(t.space[2]), Val::Px(t.space[1])),
-            border_radius: BorderRadius::all(Val::Px(t.radius_lg)),
-            max_width: Val::Px(BAR_PX + 2.0 * t.space[2]),
+            padding: UiRect::axes(Val::Px(t.space[3]), Val::Px(t.space[2])),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
+            max_width: Val::Px(BAR_PX + 2.0 * t.space[3]),
             // Long system names are cut at the panel's edge (#69).
             overflow: Overflow::clip(),
             display: Display::None,
             ..default()
         },
-        BackgroundColor(t.popover.with_alpha(0.9)),
+        cadrs_ui::glass::panel(t),
         Pickable::IGNORE,
     ))
     .with_children(|panel| {

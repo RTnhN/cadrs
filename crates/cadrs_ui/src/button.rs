@@ -65,6 +65,7 @@ pub struct Button {
     width: Option<Val>,
     square: bool,
     icon_px: Option<f32>,
+    caps: bool,
 }
 
 impl Button {
@@ -83,7 +84,14 @@ impl Button {
             width: None,
             square: false,
             icon_px: None,
+            caps: false,
         }
+    }
+
+    /// A command strip's label: small capitals, semibold.
+    pub fn caps(mut self) -> Self {
+        self.caps = true;
+        self
     }
 
     pub fn label(mut self, label: impl Into<String>) -> Self {
@@ -210,9 +218,17 @@ impl Button {
             ButtonVariant::Primary => FontWeight::MEDIUM,
             _ => FontWeight::NORMAL,
         };
-        let text_font = theme.font(font_size, weight);
+        let text_font = if self.caps {
+            theme.font(theme.font_sm, FontWeight::SEMIBOLD)
+        } else {
+            theme.font(font_size, weight)
+        };
         let caret_color = fg;
-        let label = self.label.clone();
+        let label = if self.caps {
+            self.label.as_ref().map(|l| l.to_uppercase())
+        } else {
+            self.label.clone()
+        };
         let icon_name = self.icon.clone();
         let caret = self.caret;
 

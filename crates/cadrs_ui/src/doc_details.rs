@@ -60,7 +60,7 @@ impl LabelChip {
                 column_gap: Val::Px(4.0),
                 flex_shrink: 0.0,
                 border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(9.0)),
+                border_radius: BorderRadius::all(Val::Px(theme.radius)),
                 ..default()
             },
             BackgroundColor(fill),

@@ -365,6 +365,29 @@ pub struct ToolStrip(pub Mode);
 /// (name, icon, tooltip, action) of each button, `None` for a separator.
 pub type StripSpec = &'static [Option<(&'static str, &'static str, &'static str, &'static str)>];
 
+/// While a tool strip is on the view's right edge, the panel strip (`crate::document`) sits at
+/// the bottom of that edge, above the view tools, so the two make one column.
+fn lower_panel_strip(world: &mut World) {
+    let mut q = world.query::<&ToolStrip>();
+    let low = q.iter(world).next().is_some();
+    let mut q = world.query::<(&Name, &mut Node)>();
+    for (n, mut node) in q.iter_mut(world) {
+        if n.as_str() != "right-panel-strip" {
+            continue;
+        }
+        let (top, bottom, margin) = if low {
+            (Val::Auto, Val::Px(52.0), Val::ZERO)
+        } else {
+            (Val::Percent(50.0), Val::Auto, Val::Px(-60.0))
+        };
+        if node.top != top || node.bottom != bottom || node.margin.top != margin {
+            node.top = top;
+            node.bottom = bottom;
+            node.margin.top = margin;
+        }
+    }
+}
+
 /// Keeps the right-edge tool strip of the shown mode on screen.
 pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
     let show = world
@@ -397,15 +420,17 @@ pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
                     Node {
                         position_type: PositionType::Absolute,
                         top: Val::Px(top),
-                        right: Val::Px(44.0),
+                        // The view's right edge, the panel strip's column (moved down meanwhile,
+                        // [`lower_panel_strip`]).
+                        right: Val::Px(0.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(2.0),
                         padding: UiRect::all(Val::Px(3.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
                         ..default()
                     },
-                    BackgroundColor(t.background),
-                    BoxShadow::default(),
+                    cadrs_ui::glass::panel(&t),
                 ))
                 .with_children(|s| {
                     for item in spec.iter() {
@@ -434,10 +459,12 @@ pub fn sync_strip(world: &mut World, mode: Mode, spec: StripSpec) {
                 });
             });
             world.flush();
+            lower_panel_strip(world);
         }
         (false, Some(e)) => {
             world.commands().entity(e).despawn();
             world.flush();
+            lower_panel_strip(world);
         }
         _ => {}
     }

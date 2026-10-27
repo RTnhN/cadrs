@@ -1,25 +1,27 @@
-//! The documents page (`reference/onshape/screens/01*`–`04`).
+//! The documents page, on the glass wallpaper ([`cadrs_ui::glass`]).
 //!
-//! - Top bar: logo, search box ("Search in Owned by me"), the version and the settings menu.
-//! - Sidebar: the blue **Create ▾** button (Document…, Folder…, Import files…, …), the filters
-//!   (Owned by me, Recently opened, Created by me, Labels, Trash; Shared with me, Teams and
-//!   Public are left out until there are accounts, issue #13)
-//!   and a storage note at the bottom.
-//! - Main area: a heading for the active filter, collapsible sections, and the document list
-//!   with sortable columns Name | Modified | Modified by | Owned by.
+//! - Top bar: the app menu (the cadrs mark, [`crate::app_menu`]), whose first items here are
+//!   Open documents folder, Labels ▸ (each shows its documents) and Trash ([`app_entries`]);
+//!   the version, notifications ([`crate::notifications`]), the color scheme and the account
+//!   ([`crate::identity`]).
+//! - A command strip along the top, one height and small capitals: **New document** (with ▾
+//!   for Join shared document…, From a sample…, …), Folder, the search box; at the right
+//!   Import, Label, the list and grid toggles and the Type filter.
+//! - The list in a glass card: a caption (DOCUMENTS and the count, or the Trash, a label or the
+//!   samples with ‹ back), and the sortable columns NAME | MODIFIED | MODIFIED BY | OWNED BY.
 //!
-//! Clicking a row selects it and shows it in the **Details** panel; double-clicking it (or Enter)
-//! opens it (P3E.1). Right-clicking it selects it and opens a context menu with Rename… (a
-//! dialog), Labels ▸, Move to trash (a confirmation dialog); in Trash, Restore. Rename, trash
-//! and restore are [`LibraryCommand`]s, so Ctrl+Z / Ctrl+Shift+Z undo and redo them.
+//! Clicking a row selects it; double-clicking it (or Enter) opens it (P3E.1). Right-clicking it
+//! selects it and opens a context menu with Rename… (a dialog), Labels ▸, Properties…,
+//! History…, Used in… (modals, in [`details`]), Move to trash (a confirmation dialog); in the
+//! Trash, Restore. Rename, trash and restore are [`LibraryCommand`]s, so Ctrl+Z / Ctrl+Shift+Z
+//! undo and redo them.
 //!
-//! P3E.1 (TD3, TD4.1, X5; `test-drive-gaps.md`) adds, in [`details`]: labels (Create ▸
-//! Label…, the sidebar's Labels section as filters with Rename… and Delete…, a Labels column,
-//! the details panel's searchable checkboxes and "Create new label"), the Details panel (Info,
-//! Versions, Where used), folders that open (a breadcrumb and Back), the Type filter and a grid
-//! view, the bundled samples under Explore cadrs ("Open a copy"), and Import files… (a STEP or
-//! STL file becomes a new document whose Part Studio holds its Import). Every library change is
-//! an undoable library command.
+//! P3E.1 (TD3, TD4.1, X5) adds, in [`details`]: labels (Create ▸ Label…, the Label button, a
+//! label's list with Rename… and Delete… by its caption, a Labels column, the Properties
+//! modal's searchable checkboxes and "Create new label"), folders that open (a breadcrumb and
+//! Back), the Type filter and a grid view, the bundled samples ("Open a copy"), and Import
+//! files… (a STEP or STL file becomes a new document whose Part Studio holds its Import). Every
+//! library change is an undoable library command.
 
 use std::collections::HashMap;
 
@@ -38,11 +40,10 @@ use cadrs_core::{
     Document, DocumentEntry, DocumentId, DocumentMeta, Filter, FolderId, ItemType, LabelId,
     Library, LibraryCommand, LibraryHistory, SortDir, SortKey,
 };
-use cadrs_ui::icon::icon_in;
-use cadrs_ui::input::{TextInputField, TextInputPlaceholder};
+use cadrs_ui::input::TextInputField;
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
-use cadrs_ui::{Button, CollapsibleToggled, Icon, ShortcutKey};
+use cadrs_ui::{Button, ShortcutKey};
 
 use crate::{ActiveDocument, AppClock, AppState, DocumentStore, UserProfile};
 
@@ -69,21 +70,12 @@ impl Plugin for LandingPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    sync_search,
-                    rebuild_main,
-                    sync_filter_items,
-                    sync_search_placeholder,
-                    sync_disclosures,
-                    landing_shortcuts,
-                )
-                    .run_if(in_state(AppState::Landing)),
+                (sync_search, rebuild_main, landing_shortcuts).run_if(in_state(AppState::Landing)),
             )
             .add_systems(
                 Update,
                 (
                     details::rebuild_details,
-                    details::rebuild_label_items,
                     details::filter_label_checks,
                     details::commit_description_on_blur,
                     details::on_import_picked,
@@ -93,19 +85,16 @@ impl Plugin for LandingPlugin {
             .add_observer(details::on_pick_activate)
             .add_observer(details::on_pick_double_click)
             .add_observer(details::on_label_check)
-            .add_observer(details::on_label_context_action)
-            .add_observer(details::on_label_context_menu)
             .add_observer(details::on_sample_context_menu)
             .add_observer(details::on_sample_context_action)
-            .add_observer(details::on_details_tab)
+            .add_observer(details::on_details_dialog_close)
             .add_observer(details::on_details_button)
             .add_observer(details::on_description_submit)
-            .add_observer(on_filter_activate)
             .add_observer(on_sort_change)
             .add_observer(on_text_submit)
             .add_observer(on_row_context_menu)
-            .add_observer(on_context_action)
-            .add_observer(on_section_toggled);
+            .add_observer(on_row_more)
+            .add_observer(on_context_action);
         organize::plugin(app);
     }
 }
@@ -121,12 +110,6 @@ pub struct LandingState {
     pub sort_key: SortKey,
     pub sort_dir: SortDir,
     pub search: String,
-    /// Open state of "Getting started", "Last opened by me" and "Folders".
-    pub sections: [bool; 3],
-    /// Whether the sections block is shown at all (the round toggle under it).
-    pub sections_visible: bool,
-    pub teams_open: bool,
-    pub labels_open: bool,
     /// Whether the user picked a sort; the default sort shows no arrow, like the reference.
     pub sort_touched: bool,
     /// The folder opened (P3E.1, TD3.6): the list shows its documents under a breadcrumb.
@@ -135,9 +118,6 @@ pub struct LandingState {
     pub item_type: ItemType,
     /// The grid view instead of the list (P3E.1, TD3.7).
     pub grid: bool,
-    /// Whether the user opened or closed "Last opened by me" (P3E.2, P3E.1 judge): until then
-    /// it is open whenever it has documents.
-    pub recent_touched: bool,
 }
 
 impl Default for LandingState {
@@ -147,15 +127,10 @@ impl Default for LandingState {
             sort_key: SortKey::Modified,
             sort_dir: SortDir::Descending,
             search: String::new(),
-            sections: [false; 3],
-            sections_visible: true,
-            teams_open: false,
-            labels_open: false,
             sort_touched: false,
             folder: None,
             item_type: ItemType::All,
             grid: false,
-            recent_touched: false,
         }
     }
 }
@@ -215,21 +190,14 @@ struct Thumbnails(
 #[derive(Component)]
 struct MainPanel;
 
-/// A sidebar filter item.
+/// The page's title, rebuilt with the list.
 #[derive(Component)]
-struct FilterItem(Filter);
+struct PageTitle;
 
-/// Teams / Labels expanders in the sidebar.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum Disclosure {
-    /// Not shown until there are accounts (issue #13).
-    #[allow(dead_code)]
-    Teams,
-    Labels,
-}
-
+/// The slot right of the search box for the list's view toggles and Type filter, rebuilt with
+/// the list.
 #[derive(Component)]
-struct DisclosureChildren(Disclosure);
+struct ListTools;
 
 /// A document list row.
 #[derive(Component)]
@@ -267,12 +235,6 @@ enum LandingDialog {
     PurgeFolder(FolderId),
 }
 
-const SECTION_NAMES: [&str; 3] = [
-    "section-getting-started",
-    "section-last-opened",
-    "section-folders",
-];
-
 fn filter_icon(f: Filter) -> &'static str {
     match f {
         Filter::Explore => "idea",
@@ -283,19 +245,6 @@ fn filter_icon(f: Filter) -> &'static str {
         Filter::Public => "public",
         Filter::Trash => "delete",
         Filter::Label(_) => "tag",
-    }
-}
-
-fn filter_name(f: Filter) -> &'static str {
-    match f {
-        Filter::Explore => "filter-explore",
-        Filter::OwnedByMe => "filter-owned",
-        Filter::RecentlyOpened => "filter-recent",
-        Filter::CreatedByMe => "filter-created",
-        Filter::SharedWithMe => "filter-shared",
-        Filter::Public => "filter-public",
-        Filter::Trash => "filter-trash",
-        Filter::Label(_) => "filter-label",
     }
 }
 
@@ -387,12 +336,7 @@ fn thumbnail_image(images: &mut Assets<Image>, img: image::RgbaImage) -> Option<
 // ---------------------------------------------------------------------------------------------
 // Layout
 
-fn spawn_landing(
-    mut commands: Commands,
-    theme: Res<Theme>,
-    state: Res<LandingState>,
-    details: Res<LandingDetails>,
-) {
+fn spawn_landing(mut commands: Commands, theme: Res<Theme>, profile: Res<UserProfile>) {
     let t = theme.clone();
     commands
         .spawn((
@@ -406,379 +350,343 @@ fn spawn_landing(
                 ..default()
             },
             BackgroundColor(t.background),
+            cadrs_ui::glass::wallpaper(),
         ))
         .with_children(|root| {
-            top_bar(root, &t, &state);
-            root.spawn(Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                ..default()
-            })
-            .with_children(|body| {
-                sidebar(body, &t, &state);
-                body.spawn((
-                    Name::new("main-panel"),
-                    MainPanel,
-                    Node {
-                        flex_grow: 1.0,
-                        min_width: Val::Px(0.0),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::new(
-                            Val::Px(10.0),
-                            Val::Px(12.0),
-                            Val::Px(0.0),
-                            Val::Px(0.0),
-                        ),
-                        ..default()
-                    },
-                ));
-                // The details rail and panel on the right edge (P3E.1).
-                details::spawn_details(body, &t, &details);
+            top_bar(root, &t, &profile);
+            // The page: a column, centered in a wide window.
+            root.spawn((
+                Name::new("landing-page"),
+                // On the top bar's grid: the same 8 px from the window's edges.
+                Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    ..default()
+                },
+            ))
+            .with_children(|page| {
+                actions(page, &t);
+                page.spawn(Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    column_gap: Val::Px(16.0),
+                    ..default()
+                })
+                .with_children(|body| documents_card(body, &t));
             });
-            footer(root, &t);
         });
 }
 
-fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
+/// The bar across the top: the app menu, then the version, notifications, the color scheme
+/// and the account.
+fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, profile: &UserProfile) {
+    // Floating, as a document's top bar is.
     p.spawn((
         Name::new("top-bar"),
         Node {
-            height: Val::Px(t.top_bar_height),
+            height: Val::Px(44.0),
             flex_shrink: 0.0,
-            padding: UiRect::new(Val::Px(12.0), Val::Px(8.0), Val::ZERO, Val::ZERO),
+            margin: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(8.0), Val::ZERO),
+            padding: UiRect::horizontal(Val::Px(6.0)),
             align_items: AlignItems::Center,
-            border: UiRect::bottom(Val::Px(1.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(t.title_bar),
-        BorderColor::all(Color::srgb_u8(0xdc, 0xdc, 0xdc)),
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|bar| {
-        // Logo: a neutral mark and the name.
-        bar.spawn((
-            Name::new("logo"),
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(7.0),
-                width: Val::Px(294.0),
-                // A narrow window takes from the gap after the name first.
-                min_width: Val::Px(100.0),
-                ..default()
-            },
-        ))
-        .with_children(|logo| {
-            logo.spawn((
-                Node {
-                    width: Val::Px(22.0),
-                    height: Val::Px(22.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(5.0)),
-                    ..default()
-                },
-                BackgroundColor(t.primary),
-            ))
-            .with_child(icon("part", 16.0, Color::WHITE));
-            logo.spawn(t.text("cadrs", t.font_xl, FontWeight::NORMAL, t.muted_foreground));
-        });
-        // Search box with a scope dropdown and a search button.
-        bar.spawn((
-            Name::new("search-box"),
-            Node {
-                align_items: AlignItems::Center,
-                width: Val::Px(358.0),
-                min_width: Val::Px(160.0),
-                ..default()
-            },
-        ))
-        .with_children(|s| {
-            s.spawn(
-                TextInput::new("search")
-                    .placeholder(format!("Search in {}", state.filter.label()))
-                    .height(26.0)
-                    // The box's width but the search button's (it shrinks in a narrow window).
-                    .width(Val::Percent(100.0))
-                    .build(t),
-            )
-            .with_child((
-                Name::new("search-scope"),
-                icon_in(
-                    "caret-down",
-                    14.0,
-                    t.foreground,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(6.0),
-                        ..default()
-                    },
-                ),
-                Pickable::IGNORE,
-            ));
-            s.spawn(
-                IconButton::new("search-button", "search")
-                    .icon_size(18.0)
-                    .tooltip("Search")
-                    .build(t),
-            )
-            .insert((
-                Node {
-                    width: Val::Px(28.0),
-                    height: Val::Px(26.0),
-                    margin: UiRect::left(Val::Px(-1.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::right(Val::Px(t.radius)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                cadrs_ui::Visuals {
-                    background: cadrs_ui::StateColors::new(
-                        Color::srgb_u8(0xf4, 0xf4, 0xf4),
-                        t.ghost_hover,
-                        t.ghost_active,
-                        t.ghost_hover,
-                    ),
-                    border: cadrs_ui::StateColors::all(Color::srgb_u8(0xbd, 0xbd, 0xbd)),
-                    foreground: cadrs_ui::StateColors::all(t.foreground),
-                    focus_ring: t.focus_ring,
-                },
-            ));
-        });
+        crate::app_menu::spawn_app_button(bar, t);
         bar.spawn(Node {
             flex_grow: 1.0,
             ..default()
         });
-        // Right side: the version, the color scheme and settings.
+        // Right side: the version, notifications, the color scheme and the account.
         bar.spawn(Node {
             align_items: AlignItems::Center,
-            column_gap: Val::Px(2.0),
+            column_gap: Val::Px(6.0),
             flex_shrink: 0.0,
             ..default()
         })
         .with_children(|r| {
             crate::update::spawn_version(r, t);
+            crate::notifications::spawn_bell(r, t);
             // Light, dark or the system's scheme.
-            r.spawn(cadrs_ui::scheme_toggle(t))
-                .entry::<Node>()
-                .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // (Notifications, apps and help are left out until they do something: issue #13.)
-            crate::preferences_ui::spawn_settings_button(r, t);
+            r.spawn((
+                cadrs_ui::scheme_toggle(t),
+                cadrs_ui::glass::GlassFrame::bar(),
+            ));
+            crate::identity::spawn_identity_button(r, t, profile);
         });
     });
 }
 
-fn sidebar(p: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
-    p.spawn((
-        Name::new("sidebar"),
-        Node {
-            width: Val::Px(t.sidebar_width),
-            flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(8.0), Val::Px(10.0)),
-            border: UiRect::right(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(t.sidebar),
-        BorderColor::all(t.separator),
-    ))
-    .with_children(|s| {
-        s.spawn(Node {
-            justify_content: JustifyContent::Center,
-            margin: UiRect::bottom(Val::Px(14.0)),
-            ..default()
-        })
-        .with_children(|c| {
-            c.spawn((
-                Button::new("create")
-                    .label("Create")
-                    .primary()
-                    .large()
-                    .dropdown_caret()
-                    .width(Val::Px(138.0))
-                    .build(t),
-                observe(open_create_menu),
-                observe(on_create_menu_action),
-            ))
-            .entry::<Node>()
-            .and_modify(|mut n| n.column_gap = Val::Px(6.0));
-        });
-        let item = |name: &'static str, icon_name: &'static str, label: &str| {
-            ListItem::new(name)
-                .icon(icon_name)
-                .label(label)
-                .height(29.4)
-                .padding_left(14.0)
-                .icon_size(18.0)
-                .selection_indicator()
-                .weight(FontWeight::MEDIUM)
-        };
-        // (Teams and Public are left out: there is no server to keep them. Issue #13.)
-        let before = [
-            Filter::Explore,
-            Filter::OwnedByMe,
-            Filter::RecentlyOpened,
-            Filter::CreatedByMe,
-            Filter::SharedWithMe,
-        ];
-        let filter_item = |s: &mut ChildSpawnerCommands, f: Filter| {
-            s.spawn((
-                item(filter_name(f), filter_icon(f), f.label())
-                    .selected(state.filter == f)
-                    .weight(if state.filter == f {
-                        FontWeight::BOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .build(t),
-                FilterItem(f),
-            ));
-        };
-        for f in before {
-            filter_item(s, f);
-        }
-        for (d, name, icon_name, label, empty) in [(
-            Disclosure::Labels,
-            "filter-labels",
-            "tag",
-            "Labels",
-            "No labels",
-        )] {
-            let open = match d {
-                Disclosure::Teams => state.teams_open,
-                Disclosure::Labels => state.labels_open,
-            };
-            let li = item(name, icon_name, label).disclosure(Some(open));
-            let mut row = s.spawn((li.build(t), d));
-            if d == Disclosure::Labels {
-                // P3E.1: the tag-new icon creates a label (Create ▸ Label…).
-                let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
-                v.foreground = cadrs_ui::StateColors::all(t.muted_foreground);
-                row.with_children(|r| {
-                    r.spawn((
-                        IconButton::new("labels-new", "tag-new")
-                            .icon_size(16.0)
-                            .small()
-                            .tooltip("Create label")
-                            .build(t),
-                        observe(
-                            |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
-                                details::open_new_label_dialog(&mut commands, &theme, None);
-                            },
-                        ),
-                    ))
-                    .insert(v)
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.position_type = PositionType::Absolute;
-                        n.right = Val::Px(8.0);
-                    });
-                });
-            }
-            if d == Disclosure::Labels {
-                // Filled with the labels by `details::rebuild_label_items`.
-                s.spawn((
-                    DisclosureChildren(d),
-                    Name::new("labels-list"),
-                    Node {
-                        display: if open { Display::Flex } else { Display::None },
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                continue;
-            }
-            s.spawn((
-                DisclosureChildren(d),
+/// The card's caption for the list shown: DOCUMENTS, or the Trash, a label or the samples
+/// with a way back; and how many items are listed.
+fn fill_heading(
+    h: &mut ChildSpawnerCommands,
+    t: &Theme,
+    filter: Filter,
+    lib: &Library,
+    count: usize,
+) {
+    if filter != Filter::OwnedByMe {
+        h.spawn((
+            Button::new("filter-back")
+                .label("All documents")
+                .icon("chevron-left")
+                .icon_size(14.0)
+                .ghost()
+                .small()
+                .tooltip("Back to all documents")
+                .build(t),
+            observe(|_: On<Activate>, mut state: ResMut<LandingState>| {
+                state.filter = Filter::OwnedByMe;
+                state.folder = None;
+            }),
+        ));
+    }
+    match filter {
+        Filter::Label(id) => {
+            let [r, g, b] = lib.label(id).map_or([128; 3], |l| l.colour);
+            h.spawn((
                 Node {
-                    display: if open { Display::Flex } else { Display::None },
-                    height: Val::Px(26.0),
-                    padding: UiRect::left(Val::Px(44.0)),
-                    align_items: AlignItems::Center,
+                    width: Val::Px(9.0),
+                    height: Val::Px(9.0),
+                    border_radius: BorderRadius::MAX,
                     ..default()
                 },
-            ))
-            .with_child(t.text(
-                empty,
-                t.font_base,
-                FontWeight::NORMAL,
-                t.subtle_foreground,
+                BackgroundColor(Color::srgb_u8(r, g, b)),
             ));
         }
-        filter_item(s, Filter::Trash);
+        Filter::OwnedByMe => {}
+        f => {
+            h.spawn(icon(filter_icon(f), 15.0, t.muted_foreground));
+        }
+    }
+    let title = match filter {
+        Filter::OwnedByMe => "Documents".to_string(),
+        Filter::Explore => "Samples".to_string(),
+        f => filter_title(f, lib),
+    };
+    h.spawn((
+        Name::new("page-title"),
+        t.text(
+            title.to_uppercase(),
+            t.font_sm,
+            FontWeight::BOLD,
+            t.muted_foreground,
+        ),
+    ));
+    h.spawn((
+        Name::new("page-count"),
+        t.text(
+            count.to_string(),
+            t.font_sm,
+            FontWeight::MEDIUM,
+            t.subtle_foreground,
+        ),
+    ));
+    // A label's Rename… and Delete… (P3E.1).
+    if let Filter::Label(id) = filter {
+        h.spawn((
+            IconButton::new("label-more", "more-horizontal")
+                .icon_size(16.0)
+                .small()
+                .tooltip("Label")
+                .build(t),
+            observe(
+                |a: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                    let menu = Menu::new("label-menu")
+                        .item(MenuItem::new("label-rename", "Rename…").icon("edit"))
+                        .item(MenuItem::new("label-delete", "Delete…").icon("delete"))
+                        .min_width(160.0);
+                    open_menu(&mut commands, a.entity, menu.build(&theme));
+                },
+            ),
+            observe(move |ev: On<MenuAction>, mut commands: Commands| {
+                let item = ev.item.clone();
+                commands.queue(move |w: &mut World| details::label_action(w, id, &item));
+            }),
+        ));
+    }
+}
 
-        // Bottom: where documents are kept.
-        s.spawn(Node {
+/// The page's control size and shape, with room for an icon and a label.
+pub(crate) fn page_control(n: &mut Node) {
+    cadrs_ui::glass::shape_control(
+        n,
+        cadrs_ui::glass::CONTROL_HEIGHT,
+        cadrs_ui::glass::CONTROL_RADIUS,
+    );
+    n.padding = UiRect::horizontal(Val::Px(12.0));
+    n.column_gap = Val::Px(7.0);
+}
+
+/// The command strip along the top of the page: New document, Folder and the search box, then
+/// (in [`ListTools`], rebuilt with the list) Import, Label, the view toggles and the Type
+/// filter. One height, small capitals.
+fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
+    p.spawn((
+        Name::new("landing-actions"),
+        cadrs_ui::spring::Appear::fly_up(),
+        Node {
+            flex_shrink: 0.0,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        },
+    ))
+    .with_children(|a| {
+        create_button(a, t);
+        a.spawn((
+            Button::new("new-folder-button")
+                .label("New folder")
+                .icon("folder-new")
+                .icon_size(16.0)
+                .outline()
+                .tooltip("New folder")
+                .build(t),
+            observe(
+                |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                    open_new_folder_dialog(&mut commands, &theme);
+                },
+            ),
+        ))
+        .insert(cadrs_ui::glass::control(t))
+        .entry::<Node>()
+        .and_modify(|mut n| page_control(&mut n));
+        a.spawn(
+            TextInput::new("search")
+                .placeholder("Search…")
+                .leading_icon("search")
+                .height(cadrs_ui::glass::CONTROL_HEIGHT)
+                .width(Val::Px(260.0))
+                .padding(12.0)
+                .radius(cadrs_ui::glass::CONTROL_RADIUS)
+                .background(t.control)
+                .border(Color::NONE)
+                .cleanable()
+                .build(t),
+        )
+        .insert(cadrs_ui::glass::Glass::input_rim())
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.min_width = Val::Px(180.0);
+            n.max_width = Val::Px(520.0);
+            n.flex_grow = 1.0;
+        });
+        a.spawn(Node {
             flex_grow: 1.0,
+            min_width: Val::Px(8.0),
             ..default()
         });
-        s.spawn(Node {
-            justify_content: JustifyContent::Center,
-            margin: UiRect::bottom(Val::Px(16.0)),
-            column_gap: Val::Px(4.0),
+        a.spawn((
+            Name::new("list-tools"),
+            ListTools,
+            Node {
+                align_items: AlignItems::Center,
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ));
+    });
+}
+
+/// **New document** — at once — with a ▾ for the rest of the Create menu (Join shared
+/// document…, From a sample…, …), in a soft glow: the page's one accent.
+fn create_button(p: &mut ChildSpawnerCommands, t: &Theme) {
+    p.spawn((
+        Name::new("create-group"),
+        Node {
+            height: Val::Px(cadrs_ui::glass::CONTROL_HEIGHT),
+            flex_shrink: 0.0,
+            border_radius: BorderRadius::all(Val::Px(cadrs_ui::glass::CONTROL_RADIUS)),
             ..default()
-        })
-        .with_children(|b| {
-            b.spawn(t.text("Storage:", t.font_base, FontWeight::SEMIBOLD, t.foreground));
-            b.spawn(t.text("Local", t.font_base, FontWeight::NORMAL, t.foreground));
+        },
+        cadrs_ui::glass::glow(t),
+    ))
+    .with_children(|g| {
+        g.spawn((
+            Button::new("create-document")
+                .label("New document")
+                .icon("file-new")
+                .icon_size(16.0)
+                .primary()
+                .tooltip("Create a new document")
+                .build(t),
+            observe(
+                |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                    open_new_document_dialog(&mut commands, &theme);
+                },
+            ),
+        ))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            page_control(&mut n);
+            n.height = Val::Percent(100.0);
+            n.border_radius = BorderRadius::left(Val::Px(cadrs_ui::glass::CONTROL_RADIUS));
         });
-        s.spawn(Node {
-            padding: UiRect::horizontal(Val::Px(9.0)),
-            ..default()
-        })
-        .with_children(|b| {
-            b.spawn((
-                Button::new("open-data-folder")
-                    .label("Open documents folder")
-                    .outline()
-                    .width(Val::Percent(100.0))
-                    .build(t),
-                observe(|_: On<Activate>, store: Res<DocumentStore>| {
-                    let dir = store.0.root().to_path_buf();
-                    let _ = std::fs::create_dir_all(&dir);
-                    let opener = if cfg!(windows) {
-                        "explorer"
-                    } else {
-                        "xdg-open"
-                    };
-                    if let Err(e) = std::process::Command::new(opener).arg(&dir).spawn() {
-                        warn!("cannot open {}: {e}", dir.display());
-                    }
-                }),
-            ));
+        g.spawn((
+            IconButton::new("create", "caret-down")
+                .primary()
+                .icon_size(14.0)
+                .tooltip("More ways to start: join a shared document, open a sample")
+                .build(t),
+            observe(open_create_menu),
+            observe(on_create_menu_action),
+        ))
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.height = Val::Percent(100.0);
+            n.width = Val::Px(26.0);
+            n.margin = UiRect::left(Val::Px(1.0));
+            n.border_radius = BorderRadius::right(Val::Px(cadrs_ui::glass::CONTROL_RADIUS));
         });
     });
 }
 
-fn footer(p: &mut ChildSpawnerCommands, t: &Theme) {
+/// The list's card.
+fn documents_card(p: &mut ChildSpawnerCommands, t: &Theme) {
     p.spawn((
-        Name::new("footer"),
+        Name::new("documents-card"),
         Node {
-            height: Val::Px(26.0),
-            flex_shrink: 0.0,
-            align_items: AlignItems::Center,
-            border: UiRect::top(Val::Px(1.0)),
-            ..default()
+            flex_grow: 1.0,
+            min_width: Val::Px(0.0),
+            padding: UiRect::new(Val::Px(12.0), Val::Px(8.0), Val::Px(6.0), Val::Px(6.0)),
+            ..cadrs_ui::glass::panel_node(t)
         },
-        BorderColor::all(t.separator),
+        cadrs_ui::glass::panel(t),
+        cadrs_ui::spring::Appear::fly_up().delay(0.05),
     ))
-    .with_children(|f| {
-        for text in [
-            "© 2026 cadrs contributors",
-            "Documents are stored on this computer",
-        ] {
-            f.spawn(Node {
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                justify_content: JustifyContent::Center,
+    .with_children(|card| {
+        // The caption, filled by `rebuild_main`.
+        card.spawn((
+            Name::new("landing-heading"),
+            PageTitle,
+            Node {
+                flex_shrink: 0.0,
+                height: Val::Px(30.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                padding: UiRect::left(Val::Px(4.0)),
                 ..default()
-            })
-            .with_child(t.text(
-                text,
-                t.font_xs,
-                FontWeight::NORMAL,
-                t.muted_foreground,
-            ));
-        }
+            },
+        ));
+        card.spawn((
+            Name::new("main-panel"),
+            MainPanel,
+            Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        ));
     });
 }
 
@@ -796,9 +704,12 @@ fn columns(state: &LandingState, labels: bool) -> Vec<Column> {
         }
     };
     // P3E.1: a Labels column once the library has labels (TD3.7); the others make room.
+    // The name takes twice the others' share of the free width, so a narrow window still
+    // shows every column.
     let mut v = vec![
         Column::new("name", "Name")
-            .width(if labels { 360.0 } else { 420.0 })
+            .grow(2.0)
+            .min_width(200.0)
             .sortable()
             .sort(sort(SortKey::Name)),
     ];
@@ -807,19 +718,23 @@ fn columns(state: &LandingState, labels: bool) -> Vec<Column> {
     }
     v.push(
         Column::new("modified", "Modified")
-            .width(if labels { 170.0 } else { 184.0 })
+            .grow(1.0)
+            .min_width(150.0)
             .sortable()
             .sort(sort(SortKey::Modified))
             .first_sort(ColumnSort::Descending),
     );
     v.push(
         Column::new("modified-by", "Modified by")
-            .width(if labels { 150.0 } else { 184.0 })
+            .grow(0.8)
+            .min_width(110.0)
             .sortable()
             .sort(sort(SortKey::ModifiedBy)),
     );
     v.push(
         Column::new("owned-by", "Owned by")
+            .grow(0.8)
+            .min_width(110.0)
             .sortable()
             .sort(sort(SortKey::OwnedBy)),
     );
@@ -848,6 +763,8 @@ fn rebuild_main(
     mut samples: ResMut<details::SampleThumbs>,
     mut images: ResMut<Assets<Image>>,
     q_panel: Query<(Entity, Ref<MainPanel>)>,
+    q_tools: Query<Entity, With<ListTools>>,
+    q_title: Query<Entity, With<PageTitle>>,
 ) {
     let Ok((panel, marker)) = q_panel.single() else {
         return;
@@ -857,6 +774,16 @@ fn rebuild_main(
     }
     let t = theme.clone();
     commands.entity(panel).despawn_related::<Children>();
+    // The list's view toggles and Type filter (P3E.1), right of the search box; the samples
+    // have neither.
+    for tools in &q_tools {
+        commands.entity(tools).despawn_related::<Children>();
+        if state.filter != Filter::Explore {
+            commands
+                .entity(tools)
+                .with_children(|a| details::list_toolbar(a, &t, &state));
+        }
+    }
     let picked = details_state.pick;
     // A folder in the trash (or in one that is) isn't opened.
     let folder = state
@@ -881,29 +808,9 @@ fn rebuild_main(
     if !state.item_type.shows_documents() {
         entries.clear();
     }
-    let recent: Vec<DocumentEntry> = lib
-        .lib
-        .view(
-            Filter::RecentlyOpened,
-            &user.id,
-            "",
-            SortKey::Modified,
-            SortDir::Descending,
-        )
-        .into_iter()
-        .take(6)
-        .collect();
     let has_labels = !lib.lib.labels.is_empty();
     let cols = columns(&state, has_labels);
-    // The top-level folders (the Folders section).
-    let folders: Vec<(FolderId, String)> = lib
-        .lib
-        .subfolders(None)
-        .into_iter()
-        .filter(|f| f.trashed.is_none())
-        .map(|f| (f.id, f.name.clone()))
-        .collect();
-    // Folders are listed above the documents, as in Onshape's list view: at the top level or
+    // Folders are listed above the documents: at the top level or
     // in the folder open (#112: folders nest; a search finds them anywhere), and in the Trash
     // the folders moved there.
     let folder_rows: Vec<FolderListing> = if state.item_type.shows_folders()
@@ -950,13 +857,6 @@ fn rebuild_main(
             (e, thumb, date)
         })
         .collect();
-    let recent: Vec<(DocumentEntry, Option<Handle<Image>>)> = recent
-        .into_iter()
-        .map(|e| {
-            let thumb = thumbnail(&mut thumbs, &mut images, &store.0, e.id);
-            (e, thumb)
-        })
-        .collect();
     let samples_list = if state.filter == Filter::Explore {
         Some(details::sample_rows(&mut samples, &mut images))
     } else {
@@ -965,17 +865,10 @@ fn rebuild_main(
     // P3E.2 (P3E.1 judge): the selection is cleared when the selected item leaves the view
     // (moved to the trash, deleted, or not listed under the new filter), and the Details panel
     // with it.
-    let listed_here = state.filter == Filter::OwnedByMe && folder.is_none();
     let visible = match picked {
         None => true,
-        Some(Pick::Doc(id)) => {
-            rows.iter().any(|r| r.0.id == id)
-                || (listed_here && recent.iter().any(|r| r.0.id == id))
-        }
-        Some(Pick::Folder(f)) => {
-            folder_rows.iter().any(|x| x.id == f)
-                || (listed_here && folders.iter().any(|x| x.0 == f))
-        }
+        Some(Pick::Doc(id)) => rows.iter().any(|r| r.0.id == id),
+        Some(Pick::Folder(f)) => folder_rows.iter().any(|x| x.id == f),
         Some(Pick::Sample(_)) => state.filter == Filter::Explore,
     };
     let picked = if visible {
@@ -995,18 +888,24 @@ fn rebuild_main(
         .selection
         .iter()
         .copied()
-        .filter(|p| {
-            order.contains(p)
-                || Some(*p) == picked
-                || matches!(p, Pick::Folder(f) if listed_here && folders.iter().any(|x| x.0 == *f))
-        })
+        .filter(|p| order.contains(p) || Some(*p) == picked)
         .collect();
     if selection != details_state.selection {
         let keep = selection.clone();
         commands.queue(move |w: &mut World| w.resource_mut::<LandingDetails>().selection = keep);
     }
+    let count = samples_list.as_ref().map_or(order.len(), |l| l.len());
     commands.insert_resource(details::ListOrder(order));
-    let title = filter_title(state.filter, &lib.lib);
+    for h in &q_title {
+        commands.entity(h).despawn_related::<Children>();
+        commands
+            .entity(h)
+            .with_children(|h| fill_heading(h, &t, state.filter, &lib.lib, count));
+    }
+    let title = match state.filter {
+        Filter::OwnedByMe => "Documents".to_string(),
+        f => filter_title(f, &lib.lib),
+    };
     let folder_path: Vec<(FolderId, String)> = folder
         .as_ref()
         .map(|f| {
@@ -1022,78 +921,26 @@ fn rebuild_main(
     let user = user.clone();
 
     commands.entity(panel).with_children(|m| {
-        // Heading, or a breadcrumb inside a folder (P3E.1, TD3.6).
-        m.spawn((
-            Name::new("heading"),
-            Node {
-                height: Val::Px(47.0),
-                flex_shrink: 0.0,
-                padding: UiRect::left(Val::Px(8.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                ..default()
-            },
-        ))
-        .with_children(|h| match &folder {
-            Some(_) => details::breadcrumb(h, &t, state.filter, &title, &folder_path),
-            None => {
-                h.spawn(icon(filter_icon(state.filter), 20.0, t.foreground));
-                h.spawn((
-                    Name::new("heading-title"),
-                    t.text(title.clone(), t.font_md, FontWeight::BOLD, t.foreground),
-                ));
-            }
-        });
-
-        let show_sections = state.filter == Filter::OwnedByMe && folder.is_none();
-        if show_sections {
-            sections(m, &t, &state, recent, folders, &selection);
+        // Inside a folder, a breadcrumb (P3E.1, TD3.6).
+        if folder.is_some() {
+            m.spawn((
+                Name::new("heading"),
+                Node {
+                    height: Val::Px(40.0),
+                    flex_shrink: 0.0,
+                    padding: UiRect::left(Val::Px(4.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+            ))
+            .with_children(|h| details::breadcrumb(h, &t, state.filter, &title, &folder_path));
         }
 
         if let Some(list) = samples_list {
             details::samples_table(m, &t, list, picked);
             return;
         }
-
-        // The toolbar row: list/grid toggles and the Type filter (P3E.1), "+ Add".
-        let toolbar = show_sections || folder.is_some() || matches!(state.filter, Filter::Label(_));
-        m.spawn(Node {
-            height: Val::Px(if toolbar { 40.0 } else { 8.0 }),
-            flex_shrink: 0.0,
-            justify_content: JustifyContent::FlexEnd,
-            align_items: AlignItems::Center,
-            padding: UiRect::right(Val::Px(4.0)),
-            ..default()
-        })
-        .with_children(|a| {
-            if toolbar {
-                details::list_toolbar(a, &t, &state);
-                a.spawn(Node {
-                    flex_grow: 1.0,
-                    ..default()
-                });
-            }
-            if show_sections {
-                let mut dark = cadrs_ui::button::visuals_for(&t, cadrs_ui::ButtonVariant::Ghost);
-                dark.foreground = cadrs_ui::StateColors::all(t.foreground);
-                a.spawn((
-                    Button::new("add")
-                        .label("Add")
-                        .icon("plus-bold")
-                        .icon_size(14.0)
-                        .ghost()
-                        .build(&t),
-                    observe(open_create_menu),
-                    observe(on_create_menu_action),
-                ))
-                .insert(dark)
-                .entry::<Node>()
-                .and_modify(|mut n| {
-                    n.column_gap = Val::Px(4.0);
-                    n.padding = UiRect::horizontal(Val::Px(6.0));
-                });
-            }
-        });
 
         if rows.is_empty() && folder_rows.is_empty() {
             if !state.grid {
@@ -1172,8 +1019,11 @@ fn rebuild_main(
             return;
         }
 
-        // The list.
-        m.spawn(TableHeader::new("col", cols.clone()).height(30.0).build(&t));
+        // The list. The header leaves the scrollbar's room, as the rows do, so the columns line
+        // up.
+        m.spawn(TableHeader::new("col", cols.clone()).height(30.0).build(&t))
+            .entry::<Node>()
+            .and_modify(|mut n| n.padding.right = Val::Px(14.0));
         m.spawn(Node {
             flex_grow: 1.0,
             min_height: Val::Px(0.0),
@@ -1236,6 +1086,7 @@ fn rebuild_main(
                             .text_cell(&t, "me")
                             .text_cell(&t, "me")
                             .selected(selection.contains(&Pick::Folder(f.id)));
+                        let more = format!("folder-more-{i}");
                         list.spawn((
                             row.build(&t),
                             PickRow(Pick::Folder(f.id)),
@@ -1243,6 +1094,7 @@ fn rebuild_main(
                             organize::DropFolder(Some(f.id)),
                             cadrs_ui::DoubleClickable,
                         ))
+                        .with_children(|r| row_more_button(r, &t, more))
                         .entry::<Node>()
                         .and_modify(|mut n| n.height = Val::Px(38.5));
                     }
@@ -1271,6 +1123,10 @@ fn rebuild_main(
                                     ..default()
                                 },
                             ));
+                            // Main goes without saying: only another workspace is tagged.
+                            if workspace == "Main" {
+                                return;
+                            }
                             c.spawn((
                                 Node {
                                     align_items: AlignItems::Center,
@@ -1336,6 +1192,7 @@ fn rebuild_main(
                             PickRow(Pick::Doc(e.id)),
                             cadrs_ui::DoubleClickable,
                         ))
+                        .with_children(|r| row_more_button(r, &t, format!("doc-more-{i}")))
                         .entry::<Node>()
                         .and_modify(|mut n| n.height = Val::Px(38.5));
                     }
@@ -1343,6 +1200,46 @@ fn rebuild_main(
                 .id();
             wrap.spawn(cadrs_ui::vertical_scrollbar(&t, "doc-list-scrollbar", list));
         });
+    });
+}
+
+/// The ⋯ at a row's right end: the row's menu, for whoever doesn't right-click.
+#[derive(Component)]
+struct RowMore;
+
+fn row_more_button(r: &mut ChildSpawnerCommands, t: &Theme, name: String) {
+    r.spawn((
+        IconButton::new(name, "more-horizontal")
+            .icon_size(16.0)
+            .tooltip("More actions")
+            .build(t),
+        RowMore,
+    ))
+    .entry::<Node>()
+    .and_modify(|mut n| {
+        n.position_type = PositionType::Absolute;
+        n.right = Val::Px(8.0);
+        n.top = Val::Percent(50.0);
+        n.margin.top = Val::Px(-13.0);
+        n.width = Val::Px(26.0);
+        n.height = Val::Px(26.0);
+    });
+}
+
+/// The ⋯ opens the row's context menu under it.
+fn on_row_more(
+    a: On<Activate>,
+    q: Query<(&ChildOf, &ComputedNode, &bevy::ui::UiGlobalTransform), With<RowMore>>,
+    mut commands: Commands,
+) {
+    let Ok((parent, node, tf)) = q.get(a.entity) else {
+        return;
+    };
+    let s = node.inverse_scale_factor();
+    let bottom_right = (tf.translation + node.size() / 2.0) * s;
+    commands.trigger(ContextMenuRequested {
+        entity: parent.parent(),
+        position: Vec2::new(bottom_right.x - 190.0, bottom_right.y + 2.0),
     });
 }
 
@@ -1370,265 +1267,6 @@ fn thumbnail_node(c: &mut ChildSpawner, thumb: Option<Handle<Image>>, placeholde
     }
 }
 
-fn sections(
-    m: &mut ChildSpawnerCommands,
-    t: &Theme,
-    state: &LandingState,
-    recent: Vec<(DocumentEntry, Option<Handle<Image>>)>,
-    folders: Vec<(FolderId, String)>,
-    selection: &[Pick],
-) {
-    let tc = t.clone();
-    let selection = selection.to_vec();
-    m.spawn((
-        Name::new("sections"),
-        Node {
-            flex_direction: FlexDirection::Column,
-            flex_shrink: 0.0,
-            row_gap: Val::Px(2.0),
-            display: if state.sections_visible {
-                Display::Flex
-            } else {
-                Display::None
-            },
-            ..default()
-        },
-    ))
-    .with_children(|s| {
-        let t = tc.clone();
-        s.spawn(
-            Collapsible::new(SECTION_NAMES[0], "Getting started with cadrs")
-                .icon("idea")
-                .icon_badge()
-                .highlight(true)
-                .header_height(27.0)
-                .open(state.sections[0])
-                .content(move |c| {
-                    for line in [
-                        "Create ▸ Document… makes a new document with a Part Studio and an Assembly.",
-                        "Double-click a document to open it; click it to see its details; right-click it to rename it or move it to the trash.",
-                        "Click a column header to sort the list.",
-                    ] {
-                        c.spawn(t.text(line, t.font_base, FontWeight::NORMAL, t.muted_foreground));
-                    }
-                })
-                .build(&tc),
-        );
-        let t = tc.clone();
-        s.spawn(
-            Collapsible::new(SECTION_NAMES[1], "Last opened by me")
-                .icon("clock")
-                .header_height(31.0)
-                // P3E.2 (P3E.1 judge): open by default when it has documents.
-                .open(state.sections[1] || (!state.recent_touched && !recent.is_empty()))
-                .content(move |c| {
-                    if recent.is_empty() {
-                        c.spawn(t.text(
-                            "Documents you open appear here.",
-                            t.font_base,
-                            FontWeight::NORMAL,
-                            t.muted_foreground,
-                        ));
-                        return;
-                    }
-                    c.spawn(Node {
-                        column_gap: Val::Px(12.0),
-                        row_gap: Val::Px(8.0),
-                        flex_wrap: FlexWrap::Wrap,
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        for (i, (e, thumb)) in recent.into_iter().enumerate() {
-                            // P3E.2 (P3E.1 judge, `lesson-documents-page.png`): a bordered card,
-                            // the thumbnail left and the name right.
-                            row.spawn((
-                                Name::new(format!("recent-{i}")),
-                                Node {
-                                    flex_direction: FlexDirection::Row,
-                                    align_items: AlignItems::Center,
-                                    column_gap: Val::Px(10.0),
-                                    width: Val::Px(210.0),
-                                    height: Val::Px(50.0),
-                                    padding: UiRect::horizontal(Val::Px(8.0)),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(t.radius_lg)),
-                                    overflow: Overflow::clip(),
-                                    ..default()
-                                },
-                                BorderColor::all(t.border),
-                                BackgroundColor(t.background),
-                            ))
-                            .with_children(|card| {
-                                // P3E.1 (TD3.5): double-click the thumbnail or click the name to
-                                // open the document.
-                                let id = e.id;
-                                let mut thumb_node = card.spawn((
-                                    Name::new(format!("recent-thumb-{i}")),
-                                    Node { flex_shrink: 0.0, ..default() },
-                                    cadrs_ui::DoubleClickable,
-                                    Pickable::default(),
-                                    observe(move |_: On<cadrs_ui::DoubleClick>, mut commands: Commands| {
-                                        commands.queue(move |world: &mut World| open_document(world, id));
-                                    }),
-                                ));
-                                thumb_node.with_children(|n| thumbnail_node(n, thumb, t.subtle_foreground));
-                                card.spawn((
-                                    Name::new(format!("recent-name-{i}")),
-                                    bevy::ui_widgets::Button,
-                                    bevy::picking::hover::Hovered::default(),
-                                    cadrs_ui::Visuals {
-                                        background: cadrs_ui::StateColors::all(Color::NONE),
-                                        border: cadrs_ui::StateColors::all(Color::NONE),
-                                        foreground: cadrs_ui::StateColors::new(t.foreground, t.link, t.link, t.foreground),
-                                        focus_ring: t.focus_ring,
-                                    },
-                                    Node { padding: UiRect::horizontal(Val::Px(2.0)), ..default() },
-                                    observe(move |_: On<Activate>, mut commands: Commands| {
-                                        commands.queue(move |world: &mut World| open_document(world, id));
-                                    }),
-                                ))
-                                .with_child((
-                                    t.text(e.name, t.font_base, FontWeight::NORMAL, t.foreground),
-                                    cadrs_ui::InheritFg,
-                                    Pickable::IGNORE,
-                                ));
-                            });
-                        }
-                    });
-                })
-                .build(&tc),
-        );
-        let t = tc.clone();
-        s.spawn(
-            Collapsible::new(SECTION_NAMES[2], "Folders")
-                .icon("folder")
-                .header_height(31.0)
-                .open(state.sections[2])
-                .content(move |c| {
-                    if folders.is_empty() {
-                        c.spawn(t.text(
-                            "No folders yet. Choose Create ▸ Folder… to add one.",
-                            t.font_base,
-                            FontWeight::NORMAL,
-                            t.muted_foreground,
-                        ));
-                        return;
-                    }
-                    c.spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        flex_wrap: FlexWrap::Wrap,
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        for (i, (id, name)) in folders.into_iter().enumerate() {
-                            // P3E.1 (TD3.6): a click selects the folder, a double click opens it.
-                            row.spawn((
-                                Name::new(format!("folder-{i}")),
-                                PickRow(Pick::Folder(id)),
-                                organize::FolderRow(id),
-                                organize::DropFolder(Some(id)),
-                                ContextMenuTarget,
-                                cadrs_ui::DoubleClickable,
-                                bevy::ui_widgets::Button,
-                                bevy::picking::hover::Hovered::default(),
-                                cadrs_ui::Visuals {
-                                    background: cadrs_ui::StateColors::new(Color::NONE, t.list_hover, t.list_active, Color::NONE)
-                                        .with_selected(t.list_selected),
-                                    border: cadrs_ui::StateColors::all(t.border).with_selected(t.primary),
-                                    foreground: cadrs_ui::StateColors::all(t.foreground),
-                                    focus_ring: t.focus_ring,
-                                },
-                                cadrs_ui::style::InitState { disabled: false, selected: selection.contains(&Pick::Folder(id)), force: None },
-                                Node {
-                                    height: Val::Px(32.0),
-                                    padding: UiRect::horizontal(Val::Px(10.0)),
-                                    align_items: AlignItems::Center,
-                                    column_gap: Val::Px(8.0),
-                                    min_width: Val::Px(160.0),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(t.radius_lg)),
-                                    ..default()
-                                },
-                                BorderColor::all(t.border),
-                            ))
-                            .with_children(|f| {
-                                f.spawn((icon("folder", 18.0, t.foreground), Pickable::IGNORE));
-                                f.spawn((t.text(name, t.font_base, FontWeight::MEDIUM, t.foreground), Pickable::IGNORE));
-                            });
-                        }
-                    });
-                })
-                .build(&tc),
-        );
-    });
-    // Divider with the round show/hide toggle.
-    m.spawn((
-        Name::new("sections-divider"),
-        Node {
-            height: Val::Px(20.0),
-            flex_shrink: 0.0,
-            margin: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(4.0), Val::ZERO),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-    ))
-    .with_children(|d| {
-        d.spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(2.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgb_u8(0xd6, 0xe0, 0xe6)),
-        ));
-        d.spawn(
-            IconButton::new(
-                "sections-toggle",
-                if state.sections_visible {
-                    "chevron-down"
-                } else {
-                    "chevron-up"
-                },
-            )
-            .small()
-            .tooltip(if state.sections_visible {
-                "Hide sections"
-            } else {
-                "Show sections"
-            })
-            .build(t),
-        )
-        .insert((
-            Node {
-                width: Val::Px(20.0),
-                height: Val::Px(20.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::MAX,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            cadrs_ui::Visuals {
-                background: cadrs_ui::StateColors::new(
-                    t.background,
-                    t.ghost_hover,
-                    t.ghost_active,
-                    t.background,
-                ),
-                border: cadrs_ui::StateColors::all(t.border),
-                foreground: cadrs_ui::StateColors::all(t.foreground),
-                focus_ring: t.focus_ring,
-            },
-            observe(|_: On<Activate>, mut state: ResMut<LandingState>| {
-                state.sections_visible = !state.sections_visible;
-            }),
-        ));
-    });
-}
-
 fn empty_state(
     m: &mut ChildSpawnerCommands,
     t: &Theme,
@@ -1654,57 +1292,46 @@ fn empty_state(
         e.spawn(t.text(title, t.font_md, FontWeight::SEMIBOLD, t.foreground));
         e.spawn(t.text(text, t.font_base, FontWeight::NORMAL, t.muted_foreground));
         if create {
-            e.spawn((
-                Button::new("empty-create")
-                    .label("Create document")
-                    .primary()
-                    .build(t),
-                observe(
-                    |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
-                        open_new_document_dialog(&mut commands, &theme);
-                    },
-                ),
-            ))
-            .entry::<Node>()
-            .and_modify(|mut n| n.margin = UiRect::top(Val::Px(8.0)));
+            e.spawn(Node {
+                column_gap: Val::Px(8.0),
+                margin: UiRect::top(Val::Px(8.0)),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn((
+                    Button::new("empty-create")
+                        .label("New document")
+                        .icon("file-new")
+                        .primary()
+                        .build(t),
+                    observe(
+                        |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                            open_new_document_dialog(&mut commands, &theme);
+                        },
+                    ),
+                ))
+                .entry::<Node>()
+                .and_modify(|mut n| page_control(&mut n));
+                r.spawn((
+                    Button::new("empty-samples")
+                        .label("Open a sample")
+                        .icon("idea")
+                        .outline()
+                        .build(t),
+                    observe(|_: On<Activate>, mut commands: Commands| {
+                        commands.queue(|w: &mut World| show_filter(w, Filter::Explore));
+                    }),
+                ))
+                .insert(cadrs_ui::glass::control(t))
+                .entry::<Node>()
+                .and_modify(|mut n| page_control(&mut n));
+            });
         }
     });
 }
 
 // ---------------------------------------------------------------------------------------------
 // Sync systems
-
-fn sync_filter_items(
-    state: Res<LandingState>,
-    q: Query<(Entity, &FilterItem, Has<Selected>, &Children)>,
-    mut q_text: Query<&mut TextFont, With<Text>>,
-    mut commands: Commands,
-) {
-    if !state.is_changed() {
-        return;
-    }
-    for (e, f, selected, children) in &q {
-        let want = f.0 == state.filter;
-        let weight = if want {
-            FontWeight::BOLD
-        } else {
-            FontWeight::MEDIUM
-        };
-        for c in children.iter() {
-            if let Ok(mut font) = q_text.get_mut(c)
-                && font.weight != weight
-            {
-                font.weight = weight;
-            }
-        }
-        // `try_`: the labels' items may be rebuilt in the same frame (P3E.1).
-        if want && !selected {
-            commands.entity(e).try_insert(Selected);
-        } else if !want && selected {
-            commands.entity(e).try_remove::<Selected>();
-        }
-    }
-}
 
 #[allow(clippy::type_complexity)]
 fn sync_search(
@@ -1721,62 +1348,6 @@ fn sync_search(
     }
 }
 
-fn sync_search_placeholder(
-    state: Res<LandingState>,
-    lib: Res<DocLibrary>,
-    mut q: Query<(&Name, &mut Text), With<TextInputPlaceholder>>,
-) {
-    if !state.is_changed() && !lib.is_changed() {
-        return;
-    }
-    for (name, mut text) in &mut q {
-        if name.as_str() == "search-placeholder" {
-            let want = format!("Search in {}", filter_title(state.filter, &lib.lib));
-            if text.0 != want {
-                text.0 = want;
-            }
-        }
-    }
-}
-
-fn sync_disclosures(
-    state: Res<LandingState>,
-    mut q_children: Query<(&DisclosureChildren, &mut Node)>,
-    q_items: Query<(&Disclosure, &Children)>,
-    mut q_icons: Query<&mut Icon>,
-) {
-    if !state.is_changed() {
-        return;
-    }
-    let open = |d: Disclosure| match d {
-        Disclosure::Teams => state.teams_open,
-        Disclosure::Labels => state.labels_open,
-    };
-    for (c, mut node) in &mut q_children {
-        node.display = if open(c.0) {
-            Display::Flex
-        } else {
-            Display::None
-        };
-    }
-    for (d, children) in &q_items {
-        for child in children.iter() {
-            if let Ok(mut i) = q_icons.get_mut(child)
-                && i.name.starts_with("chevron-")
-            {
-                let want = if open(*d) {
-                    "chevron-down"
-                } else {
-                    "chevron-right"
-                };
-                if i.name != want {
-                    i.name = want.into();
-                }
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Interaction
 
@@ -1786,7 +1357,7 @@ fn landing_shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
     q_fields: Query<(), With<cadrs_ui::KeyboardField>>,
-    q_dialogs: Query<(), With<LandingDialog>>,
+    q_dialogs: Query<(), With<cadrs_ui::DialogRoot>>,
     mut lib: ResMut<DocLibrary>,
     store: Res<DocumentStore>,
     details_state: Res<LandingDetails>,
@@ -1838,29 +1409,6 @@ fn landing_shortcuts(
     }
 }
 
-/// Clicking a sidebar item.
-fn on_filter_activate(
-    ev: On<Activate>,
-    q_filter: Query<&FilterItem>,
-    q_disclosure: Query<&Disclosure>,
-    mut state: ResMut<LandingState>,
-) {
-    if let Ok(f) = q_filter.get(ev.entity) {
-        if state.filter != f.0 {
-            state.filter = f.0;
-        }
-        // A filter shows its top level (P3E.1: out of an open folder).
-        if state.folder.is_some() {
-            state.folder = None;
-        }
-    } else if let Ok(d) = q_disclosure.get(ev.entity) {
-        match d {
-            Disclosure::Teams => state.teams_open = !state.teams_open,
-            Disclosure::Labels => state.labels_open = !state.labels_open,
-        }
-    }
-}
-
 fn on_sort_change(ev: On<TableSortChange>, mut state: ResMut<LandingState>) {
     // Only the first hop (the header cell itself).
     if ev.entity != ev.original_event_target() {
@@ -1881,30 +1429,12 @@ fn on_sort_change(ev: On<TableSortChange>, mut state: ResMut<LandingState>) {
     };
 }
 
-fn on_section_toggled(
-    ev: On<CollapsibleToggled>,
-    q: Query<&Name>,
-    mut state: ResMut<LandingState>,
-) {
-    let Ok(name) = q.get(ev.entity) else {
-        return;
-    };
-    if let Some(i) = SECTION_NAMES.iter().position(|n| *n == name.as_str()) {
-        // The collapsible already shows the new state; no rebuild needed.
-        let state = state.bypass_change_detection();
-        state.sections[i] = ev.open;
-        if i == 1 {
-            state.recent_touched = true;
-        }
-    }
-}
-
 fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
     // Dark (#333) icons, as in `screens/02`.
     Menu::new(name)
         .strong_icons()
-        .item(MenuItem::new("new-document", "Document…").icon("file-new"))
-        .item(MenuItem::new("new-folder", "Folder…").icon("folder-new"))
+        .item(MenuItem::new("new-document", "New document…").icon("file-new"))
+        .item(MenuItem::new("new-folder", "New folder…").icon("folder-new"))
         .separator()
         .item(MenuItem::new("import-files", "Import files…").icon("file-import"))
         .item(
@@ -1922,7 +1452,8 @@ fn create_menu(t: &Theme, name: &'static str) -> impl Bundle {
                         .into(),
                 ]),
         )
-        .item(MenuItem::new("new-label", "Label…").icon("tag-new"))
+        .item(MenuItem::new("new-label", "New label…").icon("tag-new"))
+        .item(MenuItem::new("open-samples", "From a sample…").icon("idea"))
         .separator()
         .item(MenuItem::new("join-shared", "Join shared document…").icon("share"))
         .build(t)
@@ -1947,9 +1478,104 @@ fn on_create_menu_action(ev: On<MenuAction>, mut commands: Commands, theme: Res<
             });
         }
         "new-label" => details::open_new_label_dialog(&mut commands, &theme, None),
+        "open-samples" => commands.queue(|w: &mut World| show_filter(w, Filter::Explore)),
         "join-shared" => open_join_dialog(&mut commands, &theme),
         _ => {}
     }
+}
+
+/// Shows `filter`'s list (the Trash, a label, the samples) from its top level.
+pub(crate) fn show_filter(world: &mut World, filter: Filter) {
+    let mut state = world.resource_mut::<LandingState>();
+    if state.filter != filter {
+        state.filter = filter;
+    }
+    if state.folder.is_some() {
+        state.folder = None;
+    }
+}
+
+/// Opens the folder documents are kept in, in the file manager.
+pub(crate) fn open_documents_folder(world: &mut World) {
+    let dir = world.resource::<DocumentStore>().0.root().to_path_buf();
+    let _ = std::fs::create_dir_all(&dir);
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(opener).arg(&dir).spawn() {
+        warn!("cannot open {}: {e}", dir.display());
+    }
+}
+
+/// The documents page's part of the app menu: the documents folder, the Trash and the labels
+/// (each shows its documents), with the one shown checked.
+pub(crate) fn app_entries(lib: &Library, filter: Filter) -> Vec<MenuEntry> {
+    let mut labels: Vec<MenuEntry> = lib
+        .labels_by_name()
+        .iter()
+        .map(|l| {
+            MenuItem::new(
+                format!("app-label-{}", details::slug(&l.name)),
+                l.name.clone(),
+            )
+            .dot(Color::srgb_u8(l.colour[0], l.colour[1], l.colour[2]))
+            .checked(filter == Filter::Label(l.id))
+            .into()
+        })
+        .collect();
+    if !labels.is_empty() {
+        labels.push(MenuEntry::Separator);
+    }
+    labels.push(
+        MenuItem::new("app-new-label", "New label…")
+            .icon("tag-new")
+            .into(),
+    );
+    vec![
+        MenuItem::new("app-open-folder", "Open documents folder")
+            .icon("folder")
+            .into(),
+        MenuItem::new("app-labels", "Labels")
+            .icon("tag")
+            .submenu(labels)
+            .into(),
+        MenuItem::new("app-trash", "Trash")
+            .icon("delete")
+            .checked(filter == Filter::Trash)
+            .into(),
+        MenuEntry::Separator,
+    ]
+}
+
+/// Runs an app menu item of [`app_entries`]; false for one of the others.
+pub(crate) fn app_action(world: &mut World, item: &str) -> bool {
+    match item {
+        "app-open-folder" => open_documents_folder(world),
+        "app-trash" => show_filter(world, Filter::Trash),
+        "app-new-label" => {
+            let theme = world.resource::<Theme>().clone();
+            let mut commands = world.commands();
+            details::open_new_label_dialog(&mut commands, &theme, None);
+            world.flush();
+        }
+        m if m.starts_with("app-label-") => {
+            let slug = m.trim_start_matches("app-label-");
+            let id = world
+                .resource::<DocLibrary>()
+                .lib
+                .labels
+                .iter()
+                .find(|l| details::slug(&l.name) == slug)
+                .map(|l| l.id);
+            if let Some(id) = id {
+                show_filter(world, Filter::Label(id));
+            }
+        }
+        _ => return false,
+    }
+    true
 }
 
 /// Opens a stored document: records the open time and switches to the document screen.
@@ -2046,6 +1672,8 @@ fn on_row_context_menu(
         Menu::new("doc-context-menu")
             .item(MenuItem::new("ctx-restore", "Restore").icon("restore"))
             .item(MenuItem::new("ctx-delete-forever", "Delete permanently…").icon("delete"))
+            .separator()
+            .item(MenuItem::new("ctx-properties", "Properties…").icon("info"))
             .min_width(190.0)
     } else {
         Menu::new("doc-context-menu")
@@ -2099,7 +1727,10 @@ fn on_row_context_menu(
                     .icon("tag")
                     .submenu(entries)
             })
-            .item(MenuItem::new("ctx-properties", "Details…").icon("list-details"))
+            .separator()
+            .item(MenuItem::new("ctx-properties", "Properties…").icon("info"))
+            .item(MenuItem::new("ctx-history", "History…").icon("versions"))
+            .item(MenuItem::new("ctx-used-in", "Used in…").icon("link"))
             .item(
                 MenuItem::new("ctx-transfer", "Transfer ownership…")
                     .icon("share")
@@ -2155,8 +1786,14 @@ fn on_context_action(
             });
         }
         "ctx-delete-forever" => open_purge_dialog(&mut commands, &theme, &entry),
-        "ctx-properties" => {
-            commands.queue(move |world: &mut World| details::select(world, Pick::Doc(id), true))
+        "ctx-properties" | "ctx-history" | "ctx-used-in" => {
+            let tab = match ev.item.as_str() {
+                "ctx-history" => DetailsTab::Versions,
+                "ctx-used-in" => DetailsTab::WhereUsed,
+                _ => DetailsTab::Info,
+            };
+            commands
+                .queue(move |world: &mut World| details::open_details(world, Pick::Doc(id), tab))
         }
         "ctx-new-label" => details::open_new_label_dialog(&mut commands, &theme, Some(id)),
         m if m.starts_with("ctx-label-") => {
@@ -2270,10 +1907,11 @@ fn confirm_dialog(world: &mut World) {
                     parent,
                 },
             );
-            // Show the new folder.
+            // Show the new folder: it is listed under Owned by me and Created by me.
             let mut state = world.resource_mut::<LandingState>();
-            state.sections[2] = true;
-            state.sections_visible = true;
+            if !matches!(state.filter, Filter::OwnedByMe | Filter::CreatedByMe) {
+                state.filter = Filter::OwnedByMe;
+            }
         }
         LandingDialog::Purge(id) => {
             close_dialogs(world);
