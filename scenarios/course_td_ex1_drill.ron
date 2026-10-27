@@ -411,8 +411,9 @@ Scenario(
         Click(ui("mass-dialog-cancel")),
         Key("Space"),
         // Main still has the 2 mm gasket.
-        Click(ui("branch-label")),
-        WaitFor("workspace-menu"),
+        Click(ui("app-menu")),
+        Hover(ui("document-menu-workspaces")),
+        WaitFor("document-menu-workspaces-submenu"),
         Screenshot("35-workspace-menu"),
         Click(ui("workspace-item-0")),
         ExpectText("branch-label", "Main"),

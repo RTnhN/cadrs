@@ -29,7 +29,8 @@ Scenario(
         WaitFor("document-shell"),
         Custom("linked-block"),
         Custom("linked-block consumer 1"),
-        Click(ui("back-to-documents")),
+        Click(ui("app-menu")),
+        Click(ui("app-documents")),
         WaitFor("doc-row-0"),
         // Block source is filed in "Linked parts" (P3E.2: listed inside its folder, not at the
         // root): the search finds it, with Block consumer and Block copy.
@@ -73,7 +74,8 @@ Scenario(
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("08-double-click-opens"),
-        Click(ui("back-to-documents")),
+        Click(ui("app-menu")),
+        Click(ui("app-documents")),
         WaitFor("doc-row-0"),
         Click(ui("search")),
         Key("Ctrl+A"),

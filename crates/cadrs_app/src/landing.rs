@@ -1,8 +1,9 @@
 //! The documents page, on the glass wallpaper ([`cadrs_ui::glass`]).
 //!
-//! - Top bar: the logo; the version, notifications ([`crate::notifications`]), the color scheme
-//!   and the settings menu, whose first items here are Open documents folder, Labels ▸ (each
-//!   shows its documents) and Trash ([`account_entries`]).
+//! - Top bar: the app menu (the cadrs mark, [`crate::app_menu`]), whose first items here are
+//!   Open documents folder, Labels ▸ (each shows its documents) and Trash ([`app_entries`]);
+//!   the version, notifications ([`crate::notifications`]), the color scheme and the account
+//!   ([`crate::identity`]).
 //! - A command strip along the top, one height and small capitals: **New document** (with ▾
 //!   for Join shared document…, From a sample…, …), Folder, the search box; at the right
 //!   Import, Label, the list and grid toggles and the Type filter.
@@ -92,6 +93,7 @@ impl Plugin for LandingPlugin {
             .add_observer(on_sort_change)
             .add_observer(on_text_submit)
             .add_observer(on_row_context_menu)
+            .add_observer(on_row_more)
             .add_observer(on_context_action);
         organize::plugin(app);
     }
@@ -334,7 +336,7 @@ fn thumbnail_image(images: &mut Assets<Image>, img: image::RgbaImage) -> Option<
 // ---------------------------------------------------------------------------------------------
 // Layout
 
-fn spawn_landing(mut commands: Commands, theme: Res<Theme>) {
+fn spawn_landing(mut commands: Commands, theme: Res<Theme>, profile: Res<UserProfile>) {
     let t = theme.clone();
     commands
         .spawn((
@@ -351,7 +353,7 @@ fn spawn_landing(mut commands: Commands, theme: Res<Theme>) {
             cadrs_ui::glass::wallpaper(),
         ))
         .with_children(|root| {
-            top_bar(root, &t);
+            top_bar(root, &t, &profile);
             // The page: a column, centered in a wide window.
             root.spawn((
                 Name::new("landing-page"),
@@ -385,50 +387,31 @@ fn spawn_landing(mut commands: Commands, theme: Res<Theme>) {
         });
 }
 
-/// The bar across the top: the logo, then the version, notifications, the color scheme and
-/// settings.
-fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme) {
+/// The bar across the top: the app menu, then the version, notifications, the color scheme
+/// and the account.
+fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme, profile: &UserProfile) {
+    // Floating, as a document's top bar is.
     p.spawn((
         Name::new("top-bar"),
         Node {
-            height: Val::Px(48.0),
+            height: Val::Px(44.0),
             flex_shrink: 0.0,
-            padding: UiRect::new(Val::Px(16.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
+            margin: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(8.0), Val::ZERO),
+            padding: UiRect::horizontal(Val::Px(6.0)),
             align_items: AlignItems::Center,
-            border: UiRect::bottom(Val::Px(1.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        cadrs_ui::glass::Glass::bar(),
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|bar| {
-        bar.spawn((
-            Name::new("logo"),
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(9.0),
-                ..default()
-            },
-        ))
-        .with_children(|logo| {
-            logo.spawn((
-                Node {
-                    width: Val::Px(26.0),
-                    height: Val::Px(26.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(t.radius)),
-                    ..default()
-                },
-                BackgroundColor(t.primary),
-            ))
-            .with_child(icon("part", 18.0, t.primary_foreground));
-            logo.spawn(t.text("cadrs", t.font_xl, FontWeight::SEMIBOLD, t.foreground));
-        });
+        crate::app_menu::spawn_app_button(bar, t);
         bar.spawn(Node {
             flex_grow: 1.0,
             ..default()
         });
-        // Right side: the version, notifications, the color scheme and settings.
+        // Right side: the version, notifications, the color scheme and the account.
         bar.spawn(Node {
             align_items: AlignItems::Center,
             column_gap: Val::Px(6.0),
@@ -443,7 +426,7 @@ fn top_bar(p: &mut ChildSpawnerCommands, t: &Theme) {
                 cadrs_ui::scheme_toggle(t),
                 cadrs_ui::glass::GlassFrame::bar(),
             ));
-            crate::preferences_ui::spawn_settings_button(r, t);
+            crate::identity::spawn_identity_button(r, t, profile);
         });
     });
 }
@@ -592,7 +575,7 @@ fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
                 .width(Val::Px(260.0))
                 .padding(12.0)
                 .radius(cadrs_ui::glass::CONTROL_RADIUS)
-                .background(t.glass_panel)
+                .background(t.control)
                 .border(Color::NONE)
                 .cleanable()
                 .build(t),
@@ -1111,6 +1094,7 @@ fn rebuild_main(
                             .text_cell(&t, "me")
                             .text_cell(&t, "me")
                             .selected(selection.contains(&Pick::Folder(f.id)));
+                        let more = format!("folder-more-{i}");
                         list.spawn((
                             row.build(&t),
                             PickRow(Pick::Folder(f.id)),
@@ -1118,6 +1102,7 @@ fn rebuild_main(
                             organize::DropFolder(Some(f.id)),
                             cadrs_ui::DoubleClickable,
                         ))
+                        .with_children(|r| row_more_button(r, &t, more))
                         .entry::<Node>()
                         .and_modify(|mut n| n.height = Val::Px(38.5));
                     }
@@ -1215,6 +1200,7 @@ fn rebuild_main(
                             PickRow(Pick::Doc(e.id)),
                             cadrs_ui::DoubleClickable,
                         ))
+                        .with_children(|r| row_more_button(r, &t, format!("doc-more-{i}")))
                         .entry::<Node>()
                         .and_modify(|mut n| n.height = Val::Px(38.5));
                     }
@@ -1222,6 +1208,46 @@ fn rebuild_main(
                 .id();
             wrap.spawn(cadrs_ui::vertical_scrollbar(&t, "doc-list-scrollbar", list));
         });
+    });
+}
+
+/// The ⋯ at a row's right end: the row's menu, for whoever doesn't right-click.
+#[derive(Component)]
+struct RowMore;
+
+fn row_more_button(r: &mut ChildSpawnerCommands, t: &Theme, name: String) {
+    r.spawn((
+        IconButton::new(name, "more-horizontal")
+            .icon_size(16.0)
+            .tooltip("More actions")
+            .build(t),
+        RowMore,
+    ))
+    .entry::<Node>()
+    .and_modify(|mut n| {
+        n.position_type = PositionType::Absolute;
+        n.right = Val::Px(8.0);
+        n.top = Val::Percent(50.0);
+        n.margin.top = Val::Px(-13.0);
+        n.width = Val::Px(26.0);
+        n.height = Val::Px(26.0);
+    });
+}
+
+/// The ⋯ opens the row's context menu under it.
+fn on_row_more(
+    a: On<Activate>,
+    q: Query<(&ChildOf, &ComputedNode, &bevy::ui::UiGlobalTransform), With<RowMore>>,
+    mut commands: Commands,
+) {
+    let Ok((parent, node, tf)) = q.get(a.entity) else {
+        return;
+    };
+    let s = node.inverse_scale_factor();
+    let bottom_right = (tf.translation + node.size() / 2.0) * s;
+    commands.trigger(ContextMenuRequested {
+        entity: parent.parent(),
+        position: Vec2::new(bottom_right.x - 190.0, bottom_right.y + 2.0),
     });
 }
 
@@ -1493,15 +1519,15 @@ pub(crate) fn open_documents_folder(world: &mut World) {
     }
 }
 
-/// The documents page's part of the settings menu: the documents folder, the Trash and the
-/// labels (each shows its documents), with the one shown checked.
-pub(crate) fn account_entries(lib: &Library, filter: Filter) -> Vec<MenuEntry> {
+/// The documents page's part of the app menu: the documents folder, the Trash and the labels
+/// (each shows its documents), with the one shown checked.
+pub(crate) fn app_entries(lib: &Library, filter: Filter) -> Vec<MenuEntry> {
     let mut labels: Vec<MenuEntry> = lib
         .labels_by_name()
         .iter()
         .map(|l| {
             MenuItem::new(
-                format!("account-label-{}", details::slug(&l.name)),
+                format!("app-label-{}", details::slug(&l.name)),
                 l.name.clone(),
             )
             .dot(Color::srgb_u8(l.colour[0], l.colour[1], l.colour[2]))
@@ -1513,19 +1539,19 @@ pub(crate) fn account_entries(lib: &Library, filter: Filter) -> Vec<MenuEntry> {
         labels.push(MenuEntry::Separator);
     }
     labels.push(
-        MenuItem::new("account-new-label", "New label…")
+        MenuItem::new("app-new-label", "New label…")
             .icon("tag-new")
             .into(),
     );
     vec![
-        MenuItem::new("account-open-folder", "Open documents folder")
+        MenuItem::new("app-open-folder", "Open documents folder")
             .icon("folder")
             .into(),
-        MenuItem::new("account-labels", "Labels")
+        MenuItem::new("app-labels", "Labels")
             .icon("tag")
             .submenu(labels)
             .into(),
-        MenuItem::new("account-trash", "Trash")
+        MenuItem::new("app-trash", "Trash")
             .icon("delete")
             .checked(filter == Filter::Trash)
             .into(),
@@ -1533,19 +1559,19 @@ pub(crate) fn account_entries(lib: &Library, filter: Filter) -> Vec<MenuEntry> {
     ]
 }
 
-/// Runs a settings menu item of [`account_entries`]; false for one of the others.
-pub(crate) fn account_action(world: &mut World, item: &str) -> bool {
+/// Runs an app menu item of [`app_entries`]; false for one of the others.
+pub(crate) fn app_action(world: &mut World, item: &str) -> bool {
     match item {
-        "account-open-folder" => open_documents_folder(world),
-        "account-trash" => show_filter(world, Filter::Trash),
-        "account-new-label" => {
+        "app-open-folder" => open_documents_folder(world),
+        "app-trash" => show_filter(world, Filter::Trash),
+        "app-new-label" => {
             let theme = world.resource::<Theme>().clone();
             let mut commands = world.commands();
             details::open_new_label_dialog(&mut commands, &theme, None);
             world.flush();
         }
-        m if m.starts_with("account-label-") => {
-            let slug = m.trim_start_matches("account-label-");
+        m if m.starts_with("app-label-") => {
+            let slug = m.trim_start_matches("app-label-");
             let id = world
                 .resource::<DocLibrary>()
                 .lib

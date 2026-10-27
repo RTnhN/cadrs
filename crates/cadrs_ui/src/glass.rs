@@ -136,7 +136,7 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
     // Raven: panels and inputs take the panel color, controls their own; the rim catches
     // more light on a pale surface.
     let alpha = match (kind, dark) {
-        (GlassKind::Panel, false) => 0.72,
+        (GlassKind::Panel, false) => 0.8,
         // Dark glass over the grid wallpaper: nearly solid, so the crosses don't show through
         // the rows.
         (GlassKind::Panel, true) => 0.86,
@@ -146,13 +146,15 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
         (GlassKind::Control, true) => 0.55,
         (GlassKind::Input, _) => 0.6,
     };
+    // A shade lighter than the page and the 3D view behind, so a panel floats over them (in
+    // light, a cool frost over the white).
     let base = if dark {
-        Color::srgb_u8(0x1d, 0x1c, 0x19)
+        Color::srgb_u8(0x2a, 0x29, 0x25)
     } else {
-        Color::srgb_u8(0xfb, 0xfe, 0xfe)
+        Color::srgb_u8(0xf4, 0xf8, 0xf9)
     };
-    // Raven's 0.55 in dark reads as an outline on our charcoal: dimmer.
-    let mut rim = if dark { 0.32 } else { 0.85 };
+    // Raven's 0.55 in dark reads as an outline on our charcoal: a faint catch of light.
+    let mut rim = if dark { 0.2 } else { 0.85 };
     let mut tint = base.with_alpha(alpha);
     match material {
         GlassMaterial::Clear => {
@@ -222,7 +224,13 @@ fn sync_glass(
             ]))
         };
         let mut ec = commands.entity(e);
-        ec.try_insert(border);
+        // Controls and fields have no outline: their fill is enough.
+        if matches!(g.kind, GlassKind::Control | GlassKind::Input) {
+            ec.try_remove::<BorderGradient>()
+                .try_insert(BorderColor::all(Color::NONE));
+        } else {
+            ec.try_insert(border);
+        }
         if g.fill {
             // A slab is a little brighter at the top than at the bottom.
             let top = mix(tint, Color::WHITE.with_alpha(tint.alpha()), rim * 0.08);
@@ -252,17 +260,6 @@ pub fn panel_shadow(t: &Theme) -> BoxShadow {
             blur_radius: Val::Px(3.0),
         },
     ])
-}
-
-/// The small shadow under a glass control.
-pub fn control_shadow(t: &Theme) -> BoxShadow {
-    BoxShadow::new(
-        t.glass_shadow.with_alpha(t.glass_shadow.alpha() * 0.7),
-        Val::ZERO,
-        Val::Px(2.0),
-        Val::ZERO,
-        Val::Px(6.0),
-    )
 }
 
 /// A glass panel: its tint, rim and shadow (its node needs a border: [`panel_node`]).
@@ -303,17 +300,12 @@ pub const BAR_CONTROL_HEIGHT: f32 = 32.0;
 /// Their corner radius.
 pub const BAR_CONTROL_RADIUS: f32 = 5.0;
 
-/// A secondary glass control's colors: the glass fill, lighter when hovered, the accent's
-/// label when selected; its rim is a [`Glass::control_rim`].
+/// A secondary control's colors: a soft fill with no outline, deeper when hovered, the
+/// accent's label when selected.
 pub fn control_visuals(t: &Theme) -> crate::Visuals {
     crate::Visuals {
-        background: crate::StateColors::new(
-            t.glass_panel,
-            t.list_hover,
-            t.list_active,
-            t.glass_panel,
-        )
-        .with_selected(t.list_selected),
+        background: crate::StateColors::new(t.control, t.control_hover, t.list_active, t.control)
+            .with_selected(t.list_selected),
         border: crate::StateColors::all(Color::NONE),
         foreground: crate::StateColors::new(
             t.foreground,
@@ -326,9 +318,9 @@ pub fn control_visuals(t: &Theme) -> crate::Visuals {
     }
 }
 
-/// Gives a button the secondary glass control's look and size: its colors, rim and shape.
+/// Gives a button the secondary control's look: its colors, and no outline.
 pub fn control(t: &Theme) -> impl Bundle {
-    (control_visuals(t), Glass::control_rim(), control_shadow(t))
+    (control_visuals(t), Glass::control_rim())
 }
 
 /// A control node's shape: the page's (or a top bar's) height and radius, with a 1 px rim.
@@ -383,7 +375,7 @@ fn shape_frames(
         }
         commands.entity(e).try_insert((
             Glass::control_rim(),
-            BackgroundColor(theme.glass_panel),
+            BackgroundColor(theme.control),
             BorderColor::all(Color::NONE),
         ));
         let inner = f.height - 2.0 * FRAME_INSET;

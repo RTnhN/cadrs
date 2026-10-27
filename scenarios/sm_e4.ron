@@ -46,7 +46,7 @@ Scenario(
         Click(ui("sketch")),
         WaitFor("sketch-dialog"),
         Custom("view 65 20 35 -75 30 0.06"),
-        Click(xyz(35, -40, 48)),
+        Click(xyz(35, -55, 40)),
         Key("U"),
         Click(xyz(0, -75, 24)),
         Click(xyz(0, -75, 36)),

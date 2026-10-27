@@ -30,8 +30,8 @@ Scenario(
     steps: [
         WaitFor("document-shell"),
         // Step 1: workspace units, names, tabs.
-        Click(ui("document-menu")),
-        WaitFor("document-menu-popup"),
+        Click(ui("app-menu")),
+        WaitFor("app-menu-popup"),
         Hover(ui("document-menu-units")),
         Wait(3),
         Screenshot("01-document-menu-workspace-units"),

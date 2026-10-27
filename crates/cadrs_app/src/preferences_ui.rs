@@ -1,4 +1,4 @@
-//! The local preferences (P3E.3, TD6.2, D2.2): the account menu's **Preferences…** opens a
+//! The local preferences (P3E.3, TD6.2, D2.2): the app menu's **Preferences…** opens a
 //! dialog with the **3D view mouse controls** preset (Onshape, SolidWorks, Inventor, Creo) and
 //! what its gestures do (Rotate, Rotate without roll, Pan, Zoom). OK keeps the choice in the store root's
 //! `preferences.ron` ([`cadrs_core::preferences`]); it is this machine's, not a document's, so
@@ -24,9 +24,8 @@ use cadrs_core::preferences::{
 };
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    Button, DialogClose, MenuAction, MenuItem, NumberField, NumberFieldCommit, NumberFieldEdit,
-    NumberFieldState, Select, SelectChange, SelectState, SelectableText, Switch, SwitchState,
-    form_row, open_menu,
+    Button, DialogClose, NumberField, NumberFieldCommit, NumberFieldEdit, NumberFieldState, Select,
+    SelectChange, SelectState, SelectableText, Switch, SwitchState, form_row,
 };
 
 use crate::{AppState, DocumentStore};
@@ -38,8 +37,6 @@ impl Plugin for PreferencesPlugin {
         app.init_resource::<LocalPreferences>()
             .add_systems(Startup, load_preferences)
             .add_systems(Update, (apply_ui_scale, save_color_scheme))
-            .add_observer(on_account)
-            .add_observer(on_account_action)
             .add_observer(on_preset_change)
             .add_observer(on_rotation_snap_commit);
     }
@@ -190,92 +187,7 @@ fn save(world: &mut World) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The account menu and the dialog
-
-/// The settings button of a top bar (the documents page's and a document's), framed like the
-/// color scheme toggle beside it ([`cadrs_ui::segmented::frame`]). No profile name or avatar: there are no accounts yet
-/// (issue #13).
-pub fn spawn_settings_button(r: &mut ChildSpawnerCommands, t: &Theme) {
-    r.spawn((
-        Name::new("settings"),
-        cadrs_ui::segmented::frame(t),
-        cadrs_ui::glass::GlassFrame::bar(),
-    ))
-    .with_children(|b| {
-        b.spawn(
-            Button::new("account")
-                .icon("settings")
-                .icon_size(14.0)
-                .small()
-                .ghost()
-                .dropdown_caret()
-                .tooltip("Settings")
-                .build(t),
-        )
-        .entry::<Node>()
-        .and_modify(|mut n| {
-            n.height = Val::Px(22.0);
-            n.border = UiRect::ZERO;
-            n.padding = UiRect::horizontal(Val::Px(6.0));
-            n.column_gap = Val::Px(4.0);
-        });
-    });
-}
-
-/// The account button (top right, on the documents page and in a document): its menu.
-#[allow(clippy::too_many_arguments)]
-fn on_account(
-    a: On<Activate>,
-    q: Query<&Name>,
-    theme: Res<Theme>,
-    app_state: Res<State<crate::AppState>>,
-    lib: Res<crate::landing::DocLibrary>,
-    landing: Res<crate::landing::LandingState>,
-    mut commands: Commands,
-) {
-    if q.get(a.entity).map(|n| n.as_str()) != Ok("account") {
-        return;
-    }
-    // On the documents page: its folder, the Trash and the labels first.
-    let page = if *app_state.get() == crate::AppState::Landing {
-        crate::landing::account_entries(&lib.lib, landing.filter)
-    } else {
-        Vec::new()
-    };
-    let menu = cadrs_ui::Menu::new("account-menu")
-        .align_end()
-        .min_width(200.0)
-        .entries(page)
-        .item(MenuItem::new("account-preferences", "Preferences…").icon("settings"))
-        .item(
-            MenuItem::new("account-shortcuts", "Keyboard shortcuts")
-                .icon("keyboard")
-                .shortcut("Shift+/"),
-        )
-        .separator()
-        .item(MenuItem::new("account-sign-out", "Sign out").planned());
-    open_menu(&mut commands, a.entity, menu.build(&theme));
-}
-
-fn on_account_action(ev: On<MenuAction>, q: Query<&Name>, mut commands: Commands) {
-    if q.get(ev.entity).map(|n| n.as_str()) != Ok("account") {
-        return;
-    }
-    let item = ev.item.clone();
-    if item.starts_with("account-")
-        && !matches!(item.as_str(), "account-preferences" | "account-shortcuts")
-    {
-        commands.queue(move |w: &mut World| {
-            crate::landing::account_action(w, &item);
-        });
-        return;
-    }
-    match ev.item.as_str() {
-        "account-preferences" => commands.queue(open_preferences),
-        "account-shortcuts" => commands.queue(crate::shortcuts::open_shortcuts),
-        _ => {}
-    }
-}
+// The dialog
 
 /// The dialog's root.
 #[derive(Component)]

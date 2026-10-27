@@ -1,6 +1,5 @@
-//! Document tabs, modeled on gpui-component's `TabBar`/`Tab` (underline variant) and Onshape's
-//! bottom tab bar: fixed-width grey tabs with a type icon and a name; the selected tab is white
-//! with a blue underline.
+//! Document tabs, modeled on gpui-component's `TabBar`/`Tab` (pill variant): fixed-width tabs
+//! with a type icon and a name, on the tab bar's glass; the selected tab is a tinted pill.
 //!
 //! A [`Tab`] is [`DoubleClickable`], an [`InlineEdit`] (its label is an [`InlineEditLabel`], so
 //! double-click-to-rename is one [`crate::begin_inline_edit`] call away) and a
@@ -74,18 +73,17 @@ impl Tab {
     pub fn build(self, theme: &Theme) -> impl Bundle {
         let visuals = Visuals {
             background: StateColors::new(
-                theme.tab_inactive,
-                theme.tab_hover,
-                theme.tab_hover,
-                theme.tab_inactive,
+                if self.marked {
+                    theme.control
+                } else {
+                    Color::NONE
+                },
+                theme.control_hover,
+                theme.control_hover,
+                Color::NONE,
             )
-            .with_selected(theme.background),
-            border: StateColors::all(if self.marked {
-                theme.tab_underline.with_alpha(0.55)
-            } else {
-                Color::NONE
-            })
-            .with_selected(theme.tab_underline),
+            .with_selected(theme.list_selected),
+            border: StateColors::all(Color::NONE),
             foreground: StateColors::new(
                 theme.tool_foreground,
                 theme.foreground,
@@ -111,12 +109,10 @@ impl Tab {
             Node {
                 width: Val::Px(self.width),
                 flex_shrink: 0.0,
-                margin: UiRect::top(Val::Px(2.0)),
                 padding: UiRect::new(Val::Px(10.0), Val::Px(8.0), Val::ZERO, Val::ZERO),
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(5.0),
-                border: UiRect::bottom(Val::Px(2.0)),
-                border_radius: BorderRadius::top(Val::Px(theme.radius)),
+                column_gap: Val::Px(6.0),
+                border_radius: BorderRadius::all(Val::Px(theme.radius)),
                 overflow: Overflow::clip(),
                 ..default()
             },

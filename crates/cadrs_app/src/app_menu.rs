@@ -1,0 +1,195 @@
+//! The app menu: the cadrs mark at the top left opens it, on the documents page and in a
+//! document. In a document it has the way back to the documents and what the document menu
+//! had (rename, export, a version, the workspaces, the units, a full rebuild); on the documents
+//! page, the documents folder, the labels and the Trash. Both end with Preferences and the
+//! keyboard shortcuts.
+
+use bevy::prelude::*;
+use bevy::text::FontWeight;
+use bevy::ui_widgets::Activate;
+use cadrs_ui::prelude::*;
+use cadrs_ui::{Button, MenuAction, MenuEntry, MenuItem, open_menu};
+
+use crate::AppState;
+
+pub struct AppMenuPlugin;
+
+impl Plugin for AppMenuPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(on_app_menu)
+            .add_observer(on_app_menu_action);
+    }
+}
+
+/// The cadrs mark that opens the app menu.
+#[derive(Component)]
+struct AppMenuButton;
+
+/// The cadrs mark, its name and a caret: the app menu's button.
+pub fn spawn_app_button(bar: &mut ChildSpawnerCommands, t: &Theme) {
+    bar.spawn((
+        Button::new("app-menu").ghost().tooltip("Menu").build(t),
+        AppMenuButton,
+    ))
+    .entry::<Node>()
+    .and_modify(|mut n| {
+        n.height = Val::Px(32.0);
+        n.padding = UiRect::new(Val::Px(4.0), Val::Px(8.0), Val::ZERO, Val::ZERO);
+        n.column_gap = Val::Px(8.0);
+    })
+    .entity()
+    .with_children(|b| {
+        b.spawn((
+            Node {
+                width: Val::Px(24.0),
+                height: Val::Px(24.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(t.radius)),
+                ..default()
+            },
+            BackgroundColor(t.primary),
+            Pickable::IGNORE,
+        ))
+        .with_child((icon("part", 16.0, t.primary_foreground), Pickable::IGNORE));
+        b.spawn((
+            t.text("cadrs", t.font_xl, FontWeight::SEMIBOLD, t.foreground),
+            cadrs_ui::style::InheritFg,
+            Pickable::IGNORE,
+        ));
+        b.spawn((
+            icon("caret-down", 12.0, t.muted_foreground),
+            cadrs_ui::style::InheritFg,
+            Pickable::IGNORE,
+        ));
+    });
+}
+
+/// What the app menu ends with, everywhere.
+fn app_entries() -> Vec<MenuEntry> {
+    vec![
+        MenuItem::new("app-preferences", "Preferences…")
+            .icon("settings")
+            .into(),
+        MenuItem::new("app-shortcuts", "Keyboard shortcuts")
+            .icon("keyboard")
+            .shortcut("Shift+/")
+            .into(),
+    ]
+}
+
+/// The document's part of the app menu; `workspaces` lists Main and the branches to switch to
+/// (their items are `crate::workspaces`'s).
+fn document_entries(workspaces: Vec<MenuEntry>) -> Vec<MenuEntry> {
+    let workspace = MenuItem::new("document-menu-workspaces", "Workspace").icon("branches");
+    let workspace = if workspaces.len() > 1 {
+        workspace.submenu(workspaces)
+    } else {
+        workspace
+            .disabled(true)
+            .tooltip("Branch from a version (History) to have another workspace")
+    };
+    vec![
+        MenuItem::new("app-documents", "All documents")
+            .icon("home")
+            .into(),
+        MenuEntry::Separator,
+        MenuItem::new("document-menu-rename", "Rename document…")
+            .icon("edit")
+            .into(),
+        MenuItem::new("document-menu-export", "Export document…")
+            .icon("file-export")
+            .into(),
+        MenuItem::new("document-menu-create-version", "Create version…")
+            .icon("versions")
+            .into(),
+        workspace.into(),
+        MenuEntry::Separator,
+        MenuItem::new("document-menu-units", "Workspace units…")
+            .icon("measure")
+            .into(),
+        MenuItem::new("document-menu-full-rebuild", "Full rebuild (clear cache)")
+            .icon("sync-document")
+            .into(),
+        MenuEntry::Separator,
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_app_menu(
+    a: On<Activate>,
+    q: Query<(), With<AppMenuButton>>,
+    theme: Res<Theme>,
+    app_state: Res<State<AppState>>,
+    lib: Res<crate::landing::DocLibrary>,
+    landing: Res<crate::landing::LandingState>,
+    log: Option<Res<crate::history_panel::DocLog>>,
+    mut commands: Commands,
+) {
+    if !q.contains(a.entity) {
+        return;
+    }
+    let mut entries = match app_state.get() {
+        AppState::Document => {
+            let workspaces = log
+                .as_ref()
+                .and_then(|l| l.log.as_ref())
+                .map(|l| {
+                    let current = l.current_workspace();
+                    l.workspace_ids()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, ws)| {
+                            MenuItem::new(format!("workspace-item-{i}"), l.workspace_name(ws))
+                                .icon(if ws.is_main() { "location" } else { "branches" })
+                                .checked(ws == current)
+                                .into()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            document_entries(workspaces)
+        }
+        _ => crate::landing::app_entries(&lib.lib, landing.filter),
+    };
+    entries.extend(app_entries());
+    let menu = cadrs_ui::Menu::new("app-menu-popup")
+        .min_width(240.0)
+        .entries(entries);
+    open_menu(&mut commands, a.entity, menu.build(&theme));
+}
+
+fn on_app_menu_action(
+    ev: On<MenuAction>,
+    q: Query<(), With<AppMenuButton>>,
+    q_name: Query<Entity, With<crate::document::DocumentName>>,
+    mut commands: Commands,
+) {
+    if !q.contains(ev.entity) {
+        return;
+    }
+    match ev.item.as_str() {
+        "app-preferences" => commands.queue(crate::preferences_ui::open_preferences),
+        "app-shortcuts" => commands.queue(crate::shortcuts::open_shortcuts),
+        "app-documents" => commands.queue(crate::thumbnail::close_document),
+        "document-menu-export" => commands.queue(crate::native_document::open_export),
+        "document-menu-units" => commands.queue(crate::units_dialog::open_units_dialog),
+        "document-menu-full-rebuild" => commands.queue(crate::document::full_rebuild),
+        // P3D.3: a version of the document as it is.
+        "document-menu-create-version" => commands.queue(|world: &mut World| {
+            crate::linked::open_create_version_dialog(world, crate::linked::VersionTarget::Current)
+        }),
+        "document-menu-rename" => {
+            // The same as clicking the name.
+            for e in &q_name {
+                commands.trigger(Activate { entity: e });
+            }
+        }
+        item => {
+            let item = item.to_string();
+            commands.queue(move |world: &mut World| {
+                crate::landing::app_action(world, &item);
+            });
+        }
+    }
+}

@@ -32,7 +32,7 @@ Scenario(
         Wait(5),
         Click(ui("sketch")),
         WaitFor("sketch-dialog"),
-        ClickAt(560, 575),
+        ClickAt(700, 700),
         Wait(5),
         MoveWorld(70, 0),
         Custom("drop-file fixtures/vector/bracket.eps"),

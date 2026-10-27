@@ -1,35 +1,35 @@
-//! A collapsible side panel, modeled on gpui-component's `Dock` (left placement) and Onshape's
-//! feature list: a fixed-width bordered panel with a small toggle tab on its right edge, about
-//! halfway down. Clicking the tab (or triggering [`ToggleDockPanel`] on the panel) collapses the
-//! panel to just the tab; the panel then triggers [`DockPanelToggled`].
+//! A collapsible side panel, modeled on gpui-component's `Dock` (left placement): a floating
+//! glass panel ([`crate::glass`]) with a ‹ in its top right corner that collapses it (as
+//! triggering [`ToggleDockPanel`] on the panel does); the panel then triggers
+//! [`DockPanelToggled`], and whoever shows a way to open it again (an icon on a rail) listens.
 //!
-//! Its right edge is a divider: hovering it shows the column-resize cursor and dragging it sets
-//! the panel's width (within its minimum and maximum), so long names fit; a finished drag
-//! triggers [`DockPanelResized`].
+//! A grip in the gap on its right, a short line, is the one line drawn between panels: hovering
+//! it shows the column-resize cursor and lights it, and dragging it sets the panel's width
+//! (within its minimum and maximum), so long names fit; a finished drag triggers
+//! [`DockPanelResized`].
 //!
-//! The panel root gets the builder's name, the body `<name>-body`, the tab `<name>-toggle` and
-//! the divider `<name>-resize`.
+//! The panel root gets the builder's name, the body `<name>-body`, the ‹ `<name>-collapse` and
+//! the grip `<name>-resize`.
 
 use std::borrow::Cow;
 
 use bevy::ecs::spawn::SpawnWith;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button as WidgetButton};
+use bevy::ui_widgets::Activate;
 
-use crate::icon::icon;
-use crate::style::{StateColors, Visuals};
 use crate::theme::Theme;
 
 pub struct DockPlugin;
 
 impl Plugin for DockPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_tab_activate)
+        app.add_observer(on_collapse)
             .add_observer(on_toggle)
             .add_observer(on_grip_drag_start)
             .add_observer(on_grip_drag)
             .add_observer(on_grip_drag_end)
+            .add_systems(Update, light_grips)
             .add_systems(PostUpdate, sync_docks.before(bevy::ui::UiSystems::Prepare));
     }
 }
@@ -94,8 +94,13 @@ impl DockGrip {
 #[derive(Component, Debug, Clone, Copy)]
 struct DockBody(Entity);
 
+/// The ‹ that collapses the panel.
 #[derive(Component, Debug, Clone, Copy)]
-struct DockTab(Entity);
+struct DockCollapse(Entity);
+
+/// The grip's line.
+#[derive(Component, Debug, Clone, Copy)]
+struct GripLine;
 
 type SpawnFn = Box<dyn FnOnce(&mut ChildSpawner) + Send + Sync>;
 
@@ -104,7 +109,7 @@ pub struct DockPanel {
     name: Cow<'static, str>,
     width: f32,
     open: bool,
-    tab_icon: Cow<'static, str>,
+    gap: f32,
     content: Option<SpawnFn>,
 }
 
@@ -114,7 +119,7 @@ impl DockPanel {
             name: name.into(),
             width: 190.0,
             open: true,
-            tab_icon: "list-details".into(),
+            gap: 0.0,
             content: None,
         }
     }
@@ -129,9 +134,9 @@ impl DockPanel {
         self
     }
 
-    /// The icon on the toggle tab.
-    pub fn tab_icon(mut self, i: impl Into<Cow<'static, str>>) -> Self {
-        self.tab_icon = i.into();
+    /// The gap kept on the panel's right while it is open (the grip sits in it).
+    pub fn gap(mut self, px: f32) -> Self {
+        self.gap = px;
         self
     }
 
@@ -147,17 +152,19 @@ impl DockPanel {
             name,
             width,
             open,
-            tab_icon,
+            gap,
             content,
         } = self;
         let body_name = format!("{name}-body");
-        let tab_name = format!("{name}-toggle");
+        let collapse_name = format!("{name}-collapse");
         let grip_name = format!("{name}-resize");
         (
             Name::new(name.into_owned()),
             DockPanelState { open, width },
+            DockGap(gap),
             Node {
                 width: Val::Px(if open { width } else { 0.0 }),
+                margin: UiRect::right(Val::Px(if open { gap } else { 0.0 })),
                 flex_shrink: 0.0,
                 ..default()
             },
@@ -170,75 +177,75 @@ impl DockPanel {
                         width: Val::Px(width),
                         min_height: Val::Px(0.0),
                         flex_direction: FlexDirection::Column,
-                        border: UiRect::new(Val::ZERO, Val::Px(1.0), Val::Px(1.0), Val::ZERO),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(theme.radius_panel)),
                         overflow: Overflow::clip(),
                         display: if open { Display::Flex } else { Display::None },
                         ..default()
                     },
-                    BackgroundColor(theme.background),
-                    BorderColor::all(theme.panel_border),
+                    crate::glass::panel(&theme),
                 ));
-                if let Some(f) = content {
-                    body.with_children(|b| f(b));
-                }
-                // The divider over the body's right border (1 px), a few px wider to grab.
-                {
-                    p.spawn((
-                        Name::new(grip_name),
-                        DockGrip {
-                            panel: root,
-                            start: 0.0,
-                            dragging: false,
-                        },
-                        crate::splitter::HoverCursor(crate::cursor::CursorKind::ColResize),
-                        Hovered::default(),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(0.0),
-                            bottom: Val::Px(0.0),
-                            right: Val::Px(-4.0),
-                            width: Val::Px(7.0),
-                            display: if open { Display::Flex } else { Display::None },
-                            ..default()
-                        },
-                        // Transparent, but picked (a node without a background is still hit).
-                        Pickable::default(),
-                        ZIndex(10),
+                body.with_children(|b| {
+                    if let Some(f) = content {
+                        f(b);
+                    }
+                    // The ‹ in the top right corner, over the content's first row (a panel's
+                    // filter leaves it room).
+                    let mut collapse = b.spawn((
+                        crate::button::IconButton::new(collapse_name, "chevron-left")
+                            .icon_size(16.0)
+                            .tooltip("Hide panel")
+                            .build(&theme),
+                        DockCollapse(root),
+                        ZIndex(5),
                     ));
-                }
+                    collapse.insert(Node {
+                        position_type: PositionType::Absolute,
+                        top: Val::Px(COLLAPSE_TOP),
+                        right: Val::Px(6.0),
+                        width: Val::Px(COLLAPSE_SIZE),
+                        height: Val::Px(COLLAPSE_SIZE),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(theme.radius)),
+                        ..default()
+                    });
+                });
+                // The grip, centred in the gap on the right, a few px wider than its line to
+                // grab.
                 p.spawn((
-                    Name::new(tab_name),
-                    DockTab(root),
-                    WidgetButton,
+                    Name::new(grip_name),
+                    DockGrip {
+                        panel: root,
+                        start: 0.0,
+                        dragging: false,
+                    },
+                    crate::splitter::HoverCursor(crate::cursor::CursorKind::ColResize),
                     Hovered::default(),
                     Node {
                         position_type: PositionType::Absolute,
-                        left: Val::Percent(100.0),
-                        top: Val::Percent(50.0),
-                        width: Val::Px(28.0),
-                        height: Val::Px(32.0),
-                        margin: UiRect::top(Val::Px(-16.0)),
-                        border: UiRect::new(Val::ZERO, Val::Px(1.0), Val::Px(1.0), Val::Px(1.0)),
-                        border_radius: BorderRadius::right(Val::Px(theme.radius)),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        right: Val::Px(-(gap / 2.0) - GRIP_WIDTH / 2.0),
+                        width: Val::Px(GRIP_WIDTH),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        display: if open { Display::Flex } else { Display::None },
                         ..default()
                     },
-                    Visuals {
-                        background: StateColors::new(
-                            theme.background,
-                            theme.ghost_hover,
-                            theme.ghost_active,
-                            theme.background,
-                        ),
-                        border: StateColors::all(theme.panel_border),
-                        foreground: StateColors::all(theme.tool_foreground),
-                        focus_ring: theme.focus_ring,
-                    },
-                    crate::tooltip::Tooltip::new("Toggle panel"),
+                    // Transparent, but picked (a node without a background is still hit).
+                    Pickable::default(),
+                    ZIndex(10),
                     children![(
-                        icon(tab_icon, 18.0, theme.tool_foreground),
-                        Pickable::IGNORE
+                        GripLine,
+                        Node {
+                            width: Val::Px(2.0),
+                            height: Val::Px(36.0),
+                            border_radius: BorderRadius::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(theme.scrollbar_thumb),
+                        Pickable::IGNORE,
                     )],
                 ));
             })),
@@ -246,9 +253,44 @@ impl DockPanel {
     }
 }
 
-fn on_tab_activate(ev: On<Activate>, q: Query<&DockTab>, mut commands: Commands) {
-    if let Ok(tab) = q.get(ev.entity) {
-        commands.trigger(ToggleDockPanel { entity: tab.0 });
+/// The ‹'s size and its distance from the panel's top, so it lines up with a 28 px field in a
+/// 34 px first row.
+pub const COLLAPSE_SIZE: f32 = 24.0;
+pub const COLLAPSE_TOP: f32 = 6.0;
+/// The room a panel's first row leaves for the ‹ at its right end.
+pub const COLLAPSE_ROOM: f32 = COLLAPSE_SIZE + 10.0;
+
+const GRIP_WIDTH: f32 = 8.0;
+
+/// The gap a dock panel keeps on its right while open.
+#[derive(Component, Debug, Clone, Copy)]
+struct DockGap(f32);
+
+fn on_collapse(ev: On<Activate>, q: Query<&DockCollapse>, mut commands: Commands) {
+    if let Ok(c) = q.get(ev.entity) {
+        commands.trigger(ToggleDockPanel { entity: c.0 });
+    }
+}
+
+/// A grip's line lights in the accent while hovered or dragged.
+fn light_grips(
+    theme: Res<Theme>,
+    q: Query<(&DockGrip, &Hovered, &Children)>,
+    mut q_line: Query<&mut BackgroundColor, With<GripLine>>,
+) {
+    for (g, hovered, children) in &q {
+        let want = if g.dragging || hovered.get() {
+            theme.primary
+        } else {
+            theme.scrollbar_thumb
+        };
+        for c in children.iter() {
+            if let Ok(mut bg) = q_line.get_mut(c)
+                && bg.0 != want
+            {
+                bg.0 = want;
+            }
+        }
     }
 }
 
@@ -327,12 +369,13 @@ type GripNodes<'w, 's> = Query<
 >;
 
 fn sync_docks(
-    mut q: Query<(Entity, &DockPanelState, &mut Node), Changed<DockPanelState>>,
+    mut q: Query<(Entity, &DockPanelState, &DockGap, &mut Node), Changed<DockPanelState>>,
     mut q_body: Query<(&DockBody, &mut Node), Without<DockPanelState>>,
     mut q_grip: GripNodes,
 ) {
-    for (root, state, mut node) in &mut q {
+    for (root, state, gap, mut node) in &mut q {
         node.width = Val::Px(if state.open { state.width } else { 0.0 });
+        node.margin.right = Val::Px(if state.open { gap.0 } else { 0.0 });
         for (g, mut n) in &mut q_grip {
             if g.panel == root {
                 n.display = if state.open {

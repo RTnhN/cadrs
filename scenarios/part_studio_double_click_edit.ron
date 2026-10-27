@@ -26,7 +26,7 @@ Scenario(
         Screenshot("02-boss"),
         Key("Escape"),
         Wait(10),
-        DoubleClick(at(700, 600)),
+        DoubleClick(at(560, 480)),
         WaitFor("extrude-dialog"),
         ExpectText("extrude-dialog", "Extrude 1"),
         MoveTo(1420, 900),

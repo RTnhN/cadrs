@@ -161,6 +161,10 @@ pub struct Theme {
     pub rollback_bar: Color,
     /// A scrollbar's thumb.
     pub scrollbar_thumb: Color,
+    /// A borderless control's fill (a toolbar's buttons, a segmented control's track), and
+    /// hovered.
+    pub control: Color,
+    pub control_hover: Color,
 
     // Viewport
     pub plane_fill: Color,
@@ -233,7 +237,7 @@ impl Theme {
             // is kept).
             glass_panel: hex("#fbfefe").with_alpha(0.88),
             glass_rim: hex("#fbffff").with_alpha(0.9),
-            glass_shadow: Color::srgba(0.02, 0.12, 0.16, 0.16),
+            glass_shadow: Color::srgba(0.02, 0.12, 0.16, 0.22),
 
             foreground: hex("#212121"),
             muted_foreground: hex("#5e5e5e"),
@@ -317,6 +321,8 @@ impl Theme {
             tree_guide: hex("#dbdbdb"),
             rollback_bar: hex("#bababa"),
             scrollbar_thumb: hex("#b4c3c5"),
+            control: hex("#ecf3f4"),
+            control_hover: hex("#dfeaec"),
 
             plane_fill: hex("#e6f1f2"),
             plane_edge: hex("#8fb3b8"),
@@ -460,6 +466,8 @@ impl Theme {
             tree_guide: hex("#3f3c35"),
             rollback_bar: hex("#6f6b60"),
             scrollbar_thumb: hex("#5a564d"),
+            control: hex("#302e29"),
+            control_hover: hex("#3b3933"),
 
             plane_fill: hex("#2f2d27"),
             plane_edge: hex("#8a8066"),
@@ -535,6 +543,8 @@ impl Theme {
             (Fill, self.tree_guide),
             (Fill, self.rollback_bar),
             (Fill, self.scrollbar_thumb),
+            (Fill, self.control),
+            (Fill, self.control_hover),
             (Fill, self.separator),
             (Fill, self.panel_border),
             (Fill, self.toolbar_separator),

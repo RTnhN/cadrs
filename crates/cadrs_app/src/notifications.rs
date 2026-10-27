@@ -111,10 +111,10 @@ fn collect(
                 id: "whats-new".into(),
                 icon: "idea",
                 title: "A new look for cadrs".into(),
-                body: "The filters are tabs above the list, the search box sits beside Create, \
-                       and Create ▾ still holds Folder, Import files, Label and Join shared \
-                       document. Details, Versions and Where used are the icons at the right of \
-                       the tabs."
+                body: "The cadrs mark at the top left is the menu now: Labels, Trash, the \
+                       documents folder, Preferences and the shortcuts, and in a document what \
+                       ☰ had. Right-click a document for Properties, History and Used in. Your \
+                       name at the top right switches identities."
                     .into(),
                 unread: true,
             });

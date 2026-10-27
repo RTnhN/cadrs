@@ -17,10 +17,10 @@
 use cadrs_ui::ShortcutKey;
 use std::collections::HashMap;
 
+use crate::ground_grid::{GroundGrid, GroundGridMaterial, GroundGridParams, GroundGridPlugin};
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
-use bevy::dev_tools::infinite_grid::{InfiniteGrid, InfiniteGridPlugin, InfiniteGridSettings};
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::MouseScrollUnit;
 use bevy::input_focus::InputFocus;
@@ -40,7 +40,11 @@ pub struct ViewportPlugin;
 
 impl Plugin for ViewportPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(InfiniteGridPlugin)
+        app.add_plugins(GroundGridPlugin)
+            .add_systems(
+                PreUpdate,
+                alias_backdrop.after(bevy::picking::PickingSystems::Hover),
+            )
             .init_resource::<GridVisible>()
             .init_resource::<PlanesVisible>()
             .init_resource::<ViewportView>()
@@ -798,10 +802,12 @@ fn recolor_planes(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut grid_materials: ResMut<Assets<GroundGridMaterial>>,
     theme: Res<Theme>,
     mut view: ResMut<ViewportView>,
     mut selection: ResMut<Selection>,
@@ -840,10 +846,16 @@ fn spawn_scene(
         ));
     }
     commands.spawn((
-        InfiniteGrid,
-        InfiniteGridSettings::default(),
-        Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+        Name::new("ground-grid"),
+        GroundGrid,
+        Mesh3d(meshes.add(Rectangle::new(2.0, 2.0))),
+        MeshMaterial3d(grid_materials.add(GroundGridMaterial {
+            params: GroundGridParams::default(),
+        })),
+        Transform::IDENTITY,
         Visibility::Hidden,
+        bevy::light::NotShadowCaster,
+        Pickable::IGNORE,
         DespawnOnExit(AppState::Document),
     ));
 }
@@ -1067,6 +1079,23 @@ fn track_dialog_inset(
     }
     if inset.0 != new {
         inset.0 = new;
+    }
+}
+
+/// The gaps between the floating panels are the 3D view's too: the pointer over the backdrop
+/// behind the panels counts as over the viewport area, for everything that asks the hover map.
+fn alias_backdrop(
+    mut hover: ResMut<HoverMap>,
+    q_back: Query<Entity, With<crate::document::ViewportBackdrop>>,
+    q_area: Query<Entity, With<ViewportArea>>,
+) {
+    let (Some(back), Some(area)) = (q_back.iter().next(), q_area.iter().next()) else {
+        return;
+    };
+    for hits in hover.values_mut() {
+        if let Some(hit) = hits.get(&back).cloned() {
+            hits.insert(area, hit);
+        }
     }
 }
 
@@ -2247,57 +2276,78 @@ impl PlaneEdge for Theme {
     }
 }
 
-/// The ground grid's spacing follows the zoom (a minor line every 1, 10, 100 … mm, at least
-/// 24 px apart; a major one every tenth) and it fades out past the view; its colours follow
-/// the scheme: in dark, the schematic's faint warm lines, its salmon and green for the axes.
+/// The ground grid's step follows the zoom (1, 2 or 5 times a power of ten mm, lines at least
+/// 18 px apart, [`crate::ground_grid::step_for`]) and it fades out past the view; its quad
+/// follows the focus. Its colours follow the scheme: in dark, the schematic's faint warm lines
+/// and crosses, its salmon and green for the axes.
 fn fit_grid(
     view: Res<ViewportView>,
-    mut q: Query<&mut InfiniteGridSettings>,
-    mut last: Local<Option<(f32, f32, bool)>>,
+    q: Query<(&MeshMaterial3d<GroundGridMaterial>, &mut Transform), With<GroundGrid>>,
+    mut materials: ResMut<Assets<GroundGridMaterial>>,
+    mut last: Local<Option<(f32, f32, bool, Vec3)>>,
 ) {
     let v = &view.view;
-    let step = 10f32.powf((v.scale * 24.0).max(1e-6).log10().ceil());
-    // The shader fades linearly from the eye: about 70 % at the focus, gone a few view sizes
-    // beyond it.
+    let step = crate::ground_grid::step_for(v.scale);
+    // Fades linearly from the eye: about 70 % at the focus, gone a few view sizes beyond it.
     let fade = if v.perspective {
         v.eye_distance() * 4.0
     } else {
         crate::camera::camera_distance(v.scale) / 0.3
     };
     let dark = cadrs_ui::dark_in_force();
-    if *last == Some((step, fade, dark)) {
+    let key = (step, fade, dark, v.focus);
+    if *last == Some(key) {
         return;
     }
-    *last = Some((step, fade, dark));
-    let hex = |s: &str| Color::Srgba(Srgba::hex(s).expect("valid hex color"));
-    let (minor, major, x, y) = if dark {
+    *last = Some(key);
+    let rgba = |r: u8, g: u8, b: u8, a: f32| Color::srgba_u8(r, g, b, (a * 255.0) as u8);
+    let (line, cross, x, y) = if dark {
+        // The schematic's (`cadrs_eda::render`, Horizon's theme).
         (
-            hex("#2f2d27"),
-            hex("#47423a"),
-            hex("#e67b54").with_alpha(0.8),
-            hex("#73bc74").with_alpha(0.8),
+            rgba(0x5a, 0x52, 0x3e, 0.16),
+            rgba(0x8a, 0x80, 0x66, 0.5),
+            rgba(0xe6, 0x7b, 0x54, 0.8),
+            rgba(0x73, 0xbc, 0x74, 0.8),
         )
     } else {
         (
-            hex("#e3e8ea"),
-            hex("#c9d1d4"),
-            hex("#e8857f"),
-            hex("#7fc27a"),
+            rgba(0x8f, 0xb3, 0xb8, 0.28),
+            rgba(0x4f, 0x80, 0x87, 0.6),
+            rgba(0xe8, 0x85, 0x7f, 1.0),
+            rgba(0x7f, 0xc2, 0x7a, 1.0),
         )
     };
-    for mut g in &mut q {
-        g.minor_line_color = minor;
-        g.major_line_color = major;
-        g.x_axis_color = x;
-        g.z_axis_color = y;
-        g.scale = 1.0 / step;
-        g.fadeout_distance = fade;
+    let lin = |c: Color| c.to_linear().to_vec4();
+    let params = GroundGridParams {
+        line: lin(line),
+        cross: lin(cross),
+        x_axis: lin(x),
+        y_axis: lin(y),
+        grid: Vec4::new(
+            1.0 / step,
+            1.0 / fade,
+            crate::ground_grid::CROSS_EVERY,
+            crate::ground_grid::CROSS_ARM,
+        ),
         // Seen edge-on, far away, the lines would crowd into a hatch: they fade first.
-        g.dot_fadeout_strength = 0.5;
+        fade: Vec4::new(2.0, 0.0, 0.0, 0.0),
+    };
+    for (m, mut t) in q {
+        if let Some(mut m) = materials.get_mut(&m.0)
+            && m.params != params
+        {
+            m.params = params;
+        }
+        // A quad as wide as the grid is seen, around the focus.
+        let want =
+            Transform::from_xyz(v.focus.x, v.focus.y, 0.0).with_scale(Vec3::new(fade, fade, 1.0));
+        if *t != want {
+            *t = want;
+        }
     }
 }
 
-fn sync_grid(grid: Res<GridVisible>, mut q: Query<&mut Visibility, With<InfiniteGrid>>) {
+fn sync_grid(grid: Res<GridVisible>, mut q: Query<&mut Visibility, With<GroundGrid>>) {
     for mut v in &mut q {
         v.set_if_neq(if grid.0 {
             Visibility::Inherited

@@ -35,6 +35,7 @@ pub mod flat_drawing;
 pub mod flat_export;
 pub mod history_log;
 pub mod hole;
+pub mod identity;
 pub mod ids;
 pub mod import;
 pub mod library;

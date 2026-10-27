@@ -61,8 +61,8 @@ Scenario(
     steps: [
         WaitFor("document-shell"),
         // PS21.1: inches and pounds, the document's name.
-        Click(ui("document-menu")),
-        WaitFor("document-menu-popup"),
+        Click(ui("app-menu")),
+        WaitFor("app-menu-popup"),
         Click(ui("document-menu-units")),
         WaitFor("workspace-units-dialog"),
         Click(ui("units-length")),

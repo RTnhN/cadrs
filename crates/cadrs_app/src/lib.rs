@@ -9,6 +9,7 @@ pub mod advanced;
 pub mod advanced_dialog;
 pub mod analysis;
 pub mod app_icon;
+pub mod app_menu;
 pub mod appearance;
 pub mod applied;
 pub mod applied_dialog;
@@ -44,8 +45,10 @@ pub mod flat_ui;
 pub mod frame_profile;
 pub mod frame_stats;
 pub mod gallery;
+pub mod ground_grid;
 pub mod hidden_edges;
 pub mod history_panel;
+pub mod identity;
 pub mod image_dialog;
 pub mod import_dialog;
 pub mod import_file;
@@ -62,7 +65,6 @@ pub mod measure;
 pub mod move_document;
 pub mod native_document;
 pub mod notifications;
-pub mod panel_tab;
 pub mod part_shading;
 pub mod parts;
 pub mod parts_list;
@@ -698,6 +700,8 @@ impl Plugin for CadrsAppPlugin {
                 collab::CollabPlugin,
                 update::UpdatePlugin,
                 notifications::NotificationsPlugin,
+                identity::IdentityPlugin,
+                app_menu::AppMenuPlugin,
             ))
             .add_plugins((
                 parts::PartsPlugin,
@@ -731,7 +735,6 @@ impl Plugin for CadrsAppPlugin {
                 workspaces::WorkspacesPlugin,
                 repair::RepairPlugin,
                 replace_reference::ReplaceReferencePlugin,
-                panel_tab::PanelTabPlugin,
             ))
             .add_plugins((
                 appearance::AppearancePlugin,

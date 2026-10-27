@@ -44,18 +44,19 @@ impl Avatar {
             .collect()
     }
 
-    pub fn build(self, theme: &Theme) -> impl Bundle {
-        // A stable muted color per user.
+    /// The stable muted colour picked from a user's name.
+    pub fn color_for(user: &str) -> Color {
         const COLORS: [&str; 6] = [
             "#4f6d8f", "#6b5b95", "#3f7f6e", "#8a5a44", "#5b7a3a", "#7a4f6b",
         ];
-        let hash = self
-            .user
+        let hash = user
             .bytes()
             .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
-        let bg = self.color.unwrap_or_else(|| {
-            Color::Srgba(Srgba::hex(COLORS[hash as usize % COLORS.len()]).unwrap())
-        });
+        Color::Srgba(Srgba::hex(COLORS[hash as usize % COLORS.len()]).unwrap())
+    }
+
+    pub fn build(self, theme: &Theme) -> impl Bundle {
+        let bg = self.color.unwrap_or_else(|| Self::color_for(&self.user));
         (
             Name::new(self.name),
             Node {

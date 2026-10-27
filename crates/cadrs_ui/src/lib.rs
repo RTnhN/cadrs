@@ -145,7 +145,7 @@ pub use input::{
 };
 pub use list::{GridItem, ListItem};
 pub use menu::{
-    ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuItem,
+    ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuHeader, MenuItem,
     close_all_menus, open_context_menu, open_menu,
 };
 pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};

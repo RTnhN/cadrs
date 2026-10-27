@@ -480,18 +480,17 @@ pub fn groups(log: &HistoryLog) -> Vec<Vec<usize>> {
         .collect()
 }
 
+/// A floating glass panel left of the feature list.
 fn panel_node(t: &Theme) -> impl Bundle {
     (
         Node {
             width: Val::Px(270.0),
             flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            border: UiRect::right(Val::Px(1.0)),
+            margin: UiRect::right(Val::Px(crate::document::PANEL_GAP)),
             overflow: Overflow::clip(),
-            ..default()
+            ..cadrs_ui::glass::panel_node(t)
         },
-        BackgroundColor(t.background),
-        BorderColor::all(t.panel_border),
+        cadrs_ui::glass::panel(t),
     )
 }
 

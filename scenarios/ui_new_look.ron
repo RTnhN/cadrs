@@ -1,0 +1,42 @@
+// The new look, end to end (for review): the documents page; the app menu (the cadrs mark)
+// and the account menu there; a Part Studio's floating glass panels over the crosshair ground
+// grid; the app menu in a document; the feature panel hidden by its ‹ (its button then on the
+// rail) and shown again; a PCB Studio's schematic under the same panels.
+Scenario(
+    start: Some("landing"),
+    seed_documents: 6,
+    steps: [
+        MoveTo(1100, 900),
+        Screenshot("01-documents"),
+        Click(ui("app-menu")),
+        WaitFor("app-menu-popup"),
+        Screenshot("02-app-menu-documents"),
+        Key("Escape"),
+        Click(ui("identity")),
+        WaitFor("identity-menu"),
+        Screenshot("03-identity-menu"),
+        Key("Escape"),
+        DoubleClick(ui("doc-name-0")),
+        WaitFor("document-shell"),
+        MoveTo(1100, 900),
+        Screenshot("04-part-studio"),
+        Click(ui("app-menu")),
+        WaitFor("app-menu-popup"),
+        Screenshot("05-app-menu-document"),
+        Key("Escape"),
+        Click(ui("feature-panel-collapse")),
+        MoveTo(1100, 900),
+        Screenshot("06-panel-hidden"),
+        Click(ui("rail-feature-list")),
+        MoveTo(1100, 900),
+        Screenshot("07-panel-shown"),
+        Custom("pcb-studio"),
+        WaitFor("pcb-tree"),
+        Custom("eda-example gs07"),
+        WaitFor("eda-mode-bar"),
+        Click(ui("eda-mode-schematic")),
+        WaitFor("sch-erc"),
+        MoveTo(1100, 900),
+        Screenshot("08-schematic"),
+    ],
+)

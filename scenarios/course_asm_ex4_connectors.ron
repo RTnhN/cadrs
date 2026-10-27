@@ -30,7 +30,7 @@ Scenario(
         Key("Shift+7"),
         Key("F"),
         // A24.1: inch and pound.
-        Click(ui("document-menu")),
+        Click(ui("app-menu")),
         WaitFor("document-menu-units"),
         Click(ui("document-menu-units")),
         WaitFor("workspace-units-dialog"),
