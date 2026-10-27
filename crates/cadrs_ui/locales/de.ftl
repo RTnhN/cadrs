@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = Gedrückt halten, um automatische Abhängigkeiten
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = Übernehmen
+sketch-tool-intersection = Schnittkurve
 sketch-tool-line = Linie
 sketch-tool-midpoint-line = Mittelpunktlinie
 sketch-tool-corner-rectangle = Eckrechteck
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = { $name } im letzten fehlerfreien Zustand bearbeiten�
 sketch-constraint-not-applicable = { $constraint } ist auf die Auswahl nicht anwendbar
 sketch-normal-pick-line-first = Zuerst eine Linie auswählen, dann die Ebene
 sketch-normal-plane-parallel = Normal: Die Ebene ist parallel zur Skizze
+sketch-plane-parallel = Die Ebene ist parallel zur Skizze
 sketch-glyph-select-geometry = Geometrie auswählen
 sketch-glyph-hide = Abhängigkeiten ausblenden
 sketch-glyph-escape = Abhängigkeitswerkzeug verlassen

@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = 按住以关闭推理
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = 使用
+sketch-tool-intersection = 交线
 sketch-tool-line = 直线
 sketch-tool-midpoint-line = 中点线
 sketch-tool-corner-rectangle = 边角矩形
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = 编辑 { $name } 的正常状态…
 sketch-constraint-not-applicable = { $constraint } 不适用于所选内容
 sketch-normal-pick-line-first = 请先选择一条直线，再选择平面
 sketch-normal-plane-parallel = 法向：该平面与草图平行
+sketch-plane-parallel = 该平面与草图平行
 sketch-glyph-select-geometry = 选择几何体
 sketch-glyph-hide = 隐藏约束
 sketch-glyph-escape = 退出约束

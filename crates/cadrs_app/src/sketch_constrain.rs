@@ -378,7 +378,7 @@ fn constraint_activation(
     if selection.0.is_empty() {
         return;
     }
-    let at = crate::sketch_links::sketch_vertex_at(d, s, &cache);
+    let at = crate::sketch_links::sketch_link_at(d, s, &cache);
     match fit_op(kind, sketch, &selection.0, at) {
         FitOp::Complete(op) => {
             edit_sketch(&mut commands, s, *op);
@@ -492,8 +492,8 @@ fn normal_to_plane(
 }
 
 /// A pick with a constraint tool active: adds the entity to the picks and applies the
-/// constraint once they fit. `at` places part vertices in the sketch (see
-/// [`crate::sketch_links::sketch_vertex_at`]).
+/// constraint once they fit. `at` places part vertices and planes in the sketch (see
+/// [`crate::sketch_links::sketch_link_at`]).
 pub fn pick_for_constraint(
     kind: ConstraintKind,
     sketch: &Sketch,
@@ -501,7 +501,7 @@ pub fn pick_for_constraint(
     selection: &mut SketchSelection,
     commands: &mut Commands,
     session: &SketchSession,
-    at: impl Fn(cadrs_sketch::Link) -> Option<SVec2>,
+    at: impl Fn(cadrs_sketch::Link) -> Option<cadrs_sketch::projection::Projected>,
 ) {
     if matches!(e, SketchEntity::Constraint(_) | SketchEntity::Dimension(_)) {
         return;

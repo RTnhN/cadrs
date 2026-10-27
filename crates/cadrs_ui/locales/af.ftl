@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = Hou in om afleiding af te skakel
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = Gebruik
+sketch-tool-intersection = Snyding
 sketch-tool-line = Lyn
 sketch-tool-midpoint-line = Middelpuntlyn
 sketch-tool-corner-rectangle = Hoekreghoek
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = Wysig gesonde toestand van { $name }…
 sketch-constraint-not-applicable = { $constraint } is nie op die seleksie van toepassing nie
 sketch-normal-pick-line-first = Kies eers 'n lyn, dan die vlak
 sketch-normal-plane-parallel = Normaal: die vlak is parallel aan die skets
+sketch-plane-parallel = Die vlak is parallel aan die skets
 sketch-glyph-select-geometry = Kies geometrie
 sketch-glyph-hide = Versteek beperkings
 sketch-glyph-escape = Verlaat beperking

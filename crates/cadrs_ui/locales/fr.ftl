@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = Maintenir pour désactiver les inférences
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = Utiliser
+sketch-tool-intersection = Intersection
 sketch-tool-line = Ligne
 sketch-tool-midpoint-line = Ligne par le milieu
 sketch-tool-corner-rectangle = Rectangle par coins
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = Modifier l'état valide de { $name }…
 sketch-constraint-not-applicable = { $constraint } ne s'applique pas à la sélection
 sketch-normal-pick-line-first = Choisissez d'abord une ligne, puis le plan
 sketch-normal-plane-parallel = Normale : le plan est parallèle à l'esquisse
+sketch-plane-parallel = Le plan est parallèle à l'esquisse
 sketch-glyph-select-geometry = Sélectionner la géométrie
 sketch-glyph-hide = Masquer les contraintes
 sketch-glyph-escape = Quitter la contrainte

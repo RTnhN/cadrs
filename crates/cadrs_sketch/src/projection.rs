@@ -197,6 +197,10 @@ impl Sketch {
         });
         self.constraints
             .insert(ConstraintOf::Use(CurveRef::Curve(id), link));
+        // A plane's line keeps to the plane, its ends free (see [`Sketch::carriers`]).
+        if let (Link::Plane(_), Projected::Line(a, b)) = (link, shape) {
+            self.carriers.insert(id, (a, b));
+        }
         Some(id)
     }
 
@@ -227,12 +231,40 @@ impl Sketch {
         })
     }
 
+    /// The curve a Use constraint with this link holds (a used plane, [`Link::Plane`]).
+    pub fn linked_curve(&self, link: Link) -> Option<CurveId> {
+        self.constraints.values().find_map(|c| match *c {
+            ConstraintOf::Use(CurveRef::Curve(k), l) if l == link => Some(k),
+            _ => None,
+        })
+    }
+
     /// Moves a projected curve to its shape as it is now. Returns false if the shape is of
     /// another kind than the curve (the source changed type: the link is broken).
     pub fn set_projected(&mut self, curve: CurveId, shape: Projected) -> bool {
         let Some(c) = self.curves.get(curve).copied() else {
             return false;
         };
+        // A plane's line: the plane moved its carrier; the ends stay where they are along it.
+        let plane = self.constraints.values().any(
+            |x| matches!(*x, ConstraintOf::Use(CurveRef::Curve(k), Link::Plane(_)) if k == curve),
+        );
+        if let (true, CurveKind::Line { a, b }, Projected::Line(p, q)) = (plane, c.kind, &shape) {
+            let (p, q) = (*p, *q);
+            let d = q - p;
+            if d.length() < 1e-12 {
+                return false;
+            }
+            let onto = |x: Vec2| p + d * ((x - p).dot(d) / d.dot(d));
+            for e in [a, b] {
+                let at = onto(self.pos(e));
+                if let Some(pt) = self.points.get_mut(e) {
+                    pt.pos = at;
+                }
+            }
+            self.carriers.insert(curve, (p, q));
+            return true;
+        }
         if let (CurveKind::Spline { .. }, Projected::Spline { points, closed }) = (c.kind, &shape) {
             return self.set_projected_spline(curve, points, *closed);
         }
@@ -554,5 +586,41 @@ mod tests {
         assert!(
             start.distance(Vec2::new(-1.0, 0.0)) < 1e-9 && end.distance(Vec2::new(1.0, 0.0)) < 1e-9
         );
+    }
+
+    /// A plane's line (Intersection) stays on the plane with its ends free: a dimension sets
+    /// its length, an end can be made coincident elsewhere along it, and the plane moving takes
+    /// the line with it, keeping where its ends are along it.
+    #[test]
+    fn a_plane_line_keeps_to_the_plane_with_free_ends() {
+        use crate::{DimensionKind, PlaneRef};
+        let mut s = Sketch::new();
+        let plane = Link::Plane(PlaneRef::Right);
+        let line = s
+            .add_projected(
+                Projected::Line(Vec2::new(10.0, -75.0), Vec2::new(10.0, 75.0)),
+                plane,
+            )
+            .unwrap();
+        assert!(s.carriers.contains_key(line));
+        let (a, b) = s.curve_ends(line).unwrap();
+        // A length of 40 mm: the ends slide along x = 10.
+        s.dimensions.insert(crate::Dimension::new(
+            DimensionKind::Aligned { a, b },
+            40.0,
+            5.0,
+        ));
+        assert!(solve::solve(&mut s).conflicting.is_empty());
+        let (pa, pb) = (s.pos(a), s.pos(b));
+        assert!((pa.x - 10.0).abs() < 1e-6 && (pb.x - 10.0).abs() < 1e-6);
+        assert!((pa.distance(pb) - 40.0).abs() < 1e-6, "{pa:?} {pb:?}");
+        // The plane moves to x = 25: the ends keep their y.
+        assert!(s.set_projected(
+            line,
+            Projected::Line(Vec2::new(25.0, -75.0), Vec2::new(25.0, 75.0))
+        ));
+        assert!(solve::solve(&mut s).conflicting.is_empty());
+        assert!(s.pos(a).distance(Vec2::new(25.0, pa.y)) < 1e-6);
+        assert!(s.pos(b).distance(Vec2::new(25.0, pb.y)) < 1e-6);
     }
 }

@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = 押している間は推定をオフ
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = 使用
+sketch-tool-intersection = 交差
 sketch-tool-line = 線分
 sketch-tool-midpoint-line = 中点線分
 sketch-tool-corner-rectangle = コーナー矩形
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = { $name }の正常な時点を編集…
 sketch-constraint-not-applicable = { $constraint }は選択項目に適用できません
 sketch-normal-pick-line-first = 先に線分を選択し、次に平面を選択してください
 sketch-normal-plane-parallel = 法線：平面がスケッチと平行です
+sketch-plane-parallel = 平面がスケッチと平行です
 sketch-glyph-select-geometry = ジオメトリを選択
 sketch-glyph-hide = 拘束を非表示
 sketch-glyph-escape = 拘束を終了

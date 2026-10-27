@@ -1655,6 +1655,7 @@ view-shortcut-no-inferencing = Hold to turn off inferencing
 ## crates/cadrs_app/src/sketch.rs
 # Sketch tools: their names (toolbar menus, Search tools, the Keyboard shortcuts dialog).
 sketch-tool-use = Use
+sketch-tool-intersection = Intersection
 sketch-tool-line = Line
 sketch-tool-midpoint-line = Midpoint line
 sketch-tool-corner-rectangle = Corner rectangle
@@ -1844,6 +1845,7 @@ view-repair-edit-healthy = Edit healthy moment of { $name }…
 sketch-constraint-not-applicable = { $constraint } does not apply to the selection
 sketch-normal-pick-line-first = Pick a line first, then the plane
 sketch-normal-plane-parallel = Normal: the plane is parallel to the sketch
+sketch-plane-parallel = The plane is parallel to the sketch
 # A constraint glyph's context menu.
 sketch-glyph-select-geometry = Select geometry
 sketch-glyph-hide = Hide constraints

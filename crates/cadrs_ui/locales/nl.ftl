@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = Vasthouden om automatische uitlijning uit te scha
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = Gebruiken
+sketch-tool-intersection = Doorsnijding
 sketch-tool-line = Lijn
 sketch-tool-midpoint-line = Lijn vanuit middelpunt
 sketch-tool-corner-rectangle = Rechthoek vanuit hoek
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = Laatste foutloze toestand van { $name } bewerken…
 sketch-constraint-not-applicable = { $constraint } is niet van toepassing op de selectie
 sketch-normal-pick-line-first = Kies eerst een lijn en dan het werkvlak
 sketch-normal-plane-parallel = Normaal: het werkvlak is evenwijdig aan de schets
+sketch-plane-parallel = Het werkvlak is evenwijdig aan de schets
 sketch-glyph-select-geometry = Geometrie selecteren
 sketch-glyph-hide = Beperkingen verbergen
 sketch-glyph-escape = Beperking afbreken

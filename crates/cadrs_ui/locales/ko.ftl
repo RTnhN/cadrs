@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = 누르고 있으면 추론 끄기
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = 사용
+sketch-tool-intersection = 교차
 sketch-tool-line = 선
 sketch-tool-midpoint-line = 중간점 선
 sketch-tool-corner-rectangle = 코너 사각형
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = { $name }의 정상 시점 편집…
 sketch-constraint-not-applicable = { $constraint } 구속조건을 선택 항목에 적용할 수 없습니다
 sketch-normal-pick-line-first = 먼저 선을 선택한 다음 평면을 선택하세요
 sketch-normal-plane-parallel = 법선: 평면이 스케치와 평행합니다
+sketch-plane-parallel = 평면이 스케치와 평행합니다
 sketch-glyph-select-geometry = 형상 선택
 sketch-glyph-hide = 구속조건 숨기기
 sketch-glyph-escape = 구속조건 종료

@@ -137,6 +137,9 @@ pub enum SketchTool {
     #[default]
     Select,
     Use,
+    /// Intersection (Use ▾ in Onshape's newer toolbar): a plane picked makes the line where it
+    /// cuts the sketch plane, held on it with its ends free (see [`cadrs_sketch::Sketch::carriers`]).
+    Intersection,
     Line,
     MidpointLine,
     CornerRectangle,
@@ -187,6 +190,7 @@ impl SketchTool {
         match self {
             SketchTool::Select => "common-select",
             SketchTool::Use => "sketch-tool-use",
+            SketchTool::Intersection => "sketch-tool-intersection",
             SketchTool::Line => "sketch-tool-line",
             SketchTool::MidpointLine => "sketch-tool-midpoint-line",
             SketchTool::CornerRectangle => "sketch-tool-corner-rectangle",
@@ -1946,7 +1950,7 @@ pub fn sketch_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
                 "intersection",
                 false,
                 "sketch-toolbar-intersection",
-                B::Other("Intersection"),
+                B::Tool(T::Intersection),
             ),
         ],
         &[
@@ -2788,6 +2792,7 @@ mod toolbar_tests {
             T::Constrain(ConstraintKind::Normal),
             // T5.
             T::Use,
+            T::Intersection,
             T::Text,
             T::Constrain(ConstraintKind::Pierce),
         ] {
@@ -2813,7 +2818,6 @@ mod toolbar_tests {
         // T3: Shift+F is the sketch fillet, Shift+S the point.
         assert_eq!(SketchTool::from_key(KeyCode::KeyF, true), Some(T::Fillet));
         assert_eq!(SketchTool::from_key(KeyCode::KeyS, true), Some(T::Point));
-        assert!(!SketchToolButton::Other("Intersection").implemented());
         assert!(SketchToolButton::Construction.implemented());
         // T4: M is Trim, X Extend, Shift+K Normal.
         assert_eq!(SketchTool::from_key(KeyCode::KeyM, false), Some(T::Trim));

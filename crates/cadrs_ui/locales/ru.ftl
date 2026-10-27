@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = Удерживайте, чтобы отключи
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = Проецировать
+sketch-tool-intersection = Пересечение
 sketch-tool-line = Отрезок
 sketch-tool-midpoint-line = Отрезок от середины
 sketch-tool-corner-rectangle = Прямоугольник по углам
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = Редактировать { $name } в послед�
 sketch-constraint-not-applicable = Зависимость «{ $constraint }» неприменима к выбранному
 sketch-normal-pick-line-first = Сначала выберите отрезок, затем плоскость
 sketch-normal-plane-parallel = Нормаль: плоскость параллельна эскизу
+sketch-plane-parallel = Плоскость параллельна эскизу
 sketch-glyph-select-geometry = Выбрать геометрию
 sketch-glyph-hide = Скрыть зависимости
 sketch-glyph-escape = Выйти из инструмента зависимостей

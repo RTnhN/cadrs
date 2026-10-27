@@ -1178,6 +1178,7 @@ view-shortcut-no-inferencing = Segure para desativar a inferência
 
 ## crates/cadrs_app/src/sketch.rs
 sketch-tool-use = Usar
+sketch-tool-intersection = Interseção
 sketch-tool-line = Linha
 sketch-tool-midpoint-line = Linha pelo ponto médio
 sketch-tool-corner-rectangle = Retângulo de canto
@@ -1340,6 +1341,7 @@ view-repair-edit-healthy = Editar o último estado sem erros de { $name }…
 sketch-constraint-not-applicable = { $constraint } não se aplica à seleção
 sketch-normal-pick-line-first = Escolha primeiro uma linha e depois o plano
 sketch-normal-plane-parallel = Normal: o plano é paralelo ao esboço
+sketch-plane-parallel = O plano é paralelo ao esboço
 sketch-glyph-select-geometry = Selecionar geometria
 sketch-glyph-hide = Ocultar restrições
 sketch-glyph-escape = Sair da restrição
