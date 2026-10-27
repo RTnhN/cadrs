@@ -196,6 +196,12 @@ fn dimension_pointer(
     q_edit: Query<(&ComputedNode, &UiGlobalTransform), With<DimEditBox>>,
     mut state: Local<PointerState>,
     external: Res<crate::sketch_tools::ExternalSnap>,
+    (cache, view, rect, planes): (
+        Res<crate::parts::PartCache>,
+        Res<crate::viewport::ViewportView>,
+        Res<ViewportRect>,
+        Res<crate::viewport::PlanesVisible>,
+    ),
     mut commands: Commands,
 ) {
     let (Some(map), Some(sketch)) = (
@@ -297,6 +303,25 @@ fn dimension_pointer(
                 })
                 .map(|h| h.entity)
                 .or_else(|| map.axis_at(pos));
+                // A plane seen at an angle: picked as its line.
+                if hit.is_none()
+                    && let Some(s) = session.as_deref()
+                    && let Some(features) = doc
+                        .as_deref()
+                        .and_then(|d| d.doc.element(s.element))
+                        .map(|el| el.features())
+                    && let Some(frame) = features
+                        .iter()
+                        .find(|f| f.id == s.feature)
+                        .and_then(|f| f.sketch()?.plane)
+                        .map(|p| p.frame())
+                    && let Some(plane) = crate::sketch_links::plane_under(
+                        features, s.feature, &frame, &cache, planes.0, &view.view, &rect, pos,
+                    )
+                {
+                    commands.queue(move |world: &mut World| pick_plane(world, plane));
+                    continue;
+                }
                 let click = map.to_sketch(pos).unwrap_or(SVec2::new(f64::NAN, f64::NAN));
                 let mut with = dim.picks.clone();
                 let fits = hit.is_some_and(|e| {
@@ -345,6 +370,63 @@ fn dimension_pointer(
     };
     if dim.preview != want {
         dim.preview = want;
+    }
+}
+
+/// A plane picked with the Dimension tool (in the feature list or the view): the sketch's axis
+/// along it, else its line, used first (construction, linked, as a part edge measured to is)
+/// when it is not used yet.
+pub fn pick_plane(world: &mut World, plane: cadrs_sketch::PlaneRef) {
+    let Some(s) = world.get_resource::<SketchSession>() else {
+        return;
+    };
+    let (element, feature) = (s.element, s.feature);
+    let frame = world
+        .get_resource::<ActiveDocument>()
+        .and_then(|d| d.doc.element(element))
+        .and_then(|el| el.features().iter().find(|f| f.id == feature))
+        .and_then(|f| f.sketch()?.plane)
+        .map(|p| p.frame());
+    let (Some(frame), Some(sketch)) = (frame, world_sketch(world)) else {
+        return;
+    };
+    let mut e = match crate::sketch_links::plane_entity(sketch, &frame, plane) {
+        Some(e) => e,
+        None => return,
+    };
+    if let SketchEntity::Link(link) = e {
+        let Some(line) = cadrs_core::links::plane_line(&plane.frame(), &frame) else {
+            return;
+        };
+        let op = SketchOp::UseConstruction {
+            items: vec![(line, link)],
+        };
+        if let Err(err) = world.resource_mut::<ActiveDocument>().execute(&EditSketch {
+            element,
+            feature,
+            op,
+        }) {
+            warn!("cannot use the plane to dimension to: {err}");
+            return;
+        }
+        match world_sketch(world).and_then(|sk| sk.linked_curve(link)) {
+            Some(c) => e = SketchEntity::Curve(c),
+            None => return,
+        }
+    }
+    let Some(sketch) = world_sketch(world).cloned() else {
+        return;
+    };
+    let mut dim = world.resource_mut::<DimensionTool>();
+    let mut with = dim.picks.clone();
+    with.push(e);
+    let unknown = SVec2::new(f64::NAN, f64::NAN);
+    if !dim.picks.contains(&e) && dim.picks.len() < 2 && accepts(&sketch, &with) {
+        dim.picks = with;
+        dim.clicks.push(unknown);
+    } else if accepts(&sketch, &[e]) {
+        dim.picks = vec![e];
+        dim.clicks = vec![unknown];
     }
 }
 

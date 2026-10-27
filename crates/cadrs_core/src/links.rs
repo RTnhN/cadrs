@@ -509,6 +509,48 @@ pub fn plane_trace(p: &PlaneFrame, frame: &PlaneFrame) -> Option<Curve3> {
     ))
 }
 
+/// [`plane_trace`] in the sketch's coordinates: the line a used plane ([`Link::Plane`]) is.
+pub fn plane_line(p: &PlaneFrame, frame: &PlaneFrame) -> Option<Projected> {
+    let Curve3::Line(a, b) = plane_trace(p, frame)? else {
+        return None;
+    };
+    Some(Projected::Line(frame.to_sketch(a), frame.to_sketch(b)))
+}
+
+/// Intersection's line: [`plane_line`] cut to the square of half-size `half` about `center` on
+/// the plane `p` (where the plane is drawn). `None` if the planes are parallel or the line
+/// misses the square.
+pub fn plane_line_in_square(
+    p: &PlaneFrame,
+    center: Vec3,
+    half: f64,
+    frame: &PlaneFrame,
+) -> Option<Projected> {
+    let Curve3::Line(a, b) = plane_trace(p, frame)? else {
+        return None;
+    };
+    let d = sub(b, a);
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for w in [unit(p.u), unit(p.v)] {
+        // |(a + t·d − center)·w| ≤ half
+        let (o, k) = (dot(sub(a, center), w), dot(d, w));
+        if k.abs() < 1e-12 {
+            if o.abs() > half {
+                return None;
+            }
+            continue;
+        }
+        let (t0, t1) = ((-half - o) / k, (half - o) / k);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+    }
+    if hi - lo < 1e-9 {
+        return None;
+    }
+    let at = |t: f64| frame.to_sketch(add(a, scale(d, t)));
+    Some(Projected::Line(at(lo), at(hi)))
+}
+
 /// What links resolve against: the parts made before the sketch and the features before it.
 pub struct LinkContext<'a> {
     pub solids: Vec<(FeatureId, &'a Solid)>,

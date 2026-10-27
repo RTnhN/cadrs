@@ -1143,3 +1143,76 @@ fn a_spline_edge_projects_to_a_spline() {
         assert!(matches!(p, Projected::Line(..)), "{p:?}");
     }
 }
+
+#[test]
+fn a_point_constrained_to_a_used_plane_follows_it() {
+    // A Top sketch's line end made coincident with a Plane 25 mm off Right (picked with a
+    // constraint tool: the plane is used first, its line construction); moving the plane to
+    // 40 mm moves the end with it.
+    use cadrs_core::commands::{AddFeature, SetFeature};
+    use cadrs_core::document::FeatureKind;
+    use cadrs_core::links::plane_line;
+    use cadrs_core::plane::{PlaneEntity, PlaneFeature, PlaneType};
+    use cadrs_sketch::constraint::{FitOp, fit_op};
+    use cadrs_sketch::{ConstraintKind, SketchEntity};
+    let mut d = Doc::new();
+    let plane = FeatureId::new();
+    let offset = |offset: f64| {
+        FeatureKind::Plane(PlaneFeature {
+            kind: PlaneType::Offset,
+            entities: vec![PlaneEntity::Plane(PlaneRef::Right)],
+            offset,
+            offset_expr: format!("{offset} mm"),
+            ..PlaneFeature::default()
+        })
+    };
+    d.h.execute(
+        &mut d.d,
+        &AddFeature {
+            element: d.el,
+            feature: plane,
+            base_name: "Plane".into(),
+            kind: offset(25.0),
+        },
+    )
+    .unwrap();
+    let s = d.sketch(PlaneRef::Top);
+    d.edit(
+        s,
+        SketchOp::AddPolyline {
+            points: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)],
+            closed: false,
+            construction: false,
+            label: "Add line",
+        },
+    );
+    let g = d.g(s).clone();
+    let line = g.curves.keys().next().unwrap();
+    let (_, end) = g.curve_ends(line).unwrap();
+    let plane_ref = cadrs_core::parts::plane_feature_ref(&d.features(), plane).unwrap();
+    let link = Link::Plane(plane_ref);
+    let top = PlaneRef::Top.frame();
+    let sel = [SketchEntity::Point(end), SketchEntity::Link(link)];
+    let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &g, &sel, |l| match l {
+        Link::Plane(p) => plane_line(&p.frame(), &top),
+        _ => None,
+    }) else {
+        panic!("a point and a plane fit Coincident");
+    };
+    d.edit(s, *op);
+    let x = |d: &Doc| d.g(s).pos(end).x;
+    assert!((x(&d).abs() - 25.0).abs() < 1e-6, "x = {}", x(&d));
+    let used = d.g(s).linked_curve(link).expect("the plane is used");
+    assert!(d.g(s).curves[used].construction);
+    d.h.execute(
+        &mut d.d,
+        &SetFeature {
+            element: d.el,
+            feature: plane,
+            kind: offset(40.0),
+            label: "Edit Plane".into(),
+        },
+    )
+    .unwrap();
+    assert!((x(&d).abs() - 40.0).abs() < 1e-6, "x = {}", x(&d));
+}

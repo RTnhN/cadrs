@@ -958,7 +958,7 @@ pub(crate) fn sketch_pointer(
         units,
         time,
         external,
-        (cache, view, rect),
+        (cache, view, rect, planes),
     ): (
         Res<crate::sketch_glyphs::SketchOverlay>,
         Res<crate::sketch_constrain::SketchAnalysis>,
@@ -971,6 +971,7 @@ pub(crate) fn sketch_pointer(
             Res<crate::parts::PartCache>,
             Res<crate::viewport::ViewportView>,
             Res<ViewportRect>,
+            Res<crate::viewport::PlanesVisible>,
         ),
     ),
     mut commands: Commands,
@@ -1050,6 +1051,24 @@ pub(crate) fn sketch_pointer(
                 }
             })
             .or_else(|| map.axis_at(pos))
+    };
+    // A plane seen at an angle where nothing else is (planes come last), for a constraint tool
+    // (not Normal's, which has its own, nor Pierce's) or Dimension: picked as its line.
+    let plane_at = |pos: Vec2| {
+        use cadrs_sketch::ConstraintKind as K;
+        let takes = match constraint_tool {
+            Some(K::Normal | K::Pierce) => false,
+            Some(_) => true,
+            None => dimension_tool,
+        };
+        if !takes {
+            return None;
+        }
+        let frame = frame?;
+        let p = crate::sketch_links::plane_under(
+            features, s.feature, &frame, &cache, planes.0, &view.view, &rect, pos,
+        )?;
+        crate::sketch_links::plane_entity(sketch, &frame, p)
     };
     let mut drag_moved = false;
     for input in inputs.read() {
@@ -1236,7 +1255,7 @@ pub(crate) fn sketch_pointer(
                 }
                 if let Some(kind) = constraint_tool {
                     if !moved {
-                        match press.hit {
+                        match press.hit.or_else(|| plane_at(pos)) {
                             Some(e) => crate::sketch_constrain::pick_for_constraint(
                                 kind,
                                 sketch,
@@ -1245,11 +1264,9 @@ pub(crate) fn sketch_pointer(
                                 &mut commands,
                                 s,
                                 |l| {
-                                    let frame = frame?;
-                                    crate::sketch_links::vertex_at(
-                                        features, s.feature, &frame, &cache, l,
+                                    crate::sketch_links::link_shape(
+                                        features, s.feature, &frame?, &cache, l,
                                     )
-                                    .map(|(p, _)| p)
                                 },
                             ),
                             // Pierce's curve is outside the sketch (`sketch_links`).
@@ -1612,7 +1629,8 @@ pub(crate) fn sketch_pointer(
             {
                 None
             } else {
-                pick_at(c)
+                // What a click would pick, a plane last.
+                pick_at(c).or_else(|| plane_at(c))
             }
         }
     };

@@ -341,8 +341,11 @@ fn classify(s: &Sketch, e: SketchEntity) -> Option<Pick> {
             // A Bézier curve is sized by its points (dimension those).
             CurveKind::Bezier { .. } => return None,
         },
-        // A used part vertex: its point.
-        SketchEntity::Link(l) => Pick::Point(PointRef::Point(s.linked_point(l)?)),
+        // A used part vertex: its point; a used plane: its line.
+        SketchEntity::Link(l) => match s.linked_point(l) {
+            Some(p) => Pick::Point(PointRef::Point(p)),
+            None => Pick::Line(CurveRef::Curve(s.linked_curve(l)?)),
+        },
         SketchEntity::XAxis => Pick::Line(CurveRef::XAxis),
         SketchEntity::YAxis => Pick::Line(CurveRef::YAxis),
         SketchEntity::Dimension(_) | SketchEntity::Constraint(_) | SketchEntity::Text(_) => {

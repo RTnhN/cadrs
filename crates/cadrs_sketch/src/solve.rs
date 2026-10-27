@@ -694,6 +694,9 @@ impl System {
                 | ConstraintOf::Pierce(PointRef::Point(p), _) => {
                     fixed.insert(p, s.pos(p));
                 }
+                // A plane's line with its carrier: its ends move along it (below).
+                ConstraintOf::Use(CurveRef::Curve(k), crate::Link::Plane(_))
+                    if s.carriers.contains_key(k) => {}
                 ConstraintOf::FixCurve(CurveRef::Curve(k))
                 | ConstraintOf::Use(CurveRef::Curve(k), _) => {
                     for p in s.curve_points(k) {
@@ -1144,6 +1147,17 @@ impl System {
                     for i in 0..2 {
                         self.push(Kind::Diff, vec![c1[i], c2[i]], src);
                     }
+                }
+            }
+            // A plane's line: both ends on the plane's line in the sketch.
+            ConstraintOf::Use(CurveRef::Curve(k), crate::Link::Plane(_))
+                if let Some(&(p, q)) = s.carriers.get(k)
+                    && let Some(CurveKind::Line { a, b }) = s.curves.get(k).map(|c| c.kind) =>
+            {
+                let carrier = [p.x, p.y, q.x, q.y].map(In::Const);
+                for e in [a, b] {
+                    let pp = self.point(s, PointRef::Point(e)).to_vec();
+                    self.push(Kind::PointLine, [pp, carrier.to_vec()].concat(), src);
                 }
             }
             // Structural: fixed points are constants.

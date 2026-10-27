@@ -86,6 +86,9 @@ pub enum CurveSpec {
     Circle(Vec2, f64),
     XAxis,
     YAxis,
+    /// The curve held where a link puts it (a used plane; see
+    /// [`Sketch::linked_curve`](crate::Sketch::linked_curve)).
+    Linked(crate::Link),
 }
 
 /// What a horizontal or vertical constraint applies to.
@@ -322,6 +325,7 @@ fn resolve_curve(s: &Sketch, c: CurveSpec) -> Option<CurveRef> {
         CurveSpec::Id(id) => s.curves.contains_key(id).then_some(CurveRef::Curve(id)),
         CurveSpec::XAxis => Some(CurveRef::XAxis),
         CurveSpec::YAxis => Some(CurveRef::YAxis),
+        CurveSpec::Linked(link) => s.linked_curve(link).map(CurveRef::Curve),
         CurveSpec::Between(a, b) => s
             .curves
             .keys()
@@ -508,8 +512,11 @@ fn classify(s: &Sketch, e: crate::SketchEntity) -> Option<Pick> {
             CurveKind::Bezier { .. } => Pick::Bezier(CurveRef::Curve(c)),
             _ => Pick::Round(CurveRef::Curve(c)),
         },
-        // A used part vertex: its point.
-        E::Link(l) => Pick::Point(PointRef::Point(s.linked_point(l)?)),
+        // A used part vertex: its point; a used plane: its line.
+        E::Link(l) => match s.linked_point(l) {
+            Some(p) => Pick::Point(PointRef::Point(p)),
+            None => Pick::Line(CurveRef::Curve(s.linked_curve(l)?)),
+        },
         E::XAxis => Pick::Line(CurveRef::XAxis),
         E::YAxis => Pick::Line(CurveRef::YAxis),
         E::Dimension(_) | E::Constraint(_) | E::Text(_) => return None,
@@ -524,24 +531,26 @@ pub enum FitOp {
     Invalid,
 }
 
-/// [`fit`] for a selection that may hold part vertices ([`crate::SketchEntity::Link`]): those
-/// not used yet are used first, as points where `at` projects them, and the constraints refer
-/// to them by link (one undoable edit). `None` from `at`: the vertex is gone (invalid).
+/// [`fit`] for a selection that may hold part vertices or planes ([`crate::SketchEntity::Link`]):
+/// those not used yet are used first, as the point or line `at` projects them to, and the
+/// constraints refer to them by link (one undoable edit). `None` from `at`: the vertex is gone
+/// or the plane is parallel to the sketch (invalid).
 pub fn fit_op(
     kind: ConstraintKind,
     s: &Sketch,
     sel: &[crate::SketchEntity],
-    at: impl Fn(crate::Link) -> Option<Vec2>,
+    at: impl Fn(crate::Link) -> Option<crate::projection::Projected>,
 ) -> FitOp {
     let mut items = Vec::new();
     for e in sel {
         if let crate::SketchEntity::Link(l) = *e
             && s.linked_point(l).is_none()
+            && s.linked_curve(l).is_none()
         {
-            let Some(p) = at(l) else {
+            let Some(shape) = at(l) else {
                 return FitOp::Invalid;
             };
-            items.push((crate::projection::Projected::Point(p), l));
+            items.push((shape, l));
         }
     }
     let add = |constraints| crate::SketchOp::AddConstraint {
@@ -557,8 +566,12 @@ pub fn fit_op(
     }
     let mut trial = s.clone();
     for (shape, l) in &items {
-        if let crate::projection::Projected::Point(p) = shape {
-            trial.add_projected_point(*p, *l);
+        let used = match shape {
+            crate::projection::Projected::Point(p) => trial.add_projected_point(*p, *l).is_some(),
+            _ => trial.add_projected(shape.clone(), *l).is_some(),
+        };
+        if !used {
+            return FitOp::Invalid;
         }
     }
     match fit(kind, &trial, sel) {
@@ -578,7 +591,13 @@ pub fn fit_op(
             };
             let curve = |c: CurveRef| {
                 Some(match c {
-                    CurveRef::Curve(id) => CurveSpec::Id(id),
+                    CurveRef::Curve(id) if s.curves.contains_key(id) => CurveSpec::Id(id),
+                    CurveRef::Curve(id) => CurveSpec::Linked(
+                        items
+                            .iter()
+                            .map(|(_, l)| *l)
+                            .find(|l| trial.linked_curve(*l) == Some(id))?,
+                    ),
                     CurveRef::XAxis => CurveSpec::XAxis,
                     CurveRef::YAxis => CurveSpec::YAxis,
                 })
@@ -860,6 +879,7 @@ impl Sketch {
 mod tests {
     use super::*;
     use crate::SketchOp;
+    use crate::projection::Projected;
 
     fn rect(s: &mut Sketch, corners: [Vec2; 4]) {
         SketchOp::Batch(vec![
@@ -976,8 +996,9 @@ mod tests {
             unreachable!()
         };
         let sel = [SketchEntity::Point(b), SketchEntity::Link(vertex)];
-        let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &s, &sel, |_| Some(corner))
-        else {
+        let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &s, &sel, |_| {
+            Some(Projected::Point(corner))
+        }) else {
             panic!("a point and a vertex fit Coincident");
         };
         op.apply(&mut s).unwrap();
@@ -991,8 +1012,9 @@ mod tests {
         // Horizontal from the other end to the (now used) vertex: no second point.
         let points = s.points.len();
         let sel = [SketchEntity::Point(a), SketchEntity::Link(vertex)];
-        let FitOp::Complete(op) = fit_op(ConstraintKind::Horizontal, &s, &sel, |_| Some(corner))
-        else {
+        let FitOp::Complete(op) = fit_op(ConstraintKind::Horizontal, &s, &sel, |_| {
+            Some(Projected::Point(corner))
+        }) else {
             panic!("two points fit Horizontal");
         };
         op.apply(&mut s).unwrap();
@@ -1007,6 +1029,46 @@ mod tests {
             },
         };
         let sel = [SketchEntity::Point(a), SketchEntity::Link(other)];
+        assert_eq!(
+            fit_op(ConstraintKind::Coincident, &s, &sel, |_| None),
+            FitOp::Invalid
+        );
+    }
+    /// A plane picked with a constraint tool is used first (its trace, a construction line),
+    /// then constrained to; a second constraint reuses that line.
+    #[test]
+    fn constraining_to_a_plane_uses_it_first() {
+        use crate::{Link, PlaneRef, SketchEntity};
+        let plane = Link::Plane(PlaneRef::Right);
+        let trace = Projected::Line(Vec2::new(30.0, -50.0), Vec2::new(30.0, 50.0));
+        let mut s = Sketch::new();
+        let line = s.add_line(Vec2::new(0.0, 0.0), Vec2::new(15.0, 5.0));
+        let Some(CurveKind::Line { a, b }) = s.curves.get(line).map(|c| c.kind) else {
+            unreachable!()
+        };
+        let sel = [SketchEntity::Point(b), SketchEntity::Link(plane)];
+        let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &s, &sel, |_| {
+            Some(trace.clone())
+        }) else {
+            panic!("a point and a plane fit Coincident");
+        };
+        op.apply(&mut s).unwrap();
+        let used = s.linked_curve(plane).expect("the plane is used");
+        assert!(s.curves[used].construction);
+        assert!((s.pos(b).x - 30.0).abs() < 1e-9, "the end is on the plane");
+        let curves = s.curves.len();
+        let sel = [SketchEntity::Point(a), SketchEntity::Link(plane)];
+        let FitOp::Complete(op) = fit_op(ConstraintKind::Coincident, &s, &sel, |_| None) else {
+            panic!("a point and a used plane fit Coincident");
+        };
+        op.apply(&mut s).unwrap();
+        assert_eq!(s.curves.len(), curves, "the used plane is reused");
+        assert!((s.pos(a).x - 30.0).abs() < 1e-9);
+        // A plane parallel to the sketch has no trace.
+        let sel = [
+            SketchEntity::Point(a),
+            SketchEntity::Link(Link::Plane(PlaneRef::Top)),
+        ];
         assert_eq!(
             fit_op(ConstraintKind::Coincident, &s, &sel, |_| None),
             FitOp::Invalid

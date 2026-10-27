@@ -1,4 +1,5 @@
-//! Use (S20, U) and Pierce (S12.11, Shift+G): picking geometry outside the sketch.
+//! Use (S20, U), Intersection and Pierce (S12.11, Shift+G): picking geometry outside the
+//! sketch.
 //!
 //! - **Use:** hovering a part edge, another sketch's curve, a planar face (all its edges) or a
 //!   curved face (its silhouettes seen along the sketch normal, or the one under the pointer)
@@ -13,24 +14,34 @@
 //!   is hovered and picked (Shift adds it) like a sketch point. A constraint to it uses it
 //!   first: a point held where the vertex projects, with a Use link, constrained to as any
 //!   point ([`cadrs_sketch::constraint::fit_op`]).
+//! - **Planes:** Intersection takes a default plane or a Plane feature, picked in the feature
+//!   list or seen at an angle in the view: the line where it cuts the sketch plane, as long as
+//!   the plane is drawn, held on the plane with its ends free ([`Sketch::carriers`]). A
+//!   constraint tool or Dimension takes a plane as that line (made when the constraint is), or
+//!   as the sketch's X or Y axis when the plane cuts the sketch along it. Planes come last: a
+//!   plane is under the pointer only where nothing else is ([`plane_under`]).
 //!
 //! Only parts and sketches made before the edited sketch can be used, as in Onshape.
 
 use bevy::picking::hover::HoverMap;
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::*;
-use cadrs_core::links::{LinkContext, face_edges, silhouettes};
+use cadrs_core::links::{LinkContext, face_edges, plane_line, plane_trace, silhouettes};
 use cadrs_core::{Feature, FeatureId, Solid};
 use cadrs_sketch::projection::Projected;
 use cadrs_sketch::{
-    ConstraintKind, ConstraintOf, Link, PlaneFrame, PointRef, SketchEntity, SketchOp,
+    ConstraintKind, ConstraintOf, Link, PlaneFrame, PlaneRef, PointRef, Sketch, SketchEntity,
+    SketchOp,
 };
+use cadrs_ui::{Theme, show_toast};
 
-use crate::camera::ViewState;
+use crate::camera::{ViewState, ray_square};
 use crate::parts::{FaceOutlineGizmos, PartCache, pick_face, pick_vertex};
 use crate::sketch::{ActiveSketchTool, PartStudioMode, SketchSession, SketchTool};
 use crate::sketch_tools::{SketchSelection, SketchToolsSet, execute, over_viewport};
-use crate::viewport::{ViewportArea, ViewportRect, ViewportView};
+use crate::viewport::{
+    PLANE_HALF, Pick, PickRequest, PlaneKind, ViewportArea, ViewportRect, ViewportView,
+};
 use crate::{ActiveDocument, AppState};
 
 pub struct SketchLinksPlugin;
@@ -41,6 +52,14 @@ impl Plugin for SketchLinksPlugin {
             .add_systems(
                 Update,
                 link_pointer
+                    .in_set(SketchToolsSet)
+                    .after(crate::sketch_tools::sketch_pointer)
+                    .run_if(in_state(PartStudioMode::Sketching))
+                    .run_if(in_state(AppState::Document)),
+            )
+            .add_systems(
+                Update,
+                plane_picks
                     .in_set(SketchToolsSet)
                     .after(crate::sketch_tools::sketch_pointer)
                     .run_if(in_state(PartStudioMode::Sketching))
@@ -337,13 +356,14 @@ pub fn vertex_at(
     Some((at, v3(point)))
 }
 
-/// [`vertex_at`] in the plane of the edited sketch, for
-/// [`cadrs_sketch::constraint::fit_op`].
-pub fn sketch_vertex_at<'a>(
+/// What a link puts in the plane of the edited sketch, for
+/// [`cadrs_sketch::constraint::fit_op`]: a part vertex's point ([`vertex_at`]) or a plane's
+/// line ([`cadrs_core::links::plane_line`]).
+pub fn sketch_link_at<'a>(
     doc: &'a ActiveDocument,
     s: &SketchSession,
     cache: &'a PartCache,
-) -> impl Fn(Link) -> Option<cadrs_sketch::Vec2> + 'a {
+) -> impl Fn(Link) -> Option<Projected> + 'a {
     let features = doc
         .doc
         .element(s.element)
@@ -354,7 +374,242 @@ pub fn sketch_vertex_at<'a>(
         .find(|f| f.id == sketch)
         .and_then(|f| f.sketch()?.plane)
         .map(|p| p.frame());
-    move |l| vertex_at(features, sketch, &frame?, cache, l).map(|(p, _)| p)
+    move |l| link_shape(features, sketch, &frame?, cache, l)
+}
+
+/// [`sketch_link_at`] for the sketch `sketch` on `frame`.
+pub fn link_shape(
+    features: &[Feature],
+    sketch: FeatureId,
+    frame: &PlaneFrame,
+    cache: &PartCache,
+    link: Link,
+) -> Option<Projected> {
+    match link {
+        Link::Plane(p) => plane_shape(cache, p, frame),
+        l => vertex_at(features, sketch, frame, cache, l).map(|(p, _)| Projected::Point(p)),
+    }
+}
+
+/// A plane's line in the sketch as Intersection makes it: where the plane is drawn (its square,
+/// see [`PartCache::plane_square`]), else 100 mm about the sketch origin's nearest point
+/// ([`plane_line`]) if the square does not reach the sketch plane.
+pub fn plane_shape(cache: &PartCache, plane: PlaneRef, frame: &PlaneFrame) -> Option<Projected> {
+    let p = plane.frame();
+    let (center, half) = match plane {
+        PlaneRef::Feature(_) => cache.plane_square(&p),
+        _ => ([0.0; 3], PLANE_HALF),
+    };
+    cadrs_core::links::plane_line_in_square(&p, center, half as f64, frame)
+        .or_else(|| plane_line(&p, frame))
+}
+
+/// A plane picked while sketching (in the feature list or the view): a default plane, or a
+/// Plane feature made before the sketch (as Onshape, only earlier features can be used).
+pub fn picked_plane(
+    features: &[Feature],
+    sketch: FeatureId,
+    cache: &PartCache,
+    pick: Pick,
+) -> Option<PlaneRef> {
+    match pick {
+        Pick::Plane(k) => Some(k.plane_ref()),
+        Pick::Feature(id) => {
+            let i = features.iter().position(|f| f.id == sketch)?;
+            features[..i].iter().any(|f| f.id == id).then_some(())?;
+            let f = cache.planes.get(&id)?;
+            Some(PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(id.0, *f)))
+        }
+        _ => None,
+    }
+}
+
+/// The nearest plane under the pointer in the view that cuts the sketch plane: a default plane
+/// shown (`shown`, see [`crate::viewport::PlanesVisible`]) or a Plane feature made before the
+/// sketch. Edge-on planes (the sketch's axes in a view normal to it) are not under it. Planes
+/// come last: none is under the pointer where a part, a sketch's curve, point or region is
+/// (the callers check the edited sketch's own entities first).
+#[allow(clippy::too_many_arguments)]
+pub fn plane_under(
+    features: &[Feature],
+    sketch: FeatureId,
+    frame: &PlaneFrame,
+    cache: &PartCache,
+    shown: [bool; 3],
+    view: &ViewState,
+    rect: &ViewportRect,
+    cursor: Vec2,
+) -> Option<PlaneRef> {
+    let at = rect.offset(cursor);
+    if pick_vertex(cache, view, at).is_some()
+        || crate::parts::pick_edge(cache, view, at).is_some()
+        || pick_face(cache, view, at).is_some()
+        || crate::parts::pick_sketch_point(cache, view, at).is_some()
+        || crate::parts::pick_sketch_curve(cache, view, at).is_some()
+        || crate::parts::pick_region(cache, view, at).is_some()
+    {
+        return None;
+    }
+    let (o, d) = view.ray(at);
+    let cuts = |p: &PlaneFrame| plane_trace(p, frame).is_some();
+    let defaults = PlaneKind::ALL
+        .into_iter()
+        .filter(|k| shown[k.index()] && cuts(&k.plane_ref().frame()))
+        .filter_map(|k| {
+            ray_square(o, d, Vec3::ZERO, k.u(), k.v(), PLANE_HALF).map(|t| (t, k.plane_ref()))
+        });
+    let i = features
+        .iter()
+        .position(|f| f.id == sketch)
+        .unwrap_or(features.len());
+    let planes = features[..i].iter().filter_map(|f| {
+        let fr = cache.planes.get(&f.id).filter(|fr| cuts(fr))?;
+        let (center, half) = cache.plane_square(fr);
+        let t = ray_square(o, d, v3(center), v3(fr.u), v3(fr.v), half)?;
+        Some((
+            t,
+            PlaneRef::Feature(cadrs_sketch::FeaturePlane::new(f.id.0, *fr)),
+        ))
+    });
+    defaults
+        .chain(planes)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, p)| p)
+}
+
+/// What a constraint or the Dimension tool picks for a plane: the sketch's X or Y axis where
+/// the plane cuts the sketch plane along it, the plane's line if it is used already, else the
+/// plane (used when the constraint is made). `None` for a plane parallel to the sketch.
+pub fn plane_entity(sketch: &Sketch, frame: &PlaneFrame, plane: PlaneRef) -> Option<SketchEntity> {
+    let Projected::Line(a, b) = plane_line(&plane.frame(), frame)? else {
+        return None;
+    };
+    const EPS: f64 = 1e-6;
+    if a.y.abs() < EPS && b.y.abs() < EPS {
+        return Some(SketchEntity::XAxis);
+    }
+    if a.x.abs() < EPS && b.x.abs() < EPS {
+        return Some(SketchEntity::YAxis);
+    }
+    let link = Link::Plane(plane);
+    Some(
+        sketch
+            .linked_curve(link)
+            .map_or(SketchEntity::Link(link), SketchEntity::Curve),
+    )
+}
+
+/// Intersection (or a constraint tool) on a plane parallel to the sketch: no line in it.
+pub fn parallel_plane_toast(commands: &mut Commands, theme: &Theme) {
+    show_toast(
+        commands,
+        theme,
+        "The plane is parallel to the sketch".to_string(),
+    );
+}
+
+/// A plane picked in the feature list while sketching (the view's are taken by
+/// [`link_pointer`], [`crate::sketch_tools::sketch_pointer`] and the Dimension tool):
+/// Intersection makes its line; a constraint tool or Dimension picks it as a line.
+#[allow(clippy::too_many_arguments)]
+fn plane_picks(
+    mut picks: MessageReader<PickRequest>,
+    session: Option<Res<SketchSession>>,
+    doc: Option<Res<ActiveDocument>>,
+    tool: Res<ActiveSketchTool>,
+    cache: Res<PartCache>,
+    theme: Res<Theme>,
+    mut selection: ResMut<SketchSelection>,
+    mut commands: Commands,
+) {
+    let (Some(s), Some(doc)) = (session.as_deref(), doc.as_deref()) else {
+        picks.clear();
+        return;
+    };
+    if s.waiting_for_plane {
+        picks.clear();
+        return;
+    }
+    let Some(el) = doc.doc.element(s.element) else {
+        picks.clear();
+        return;
+    };
+    let features = el.features();
+    let Some(sk) = features
+        .iter()
+        .find(|f| f.id == s.feature)
+        .and_then(|f| f.sketch())
+    else {
+        picks.clear();
+        return;
+    };
+    let Some(frame) = sk.plane.map(|p| p.frame()) else {
+        picks.clear();
+        return;
+    };
+    for p in picks.read() {
+        let Some(plane) =
+            p.0.and_then(|p| picked_plane(features, s.feature, &cache, p))
+        else {
+            continue;
+        };
+        pick_plane(
+            plane,
+            &tool,
+            &sk.geometry,
+            &frame,
+            s,
+            &mut selection,
+            &theme,
+            &mut commands,
+            |l| link_shape(features, s.feature, &frame, &cache, l),
+        );
+    }
+}
+
+/// What the active tool does with a picked plane (see [`plane_picks`]). Returns false if the
+/// tool takes no planes.
+#[allow(clippy::too_many_arguments)]
+pub fn pick_plane(
+    plane: PlaneRef,
+    tool: &ActiveSketchTool,
+    sketch: &Sketch,
+    frame: &PlaneFrame,
+    s: &SketchSession,
+    selection: &mut SketchSelection,
+    theme: &Theme,
+    commands: &mut Commands,
+    at: impl Fn(Link) -> Option<Projected>,
+) -> bool {
+    let target = (s.element, s.feature);
+    match tool.tool {
+        SketchTool::Intersection => match at(Link::Plane(plane)) {
+            Some(line) => execute(
+                commands,
+                target,
+                use_op(vec![(line, Link::Plane(plane))], tool.construction),
+            ),
+            None => parallel_plane_toast(commands, theme),
+        },
+        SketchTool::Dimension => match plane_entity(sketch, frame, plane) {
+            Some(_) => {
+                commands.queue(move |world: &mut World| {
+                    crate::sketch_dimension::pick_plane(world, plane)
+                });
+            }
+            None => parallel_plane_toast(commands, theme),
+        },
+        // Normal has its own (the line made normal to the plane); Pierce takes curves.
+        SketchTool::Constrain(ConstraintKind::Normal | ConstraintKind::Pierce) => return false,
+        SketchTool::Constrain(kind) => match plane_entity(sketch, frame, plane) {
+            Some(e) => crate::sketch_constrain::pick_for_constraint(
+                kind, sketch, e, selection, commands, s, at,
+            ),
+            None => parallel_plane_toast(commands, theme),
+        },
+        _ => return false,
+    }
+    true
 }
 
 /// What Pierce would take under the pointer: an edge or curve that crosses the plane.
@@ -409,10 +664,12 @@ fn link_pointer(
     rect: Res<ViewportRect>,
     mut selection: ResMut<SketchSelection>,
     mut pick: ResMut<LinkPick>,
+    planes: Res<crate::viewport::PlanesVisible>,
     mut commands: Commands,
 ) {
     let pierce = tool.tool == SketchTool::Constrain(ConstraintKind::Pierce);
     let using = tool.tool == SketchTool::Use;
+    let intersecting = tool.tool == SketchTool::Intersection;
     if pick.last_tool != tool.tool {
         pick.last_tool = tool.tool;
         pick.pending = None;
@@ -421,7 +678,7 @@ fn link_pointer(
         inputs.clear();
         return;
     };
-    if !(pierce || using) || s.waiting_for_plane {
+    if !(pierce || using || intersecting) || s.waiting_for_plane {
         inputs.clear();
         if pick.hover.is_some() {
             pick.hover = None;
@@ -489,6 +746,23 @@ fn link_pointer(
     };
     let hover = match pick.cursor.filter(|_| over) {
         Some(c) if using => use_hover(features, s.feature, frame, &cache, &view.view, &rect, c),
+        // A plane seen at an angle, where nothing of the sketch is: its line in it.
+        Some(c) if intersecting && own_point(c).is_none() => (|| {
+            let p = plane_under(
+                features, s.feature, &frame, &cache, planes.0, &view.view, &rect, c,
+            )?;
+            let line = plane_shape(&cache, p, &frame)?;
+            let Projected::Line(a, b) = line else {
+                return None;
+            };
+            let w = |q: cadrs_sketch::Vec2| v3(frame.to_world(q));
+            Some(LinkHover {
+                source: vec![vec![w(a), w(b)]],
+                items: vec![(line, Link::Plane(p))],
+                frame,
+                face: None,
+            })
+        })(),
         Some(c) if own_point(c).is_none() => {
             pierce_hover(features, s.feature, frame, &cache, &view.view, &rect, c).map(|(_, h)| h)
         }
@@ -502,7 +776,7 @@ fn link_pointer(
         _ => None,
     };
     if let Some(c) = clicked {
-        if using {
+        if using || intersecting {
             if let Some(h) = pick.hover.clone() {
                 execute(&mut commands, target, use_op(h.items, tool.construction));
             }
@@ -659,13 +933,20 @@ fn draw_vertex_picks(
         let SketchEntity::Link(link) = e else {
             continue;
         };
-        let Some((_, at)) = vertex_at(features, s.feature, &frame, &cache, link) else {
-            continue;
-        };
         let (color, radii): (Color, &[f32]) = if selected {
             (Color::srgb_u8(0xf6, 0xbc, 0x1a), &[1.0, 2.0, 3.0, 4.0, 5.0])
         } else {
             (Color::srgb_u8(0xf2, 0xb1, 0x3a), &[1.0, 2.0, 3.0, 4.0])
+        };
+        // A plane picked for a constraint (not used yet): its line.
+        if let Link::Plane(p) = link {
+            if let Some(Projected::Line(a, b)) = plane_line(&p.frame(), &frame) {
+                g.line(v3(frame.to_world(a)), v3(frame.to_world(b)), color);
+            }
+            continue;
+        }
+        let Some((_, at)) = vertex_at(features, s.feature, &frame, &cache, link) else {
+            continue;
         };
         for r in radii {
             g.circle(Isometry3d::new(at, rot), r * px, color)

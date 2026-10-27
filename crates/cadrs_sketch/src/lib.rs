@@ -1093,6 +1093,12 @@ pub struct Sketch {
     /// `value`). The document re-evaluates them when a variable changes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub expressions: Vec<(DimensionId, String)>,
+    /// The line each used plane's line ([`Link::Plane`], Intersection) is held on, its ends free
+    /// along it as in Onshape: two points of it, in sketch coordinates. Moved by
+    /// [`Sketch::set_projected`] when the document regenerates; a used plane line without one
+    /// is held fixed like any used curve (sketches saved before, until they regenerate).
+    #[serde(default, skip_serializing_if = "slotmap::SecondaryMap::is_empty")]
+    pub carriers: slotmap::SecondaryMap<CurveId, (Vec2, Vec2)>,
 }
 
 /// A boundary imprinted from a part face's edge (S21): see [`Sketch::imprint`].
@@ -1186,6 +1192,11 @@ impl PartialEq for Sketch {
                 .iter()
                 .all(|(k, v)| other.splines.get(k) == Some(v))
             && self.expressions == other.expressions
+            && self.carriers.len() == other.carriers.len()
+            && self
+                .carriers
+                .iter()
+                .all(|(k, v)| other.carriers.get(k) == Some(v))
     }
 }
 

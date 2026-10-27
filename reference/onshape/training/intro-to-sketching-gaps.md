@@ -10,8 +10,8 @@ the phase 3 Final stage, after phase 3 had changed much of the app (see "Phase 3
 tangency and crossings (S8), fillets where lines meet arcs (S9.1), Normal to a plane (S12.10) and
 the Curvature constraint with a Bézier curve (S12.14). The one regression found (the Use
 silhouette scenario hovering the view's own silhouette, S20) is fixed. The toolbar has no
-enabled no-op buttons: Intersection, sketch Pattern, Insert image and Insert DXF are disabled
-(no course lesson teaches them), and Spline ▾ keeps Onshape's fit-point Spline disabled beside the
+enabled no-op buttons: sketch Pattern, Insert image and Insert DXF are disabled (no course
+lesson teaches them), and Spline ▾ keeps Onshape's fit-point Spline disabled beside the
 working Bézier curve.
 
 ## Creating a sketch
@@ -81,6 +81,7 @@ working Bézier curve.
 | S19.1 | Offset (O) | ✅ | T1: line, arc, circle or dragged chain; arrow flips; typed driving distance. `course_s19_offset` 01–10, `course_ex2_intermediate` 08a–08c. |
 | S19.2 | Mirror + Symmetric | ✅ | T1: mirror line then entities; copies linked by Symmetric (Final: Bézier curves too). No shortcut (M is Trim). `course_s19_mirror` 01–05, `course_ex2_intermediate` 04, 11. |
 | S20 | Use / project | ✅ | T5: part edges, whole faces, cylinder silhouettes, other sketches' curves; fixed, black, deletable link glyph; follows its source; a lost source puts the sketch in error. Oblique arcs (elliptical arcs) cannot be projected, nor Bézier curves. `course_s20_use_edges` 01–08, `course_s20_use_updates` 01–06, `course_s20_use_silhouette` 01–02. Final: the silhouette scenario had regressed (no hover, nothing used): its pointer sat on the isometric view's own silhouette of the cylinder, where the pick ray only grazes the finer phase 3 tessellation and missed the part; the pointer now rests on the side facing the view, and both silhouettes are used again. |
+| S20.3 | Intersection (beyond the course) | ✅ | Picks a default plane or a Plane feature (feature list, or the view at an angle): the line where it cuts the sketch plane, as long as the plane is drawn, linked and held on the plane with its ends free (`Sketch::carriers`), as Onshape does. Constraint tools and Dimension take planes the same way (the sketch axis where the plane cuts along it). Planes are picked last. Faces are not intersected yet. Tests `a_plane_line_keeps_to_the_plane_with_free_ends`, `constraining_to_a_plane_uses_it_first`, `a_point_constrained_to_a_used_plane_follows_it`. |
 | S21 | Imprinting | ✅ | T5: edges of part faces in the plane split regions of sketches on faces; the checkbox (undoable, saved) turns it off. `course_s21_imprinting` 01–04, `course_s21_disable_imprinting` 01–04. |
 
 ## Cross-cutting
