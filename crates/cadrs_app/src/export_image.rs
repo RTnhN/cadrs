@@ -489,10 +489,11 @@ fn start(world: &mut World) {
         }
         p => p,
     };
+    // An exported image is on white, not the view's canvas.
     let background = if transparent {
         Color::NONE
     } else {
-        world.resource::<Theme>().viewport_background
+        Color::WHITE
     };
     let camera = world
         .spawn((

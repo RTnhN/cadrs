@@ -6,15 +6,16 @@
 //!   ([`select`]) and opens the Details panel; a double click, or Enter, opens it
 //!   ([`open_pick`]): a document opens, a folder shows its documents under a breadcrumb, a
 //!   sample offers "Open a copy".
-//! - **Details panel** (right; `details-panel`), with a rail of three tabs (`details-toggle`
-//!   Info, `details-versions` Versions, `details-where-used` Where used): the thumbnail, Owner,
+//! - **Details panel** (a glass card right of the list; `details-panel`), opened by three tabs
+//!   in the list card's header (`details-toggle` Info, `details-versions` Versions,
+//!   `details-where-used` Where used): the thumbnail, Owner,
 //!   an editable Document description (`details-description`, saved on Enter or when it loses
 //!   focus), Document labels (a search field `details-label-search`, a checkbox per label
 //!   `details-label-<slug>` and `details-create-label`), Created by, Created, Modified and the
 //!   location; the versions from the document's history (P3D.3); where it is used (P3G.2).
-//! - **Labels.** Create ▸ Label…, the sidebar's tag icon (`labels-new`) and "Create new label"
-//!   open `new-label-dialog`; the sidebar's Labels section lists them (`label-item-<slug>`) as
-//!   filters, with Rename… and Delete… on right-click; the row menu's Labels ▸ toggles them.
+//! - **Labels.** Create ▸ Label…, the tag icon after the filter tabs (`labels-new`) and "Create
+//!   new label" open `new-label-dialog`; each label is a tab (`label-item-<slug>`) that filters
+//!   the list, with Rename… and Delete… on right-click; the row menu's Labels ▸ toggles them.
 //! - **Samples.** Explore cadrs lists [`cadrs_core::documents_page::SAMPLES`] (`sample-row-<i>`);
 //!   Open a copy (`sample-copy-dialog`) adds an editable copy to the library and opens it.
 //! - **Import files…** picks a STEP or STL file (`import-files-picker`); it becomes a new
@@ -37,14 +38,14 @@ use cadrs_core::{DocumentEntry, DocumentId, Filter, FolderId, ItemType, LabelId}
 use cadrs_ui::menu::ContextMenuAnchor;
 use cadrs_ui::prelude::*;
 use cadrs_ui::{
-    Button, CheckboxChange, FilePicked, LabelChip, details_caption, details_divider,
-    details_header, details_value, show_toast, side_tab,
+    Button, CheckboxChange, FilePicked, LabelChip, details_caption, details_divider, details_value,
+    show_toast, side_tab,
 };
 
 use super::{
-    DocLibrary, DocRow, FilterItem, LandingDialog, LandingState, PickRow, Thumbnails,
-    close_dialogs, dialog_buttons, field_label, field_value, large_thumbnail, open_document,
-    thumbnail_node, undo_toast,
+    DocLibrary, DocRow, LandingDialog, LandingState, PickRow, Thumbnails, close_dialogs,
+    dialog_buttons, field_label, field_value, large_thumbnail, open_document, thumbnail_node,
+    undo_toast,
 };
 use crate::{AppClock, AppState, DocumentStore, UserProfile};
 
@@ -104,24 +105,12 @@ pub struct SampleThumbs(HashMap<usize, (Option<Handle<Image>>, Option<image::Rgb
 #[derive(Component)]
 pub struct DetailsPanel;
 
-/// A rail button.
-#[derive(Component, Clone, Copy)]
-pub struct DetailsTabButton(DetailsTab);
-
 /// A label's checkbox in the panel (hidden when the search doesn't match its name).
 #[derive(Component, Clone)]
 pub struct LabelCheck {
     id: LabelId,
     name: String,
 }
-
-/// A label in the sidebar.
-#[derive(Component, Clone, Copy)]
-pub struct LabelItem(LabelId);
-
-/// Which label a context menu is for.
-#[derive(Component, Clone, Copy)]
-pub struct ContextLabel(LabelId);
 
 /// A sample row.
 #[derive(Component, Clone, Copy)]
@@ -218,8 +207,7 @@ pub fn click_select(world: &mut World, pick: Pick, ctrl: bool, shift: bool) {
             };
             set_selection(world, picks, primary, false);
         }
-        // A plain click opens the Details panel too (P3E.1).
-        _ => select(world, pick, true),
+        _ => select(world, pick, false),
     }
     world.resource_mut::<LandingDetails>().anchor = Some(pick);
 }
@@ -343,28 +331,73 @@ pub fn breadcrumb(
     }
 }
 
-/// The list's toolbar (left of "+ Add"): list and grid toggles and the Type filter.
+/// The list's tools, right of the search box: Import files… and Label…, the list and grid
+/// toggles (framed like the color scheme's), and the Type filter.
 pub fn list_toolbar(a: &mut ChildSpawnerCommands, t: &Theme, state: &LandingState) {
     a.spawn(Node {
         align_items: AlignItems::Center,
-        column_gap: Val::Px(4.0),
-        padding: UiRect::left(Val::Px(6.0)),
+        column_gap: Val::Px(8.0),
         ..default()
     })
     .with_children(|b| {
-        for (name, icon_name, tip, grid) in [
-            ("view-list", "list", "List view", false),
-            ("view-grid", "apps", "Grid view", true),
+        for (name, icon_name, label, tip) in [
+            (
+                "import-button",
+                "file-import",
+                "Import",
+                "Import a STEP, IGES or STL file as a new document",
+            ),
+            ("label-button", "tag-new", "New label", "Create a label"),
         ] {
             b.spawn((
-                side_tab(t, name, icon_name, tip, state.grid == grid),
-                observe(move |_: On<Activate>, mut state: ResMut<LandingState>| {
-                    if state.grid != grid {
-                        state.grid = grid;
-                    }
-                }),
-            ));
+                Button::new(name)
+                    .label(label)
+                    .icon(icon_name)
+                    .icon_size(16.0)
+                    .ghost()
+                    .tooltip(tip)
+                    .build(t),
+                observe(
+                    move |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
+                        if name == "import-button" {
+                            commands.queue(|w: &mut World| {
+                                crate::import_file::start(
+                                    w,
+                                    crate::import_file::ImportTarget::NewDocument,
+                                )
+                            });
+                        } else {
+                            open_new_label_dialog(&mut commands, &theme, None);
+                        }
+                    },
+                ),
+            ))
+            .insert(cadrs_ui::glass::control(t))
+            .entry::<Node>()
+            .and_modify(|mut n| super::page_control(&mut n));
         }
+        b.spawn((
+            Name::new("view-modes"),
+            cadrs_ui::segmented::frame(t),
+            cadrs_ui::glass::GlassFrame::page(),
+        ))
+        .with_children(|f| {
+            for (name, icon_name, tip, grid) in [
+                ("view-list", "list", "List view", false),
+                ("view-grid", "apps", "Grid view", true),
+            ] {
+                f.spawn((
+                    side_tab(t, name, icon_name, tip, state.grid == grid),
+                    observe(move |_: On<Activate>, mut state: ResMut<LandingState>| {
+                        if state.grid != grid {
+                            state.grid = grid;
+                        }
+                    }),
+                ))
+                .entry::<Node>()
+                .and_modify(|mut n| n.width = Val::Px(36.0));
+            }
+        });
         let label = match state.item_type {
             ItemType::All => "Type".to_string(),
             t => format!("Type: {}", t.label()),
@@ -373,7 +406,6 @@ pub fn list_toolbar(a: &mut ChildSpawnerCommands, t: &Theme, state: &LandingStat
             Button::new("type-filter")
                 .label(label)
                 .outline()
-                .small()
                 .dropdown_caret()
                 .tooltip("Show only one type of item")
                 .build(t),
@@ -405,11 +437,9 @@ pub fn list_toolbar(a: &mut ChildSpawnerCommands, t: &Theme, state: &LandingStat
                 }
             }),
         ))
+        .insert(cadrs_ui::glass::control(t))
         .entry::<Node>()
-        .and_modify(|mut n| {
-            n.margin = UiRect::left(Val::Px(8.0));
-            n.column_gap = Val::Px(4.0);
-        });
+        .and_modify(|mut n| super::page_control(&mut n));
     });
 }
 
@@ -647,72 +677,81 @@ pub fn on_sample_context_action(
 // ---------------------------------------------------------------------------------------------
 // The Details panel
 
-/// The rail and the panel, right of the main panel.
-pub fn spawn_details(body: &mut ChildSpawnerCommands, t: &Theme, d: &LandingDetails) {
-    body.spawn((
-        Name::new("details-strip"),
-        Node {
-            width: Val::Px(37.0),
-            flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: Val::Px(6.0),
-            padding: UiRect::top(Val::Px(34.0)),
-            border: UiRect::left(Val::Px(1.0)),
-            ..default()
-        },
-        BorderColor::all(t.separator),
-    ))
-    .with_children(|r| {
-        for (tab, name, icon_name, tip) in [
-            (DetailsTab::Info, "details-toggle", "info", "Details"),
-            (
-                DetailsTab::Versions,
-                "details-versions",
-                "versions",
-                "Versions and history",
-            ),
-            (
-                DetailsTab::WhereUsed,
-                "details-where-used",
-                "link",
-                "Where used",
-            ),
-        ] {
-            r.spawn((
-                side_tab(t, name, icon_name, tip, d.open && d.tab == tab),
-                DetailsTabButton(tab),
-            ));
-        }
-    });
-    body.spawn((
-        Name::new("details-panel"),
-        DetailsPanel,
-        Node {
-            width: Val::Px(300.0),
-            flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            display: if d.open { Display::Flex } else { Display::None },
-            border: UiRect::left(Val::Px(1.0)),
-            ..default()
-        },
-        BorderColor::all(t.separator),
-        BackgroundColor(t.background),
+/// The modal holding a document's (or folder's, or sample's) Properties, History or Used in.
+#[derive(Component)]
+pub struct DetailsDialog;
+
+fn details_title(tab: DetailsTab) -> &'static str {
+    match tab {
+        DetailsTab::Info => "Properties",
+        DetailsTab::Versions => "History",
+        DetailsTab::WhereUsed => "Used in",
+    }
+}
+
+/// Selects `pick` and opens its Properties, History or Used in (right-click on a row) in a
+/// modal, which [`rebuild_details`] fills.
+pub fn open_details(world: &mut World, pick: Pick, tab: DetailsTab) {
+    set_selection(world, vec![pick], Some(pick), false);
+    {
+        let mut d = world.resource_mut::<LandingDetails>();
+        d.tab = tab;
+        d.open = true;
+    }
+    let theme = world.resource::<Theme>().clone();
+    world.spawn((
+        Dialog::new("details-dialog")
+            .title(details_title(tab))
+            .width(440.0)
+            .body(|b| {
+                b.spawn((
+                    Name::new("details-panel"),
+                    DetailsPanel,
+                    // As tall as its content, scrolling past most of the window.
+                    Node {
+                        max_height: Val::Vh(70.0),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                ));
+            })
+            .build(&theme),
+        DetailsDialog,
+        DespawnOnExit(AppState::Landing),
     ));
 }
 
-pub fn on_details_tab(
-    ev: On<Activate>,
-    q: Query<&DetailsTabButton>,
+/// Closing the modal (its ✕ or Escape) closes the details.
+pub fn on_details_dialog_close(
+    ev: On<DialogClose>,
+    q: Query<(), With<DetailsDialog>>,
     mut d: ResMut<LandingDetails>,
 ) {
-    let Ok(b) = q.get(ev.entity) else { return };
-    if d.open && d.tab == b.0 {
+    if q.contains(ev.entity) && d.open {
         d.open = false;
-    } else {
-        d.open = true;
-        d.tab = b.0;
     }
+}
+
+/// A label's Rename… and Delete… (the menu by its title).
+pub fn label_action(world: &mut World, id: LabelId, item: &str) {
+    let Some(label) = world.resource::<DocLibrary>().lib.label(id).cloned() else {
+        return;
+    };
+    let theme = world.resource::<Theme>().clone();
+    let n = world
+        .resource::<DocLibrary>()
+        .lib
+        .entries
+        .iter()
+        .filter(|e| e.meta.labels.contains(&label.id))
+        .count();
+    let mut commands = world.commands();
+    match item {
+        "label-rename" => open_rename_label_dialog(&mut commands, &theme, &label),
+        "label-delete" => open_delete_label_dialog(&mut commands, &theme, &label, n),
+        _ => {}
+    }
+    world.flush();
 }
 
 /// The panel's buttons, by name.
@@ -725,7 +764,6 @@ pub fn on_details_button(
 ) {
     let Ok(name) = q.get(ev.entity) else { return };
     match name.as_str() {
-        "details-close" => d.open = false,
         "details-labels-toggle" => d.labels_open = !d.labels_open,
         "details-create-label" => {
             if let Some(Pick::Doc(id)) = d.pick {
@@ -759,37 +797,26 @@ pub fn rebuild_details(
     mut thumbs: ResMut<Thumbnails>,
     samples: Res<SampleThumbs>,
     mut images: ResMut<Assets<Image>>,
-    mut q_panel: Query<(Entity, Ref<DetailsPanel>, &mut Node)>,
-    q_tabs: Query<(Entity, &DetailsTabButton, Has<Selected>)>,
+    q_panel: Query<(Entity, Ref<DetailsPanel>)>,
+    q_dialog: Query<Entity, With<DetailsDialog>>,
 ) {
-    let Ok((panel, marker, mut node)) = q_panel.single_mut() else {
+    // Closed some other way (the selection left the list): the modal goes.
+    if !d.open {
+        for e in &q_dialog {
+            commands.entity(e).try_despawn();
+        }
+    }
+    let Ok((panel, marker)) = q_panel.single() else {
         return;
     };
     if !(marker.is_added() || d.is_changed() || lib.is_changed()) {
         return;
-    }
-    let display = if d.open { Display::Flex } else { Display::None };
-    if node.display != display {
-        node.display = display;
-    }
-    for (e, b, selected) in &q_tabs {
-        let want = d.open && d.tab == b.0;
-        if want && !selected {
-            commands.entity(e).insert(Selected);
-        } else if !want && selected {
-            commands.entity(e).remove::<Selected>();
-        }
     }
     commands.entity(panel).despawn_related::<Children>();
     if !d.open {
         return;
     }
     let t = theme.clone();
-    let title = match d.tab {
-        DetailsTab::Info => "Details",
-        DetailsTab::Versions => "Versions and history",
-        DetailsTab::WhereUsed => "Where used",
-    };
     // What to show, read before spawning.
     enum Content {
         None(String),
@@ -856,7 +883,6 @@ pub fn rebuild_details(
     let clock = *clock;
     let user = user.clone();
     commands.entity(panel).with_children(|p| {
-        p.spawn(details_header(&t, "details-close", title));
         p.spawn((
             Name::new("details-body"),
             ScrollArea,
@@ -1342,7 +1368,7 @@ fn labels_section(
         dark.foreground = cadrs_ui::StateColors::all(t.foreground);
         x.spawn(
             Button::new("details-create-label")
-                .label("Create new label")
+                .label("New label")
                 .icon("tag-new")
                 .icon_size(16.0)
                 .ghost()
@@ -1487,126 +1513,6 @@ pub fn commit_description_on_blur(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Labels in the sidebar
-
-/// Fills the sidebar's Labels section with a filter item per label.
-pub fn rebuild_label_items(
-    mut commands: Commands,
-    theme: Res<Theme>,
-    state: Res<LandingState>,
-    lib: Res<DocLibrary>,
-    q: Query<(Entity, Ref<super::DisclosureChildren>)>,
-) {
-    let Some((list, marker)) = q.iter().find(|(_, c)| c.0 == super::Disclosure::Labels) else {
-        return;
-    };
-    // The selected item's look follows the filter through `sync_filter_items`.
-    if !(marker.is_added() || lib.is_changed()) {
-        return;
-    }
-    let t = theme.clone();
-    commands.entity(list).despawn_related::<Children>();
-    let labels = lib.lib.labels_by_name();
-    commands.entity(list).with_children(|l| {
-        if labels.is_empty() {
-            l.spawn(Node {
-                height: Val::Px(26.0),
-                padding: UiRect::left(Val::Px(44.0)),
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .with_child(t.text(
-                "No labels",
-                t.font_base,
-                FontWeight::NORMAL,
-                t.subtle_foreground,
-            ));
-            return;
-        }
-        for x in labels {
-            let f = Filter::Label(x.id);
-            let on = state.filter == f;
-            let [r, g, b] = x.colour;
-            let colour = Color::srgb_u8(r, g, b);
-            l.spawn((
-                ListItem::new(format!("label-item-{}", slug(&x.name)))
-                    .label(x.name.clone())
-                    .height(28.0)
-                    .padding_left(40.0)
-                    .selection_indicator()
-                    .selected(on)
-                    .weight(if on {
-                        FontWeight::BOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .content(move |c| {
-                        // The label's colour, before its name.
-                        c.spawn((
-                            Node {
-                                width: Val::Px(10.0),
-                                height: Val::Px(10.0),
-                                border_radius: BorderRadius::MAX,
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(22.0),
-                                ..default()
-                            },
-                            BackgroundColor(colour),
-                            Pickable::IGNORE,
-                        ));
-                    })
-                    .build(&t),
-                FilterItem(f),
-                LabelItem(x.id),
-                ContextMenuTarget,
-            ));
-        }
-    });
-}
-
-pub fn on_label_context_menu(
-    ev: On<ContextMenuRequested>,
-    q: Query<&LabelItem>,
-    theme: Res<Theme>,
-    mut commands: Commands,
-) {
-    let Ok(l) = q.get(ev.entity) else { return };
-    let menu = Menu::new("label-context-menu")
-        .item(MenuItem::new("label-rename", "Rename…").icon("edit"))
-        .item(MenuItem::new("label-delete", "Delete…").icon("delete"))
-        .min_width(160.0);
-    let anchor = open_context_menu(&mut commands, ev.position, menu.build(&theme));
-    commands
-        .entity(anchor)
-        .insert((ContextLabel(l.0), DespawnOnExit(AppState::Landing)));
-}
-
-pub fn on_label_context_action(
-    ev: On<MenuAction>,
-    q: Query<&ContextLabel, With<ContextMenuAnchor>>,
-    lib: Res<DocLibrary>,
-    theme: Res<Theme>,
-    mut commands: Commands,
-) {
-    let Ok(l) = q.get(ev.entity) else { return };
-    let Some(label) = lib.lib.label(l.0).cloned() else {
-        return;
-    };
-    match ev.item.as_str() {
-        "label-rename" => open_rename_label_dialog(&mut commands, &theme, &label),
-        "label-delete" => {
-            let n = lib
-                .lib
-                .entries
-                .iter()
-                .filter(|e| e.meta.labels.contains(&label.id))
-                .count();
-            open_delete_label_dialog(&mut commands, &theme, &label, n);
-        }
-        _ => {}
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Dialogs
 
@@ -1769,7 +1675,6 @@ pub fn confirm(world: &mut World, dialog: LandingDialog) {
                 assign: assign.into_iter().collect(),
             };
             world.resource_mut::<DocLibrary>().execute(&store, &cmd);
-            world.resource_mut::<LandingState>().labels_open = true;
             undo_toast(world, format!("Created label \u{201c}{name}\u{201d}"));
         }
         LandingDialog::RenameLabel(id) => {
@@ -1948,7 +1853,7 @@ pub fn import_file(world: &mut World, path: &Path) {
             state.item_type = ItemType::All;
         }
     }
-    select(world, Pick::Doc(id), true);
+    select(world, Pick::Doc(id), false);
     undo_toast(
         world,
         format!("Imported \u{201c}{file_name}\u{201d} as a new document"),

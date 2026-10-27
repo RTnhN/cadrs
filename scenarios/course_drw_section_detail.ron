@@ -27,7 +27,7 @@ Scenario(
         Wait(5),
         Screenshot("01-ex1-drawing"),
         // Make room: delete Right and Isometric.
-        RightClick(world(158, 61)),
+        RightClick(world(179, 77)),
         WaitFor("view-menu-delete"),
         Click(ui("view-menu-delete")),
         RightClick(world(236, 160)),

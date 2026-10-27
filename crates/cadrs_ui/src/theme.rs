@@ -1,25 +1,13 @@
-//! Theme tokens (colors, spacing, sizes, fonts), modeled on gpui-component's `ThemeColor` and
-//! measured from the Onshape reference captures in `reference/onshape/screens/`.
+//! Theme tokens (colors, spacing, sizes, fonts), modeled on gpui-component's `ThemeColor`.
 //!
-//! Measurements (Chrome at 1148×1059, device scale 1):
-//! - Top bar `#eaeaea`, with a `#e0e0e0` bottom border. Bottom tab bar `#d7d7d7`.
-//! - Primary ("Create", "Share", "Create public document") `#1655ad`.
-//! - Secondary ("Cancel") `#dadada`. Text `#232323`–`#333333`; muted text `#4a4a4a`–`#6b6b6b`;
-//!   the dialog ✕ `#959595`.
-//! - Borders: menu `#d7d7d7`, input `#cfcfcf`, list header `#d5d5d5`, list rows `#f1f1f1`,
-//!   dialog separators `#e4e4e4`. Focused input border `#7ba5cb`. Selection `#3a65d8`.
-//! - Modal backdrop: black at 50% (white turns `#7f7f7f`).
-//! - List hover / section header `#f1f4f9`. Active filter: blue bar `#2750a2`, text `#1655ad`.
-//! - Toast `#ddf1fc` with a `#c3d6e0` border. Tooltips `#d3dae4` with `#333` text.
-//! - Feature dialog: ✓ `#009600` (disabled `#cfe8cf`), ✕ `#c42b3c`, invalid title `#a3202e`;
-//!   selection field waiting `#def1ff`; checkbox checked `#28549d`; feature being edited in the
-//!   list `#b1ddf8`.
-//! - Info box `#ddf1f8`. Planes: fill `#e8ecf5`, edge `#bbc9d4`, label `#4a6fb0`.
-//! - Document shell: icon rail `#fafafa` (36 px), panel borders `#e0e0e0`, tools `#333333`
-//!   (disabled `#999999`), inactive tabs `#eaeaea`, tree guide `#dbdbdb`, rollback bar `#bababa`.
-//! - Sizes: top bar 36 px, toolbar 34 px, tab bar 29 px, list rows 38 px, menu items 27 px,
-//!   Create button 32 px tall, dialog buttons 30 px, text inputs 30 px. UI text 13 px, sidebar
-//!   14 px, dialog title 16 px semibold.
+//! - Accent: cyan. Primary `#08767c` (dark `#5ad8d2`, with dark text on it), links `#08707a`,
+//!   selected rows `#d3eef0`, focus `#17a2aa`.
+//! - Surfaces: glass panels ([`crate::glass`]) over a soft cyan wallpaper: a see-through fill,
+//!   a light 1 px rim, a soft shadow and the 5 px radius every corner has.
+//! - Neutrals: text `#212121`, muted `#5e5e5e`; borders `#d7d7d7`, rows `#f1f1f1`.
+//! - Feature dialog: ✓ `#009600`, ✕ `#c42b3c`, invalid title `#a3202e`.
+//! - Sizes: top bar 36 px, toolbar 38 px, tab bar 29 px, list rows 38 px, menu items 27 px,
+//!   dialog buttons 30 px, text inputs 30 px. UI text 13 px, dialog title 16 px semibold.
 
 use std::time::Duration;
 
@@ -62,6 +50,11 @@ pub struct Theme {
     pub floating: Color,
     pub overlay: Color,
     pub shadow: Color,
+    /// Glass panels ([`crate::glass`]): a see-through fill over the wallpaper, a light rim and
+    /// a soft shadow.
+    pub glass_panel: Color,
+    pub glass_rim: Color,
+    pub glass_shadow: Color,
 
     // Text
     pub foreground: Color,
@@ -85,6 +78,8 @@ pub struct Theme {
     pub primary_open_border: Color,
     pub primary_active: Color,
     pub primary_disabled: Color,
+    /// A primary button's label: white to the eye in light, but its own token so the dark
+    /// theme can put dark text on its bright cyan.
     pub primary_foreground: Color,
     /// A disabled primary button's label: white to the eye in light, but its own token so the
     /// dark theme can dim it.
@@ -122,7 +117,7 @@ pub struct Theme {
     pub success: Color,
     pub tooltip_background: Color,
     pub tooltip_foreground: Color,
-    /// Toasts: Onshape's light-blue message pill.
+    /// Toasts: a light cyan message pill.
     pub toast_background: Color,
     pub toast_border: Color,
     pub toast_foreground: Color,
@@ -164,6 +159,12 @@ pub struct Theme {
     pub feature_icon: Color,
     pub tree_guide: Color,
     pub rollback_bar: Color,
+    /// A scrollbar's thumb.
+    pub scrollbar_thumb: Color,
+    /// A borderless control's fill (a toolbar's buttons, a segmented control's track), and
+    /// hovered.
+    pub control: Color,
+    pub control_hover: Color,
 
     // Viewport
     pub plane_fill: Color,
@@ -190,6 +191,8 @@ pub struct Theme {
     pub radius_sm: f32,
     pub radius: f32,
     pub radius_lg: f32,
+    /// Glass panels and cards.
+    pub radius_panel: f32,
 
     // Component sizes (logical px)
     pub button_height_sm: f32,
@@ -217,39 +220,45 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// The Onshape-like light theme.
+    /// The light theme.
     pub fn light() -> Self {
         Self {
             background: hex("#ffffff"),
             title_bar: hex("#eaeaea"),
             tab_bar: hex("#d7d7d7"),
             sidebar: hex("#ffffff"),
-            viewport_background: hex("#ffffff"),
+            // A soft canvas, so the white glass panels float over it.
+            viewport_background: hex("#eef2f3"),
             popover: hex("#ffffff"),
             floating: hex("#ffffff"),
             // UI blends in linear space: 0.79 alpha dims white to about #7f7f7f, like the browser's 50%.
             overlay: Color::srgba(0.0, 0.0, 0.0, 0.79),
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.18),
+            // Not quite white, so the dark theme pairs them with their own colors (the alpha
+            // is kept).
+            glass_panel: hex("#fbfefe").with_alpha(0.88),
+            glass_rim: hex("#fbffff").with_alpha(0.9),
+            glass_shadow: Color::srgba(0.02, 0.12, 0.16, 0.22),
 
             foreground: hex("#212121"),
             muted_foreground: hex("#5e5e5e"),
-            subtle_foreground: hex("#959595"),
+            subtle_foreground: hex("#7c7c7c"),
             disabled_foreground: hex("#b4b4b4"),
-            link: hex("#1655ad"),
+            link: hex("#08707a"),
 
             border: hex("#d7d7d7"),
             border_strong: hex("#c4c4c4"),
             separator: hex("#e4e4e4"),
-            row_separator: hex("#f1f1f1"),
-            focus_ring: hex("#7ba5cb"),
+            row_separator: hex("#e6ebec"),
+            focus_ring: hex("#6cc4ca"),
 
-            primary: hex("#1655ad"),
-            primary_hover: hex("#2d63c0"),
-            primary_open: hex("#5b8fd6"),
-            primary_open_border: hex("#9fc0ee"),
-            primary_active: hex("#0f4491"),
-            primary_disabled: hex("#9bb6dc"),
-            primary_foreground: hex("#ffffff"),
+            primary: hex("#08767c"),
+            primary_hover: hex("#0b868c"),
+            primary_open: hex("#4cb6bb"),
+            primary_open_border: hex("#95d6d9"),
+            primary_active: hex("#06646a"),
+            primary_disabled: hex("#9dd2d5"),
+            primary_foreground: hex("#fdfefe"),
             primary_disabled_foreground: hex("#f8fafd"),
             secondary: hex("#dadada"),
             secondary_hover: hex("#cecece"),
@@ -258,45 +267,45 @@ impl Theme {
             ghost_hover: hex("#e9e9e9"),
             ghost_active: hex("#dcdcdc"),
 
-            list_hover: hex("#f1f4f9"),
-            list_active: hex("#e3eaf5"),
-            list_selected: hex("#dce8f8"),
-            list_selected_bar: hex("#2750a2"),
-            menu_hover: hex("#eef3fb"),
-            timeline_selected: hex("#cfe3f7"),
+            list_hover: hex("#eef7f8"),
+            list_active: hex("#ddf0f2"),
+            list_selected: hex("#d3eef0"),
+            list_selected_bar: hex("#08767c"),
+            menu_hover: hex("#e8f5f6"),
+            timeline_selected: hex("#c6e9ec"),
 
             input_background: hex("#ffffff"),
             input_disabled_background: hex("#eeeeee"),
             input_border: hex("#cfcfcf"),
-            input_border_focus: hex("#3d7bd9"),
+            input_border_focus: hex("#17a2aa"),
             caret: hex("#2b2b2b"),
-            selection: hex("#3b78e0"),
+            selection: hex("#149aa2"),
             selection_foreground: hex("#ffffff"),
 
-            info_background: hex("#ddf1f8"),
-            info_border: hex("#b9e0ee"),
+            info_background: hex("#dbf2f3"),
+            info_border: hex("#b0dfe2"),
             warning_background: hex("#fff3c4"),
             danger: hex("#d0342c"),
             success: hex("#2e9e3e"),
-            tooltip_background: hex("#d3dae4"),
+            tooltip_background: hex("#d5e0e2"),
             tooltip_foreground: hex("#333333"),
-            toast_background: hex("#ddf1fc"),
-            toast_border: hex("#c3d6e0"),
-            toast_foreground: hex("#0f2d44"),
-            toast_icon: hex("#6b8faf"),
+            toast_background: hex("#dcf3f4"),
+            toast_border: hex("#b8dcdf"),
+            toast_foreground: hex("#0b2e33"),
+            toast_icon: hex("#4b98a0"),
             warning_banner_background: hex("#fdfae6"),
             warning_banner_border: hex("#e0dbbb"),
             warning_icon: hex("#ecb330"),
 
             feature_error: hex("#a3202e"),
-            feature_editing: hex("#b1ddf8"),
+            feature_editing: hex("#b4e5e8"),
             accept: hex("#009600"),
             accept_disabled: hex("#cfe8cf"),
             cancel: hex("#c42b3c"),
             checkbox_border: hex("#a6a6a6"),
-            checkbox_checked: hex("#28549d"),
+            checkbox_checked: hex("#0a8188"),
             checkbox_unavailable: hex("#a8a8a8"),
-            selection_field_active: hex("#def1ff"),
+            selection_field_active: hex("#dbf3f4"),
             selection_field_active_border: hex("#7a8a97"),
 
             rail_background: hex("#fafafa"),
@@ -308,14 +317,17 @@ impl Theme {
             search_background: hex("#eeeeee"),
             tab_inactive: hex("#eaeaea"),
             tab_hover: hex("#f4f4f4"),
-            tab_underline: hex("#2b5aa8"),
+            tab_underline: hex("#08767c"),
             feature_icon: hex("#8e8e8e"),
             tree_guide: hex("#dbdbdb"),
             rollback_bar: hex("#bababa"),
+            scrollbar_thumb: hex("#b4c3c5"),
+            control: hex("#ecf3f4"),
+            control_hover: hex("#dfeaec"),
 
-            plane_fill: hex("#e8ecf5"),
-            plane_edge: hex("#93a8c4"),
-            plane_label: hex("#3f5a8c"),
+            plane_fill: hex("#e6f1f2"),
+            plane_edge: hex("#8fb3b8"),
+            plane_label: hex("#2f6f75"),
             highlight: hex("#f0a860"),
             selection_3d: hex("#f07c00"),
             axis_x: hex("#e0312b"),
@@ -330,9 +342,10 @@ impl Theme {
             font_xl: 20.0,
 
             space: [0.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0],
-            radius_sm: 2.0,
-            radius: 3.0,
-            radius_lg: 4.0,
+            radius_sm: 5.0,
+            radius: 5.0,
+            radius_lg: 5.0,
+            radius_panel: 5.0,
 
             button_height_sm: 24.0,
             button_height: 30.0,
@@ -352,106 +365,114 @@ impl Theme {
         }
     }
 
-    /// The dark theme: the light theme's tokens on charcoal surfaces. The interface is always
-    /// built from [`Theme::light`]; [`crate::color_scheme`] maps what it draws to these values
-    /// while the dark scheme is on, so sizes, fonts and behavior are the light theme's.
+    /// The dark theme, after the schematic's (Horizon EDA's "Nostalgia"): the light theme's
+    /// tokens on a warm near-black ground (`#21201d`) and warm greys, with the cyan accent. The
+    /// interface is always built from [`Theme::light`]; [`crate::color_scheme`] maps what it
+    /// draws to these values while the dark scheme is on, so sizes, fonts and behavior are the
+    /// light theme's.
     pub fn dark() -> Self {
         Self {
-            background: hex("#1f2023"),
-            title_bar: hex("#2a2b2f"),
-            tab_bar: hex("#18191b"),
-            sidebar: hex("#1f2023"),
-            viewport_background: hex("#393c42"),
-            popover: hex("#2c2e33"),
-            floating: hex("#44474e"),
+            background: hex("#21201d"),
+            title_bar: hex("#272622"),
+            tab_bar: hex("#1a1917"),
+            sidebar: hex("#21201d"),
+            viewport_background: hex("#21201d"),
+            popover: hex("#2c2a26"),
+            floating: hex("#3b3934"),
             overlay: Color::srgba(0.0, 0.0, 0.0, 0.79),
             shadow: Color::srgba(0.0, 0.0, 0.0, 0.45),
+            glass_panel: hex("#1d1c19"),
+            glass_rim: hex("#5a564c"),
+            glass_shadow: Color::srgba(0.0, 0.0, 0.0, 0.4),
 
-            foreground: hex("#e3e4e6"),
-            muted_foreground: hex("#a9abb0"),
-            subtle_foreground: hex("#8b8e95"),
-            disabled_foreground: hex("#7a7d84"),
-            link: hex("#7aaaf0"),
+            foreground: hex("#e6e1d6"),
+            muted_foreground: hex("#aca695"),
+            subtle_foreground: hex("#8e8878"),
+            disabled_foreground: hex("#77725f"),
+            link: hex("#6fd8d6"),
 
-            border: hex("#3d3f44"),
-            border_strong: hex("#4c4e54"),
-            separator: hex("#35373b"),
-            row_separator: hex("#28292d"),
-            focus_ring: hex("#5c8fd6"),
+            border: hex("#3f3c35"),
+            border_strong: hex("#4e4a42"),
+            separator: hex("#35332e"),
+            row_separator: hex("#2b2a26"),
+            focus_ring: hex("#3fb6bb"),
 
-            primary: hex("#2f6fd0"),
-            primary_hover: hex("#3e7ddc"),
-            primary_open: hex("#4f88dc"),
-            primary_open_border: hex("#7aa5e8"),
-            primary_active: hex("#2861b8"),
-            primary_disabled: hex("#2c4469"),
-            primary_foreground: hex("#ffffff"),
-            primary_disabled_foreground: hex("#8c9bb4"),
-            secondary: hex("#3a3c41"),
-            secondary_hover: hex("#45474d"),
-            secondary_active: hex("#50535a"),
-            secondary_disabled: hex("#2c2d31"),
-            ghost_hover: hex("#34363b"),
-            ghost_active: hex("#3e4046"),
+            primary: hex("#5ad8d2"),
+            primary_hover: hex("#77e1dc"),
+            primary_open: hex("#8ae6e2"),
+            primary_open_border: hex("#b2f0ed"),
+            primary_active: hex("#43c3bd"),
+            primary_disabled: hex("#29494b"),
+            primary_foreground: hex("#062a2b"),
+            primary_disabled_foreground: hex("#7f9e9f"),
+            secondary: hex("#3a3833"),
+            secondary_hover: hex("#45423c"),
+            secondary_active: hex("#504c45"),
+            secondary_disabled: hex("#2c2a26"),
+            ghost_hover: hex("#34322d"),
+            ghost_active: hex("#3e3b35"),
 
-            list_hover: hex("#2a2e36"),
-            list_active: hex("#2f3747"),
-            list_selected: hex("#263a57"),
-            list_selected_bar: hex("#5b8fe0"),
-            menu_hover: hex("#2d3544"),
-            timeline_selected: hex("#263a57"),
+            list_hover: hex("#2c2b27"),
+            list_active: hex("#323b37"),
+            list_selected: hex("#233f3b"),
+            list_selected_bar: hex("#5ad8d2"),
+            menu_hover: hex("#363a35"),
+            timeline_selected: hex("#233f3b"),
 
-            input_background: hex("#18191c"),
-            input_disabled_background: hex("#26272b"),
-            input_border: hex("#46484e"),
-            input_border_focus: hex("#4f86da"),
-            caret: hex("#e6e6e6"),
-            selection: hex("#3b78e0"),
+            input_background: hex("#1a1917"),
+            input_disabled_background: hex("#262521"),
+            input_border: hex("#4a463f"),
+            input_border_focus: hex("#4ccbc8"),
+            caret: hex("#ece7dc"),
+            selection: hex("#1d8b90"),
             selection_foreground: hex("#ffffff"),
 
-            info_background: hex("#1b3340"),
-            info_border: hex("#2a5266"),
+            info_background: hex("#163638"),
+            info_border: hex("#24585b"),
             warning_background: hex("#3d3517"),
             danger: hex("#f0605a"),
             success: hex("#4cc15c"),
-            tooltip_background: hex("#4d515a"),
-            tooltip_foreground: hex("#ececec"),
-            toast_background: hex("#1c3545"),
-            toast_border: hex("#2d5068"),
-            toast_foreground: hex("#d8ecfa"),
-            toast_icon: hex("#7fb0d6"),
+            tooltip_background: hex("#4a4740"),
+            tooltip_foreground: hex("#efeae0"),
+            toast_background: hex("#173a3d"),
+            toast_border: hex("#275a5e"),
+            toast_foreground: hex("#d3f2f1"),
+            toast_icon: hex("#6cc7c8"),
             warning_banner_background: hex("#36311d"),
             warning_banner_border: hex("#5a5232"),
             warning_icon: hex("#f0bd45"),
 
             feature_error: hex("#ff9a9e"),
-            feature_editing: hex("#22476a"),
+            feature_editing: hex("#1c4a4d"),
             accept: hex("#3dc23d"),
             accept_disabled: hex("#2b4a2b"),
             cancel: hex("#ff6070"),
             checkbox_border: hex("#6c6f75"),
-            checkbox_checked: hex("#4a80d2"),
+            checkbox_checked: hex("#2aa9ae"),
             checkbox_unavailable: hex("#45474d"),
-            selection_field_active: hex("#1d3a54"),
-            selection_field_active_border: hex("#6d8ca8"),
+            selection_field_active: hex("#173b3e"),
+            selection_field_active_border: hex("#5c9ca0"),
 
-            rail_background: hex("#232427"),
-            panel_border: hex("#35373b"),
-            tool_foreground: hex("#d5d6d9"),
-            tool_disabled_foreground: hex("#686b72"),
-            toolbar_separator: hex("#404247"),
-            kbd_border: hex("#6c6f75"),
-            search_background: hex("#2a2b2f"),
-            tab_inactive: hex("#2a2b2f"),
-            tab_hover: hex("#313338"),
-            tab_underline: hex("#5b8fe0"),
-            feature_icon: hex("#9c9fa5"),
-            tree_guide: hex("#404247"),
-            rollback_bar: hex("#6d7076"),
+            rail_background: hex("#23221f"),
+            panel_border: hex("#35332e"),
+            tool_foreground: hex("#dcd7cb"),
+            tool_disabled_foreground: hex("#6c675b"),
+            toolbar_separator: hex("#3f3c35"),
+            kbd_border: hex("#6c675b"),
+            search_background: hex("#272622"),
+            tab_inactive: hex("#272622"),
+            tab_hover: hex("#2f2d29"),
+            tab_underline: hex("#5ad8d2"),
+            feature_icon: hex("#a29d8e"),
+            tree_guide: hex("#3f3c35"),
+            rollback_bar: hex("#6f6b60"),
+            scrollbar_thumb: hex("#5a564d"),
+            control: hex("#302e29"),
+            control_hover: hex("#3b3933"),
 
-            plane_fill: hex("#3b4456"),
-            plane_edge: hex("#7189ab"),
-            plane_label: hex("#a8bfe6"),
+            plane_fill: hex("#2f2d27"),
+            plane_edge: hex("#8a8066"),
+            plane_label: hex("#c99c49"),
             highlight: hex("#f0a860"),
             selection_3d: hex("#ff8c1a"),
             axis_x: hex("#ff5a52"),
@@ -468,6 +489,7 @@ impl Theme {
         use ColorRole::{Fill, Floating, Ink, Line, Raised};
         vec![
             (Fill, self.background),
+            (Fill, self.glass_panel),
             (Fill, self.title_bar),
             (Fill, self.tab_bar),
             (Fill, self.sidebar),
@@ -521,6 +543,9 @@ impl Theme {
             (Fill, self.tab_underline),
             (Fill, self.tree_guide),
             (Fill, self.rollback_bar),
+            (Fill, self.scrollbar_thumb),
+            (Fill, self.control),
+            (Fill, self.control_hover),
             (Fill, self.separator),
             (Fill, self.panel_border),
             (Fill, self.toolbar_separator),
@@ -552,6 +577,7 @@ impl Theme {
             (Ink, self.checkbox_checked),
             (Ink, self.list_selected_bar),
             (Ink, self.plane_label),
+            (Line, self.glass_rim),
             (Line, self.border),
             (Line, self.border_strong),
             (Line, self.separator),

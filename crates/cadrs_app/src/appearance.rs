@@ -691,21 +691,19 @@ fn on_panel_button(a: On<Activate>, q: Query<&Name>, mut open: ResMut<SidePanel>
     }
 }
 
-/// The side panels' frame: docked full height on the viewport's right, beside it rather than
-/// over it, so the graphics area (and the view cube in its corner) shrinks to make room (P3.6,
-/// as Onshape's).
+/// The side panels' frame: a floating glass panel, full height on the viewport's right,
+/// beside it rather than over it, so the graphics area (and the view cube in its corner)
+/// shrinks to make room (P3.6).
 pub(crate) fn side_panel_node(t: &Theme) -> impl Bundle {
     (
         Node {
             width: Val::Px(240.0),
             flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            border: UiRect::new(Val::Px(1.0), Val::Px(1.0), Val::ZERO, Val::ZERO),
+            margin: UiRect::left(Val::Px(crate::document::PANEL_GAP)),
             overflow: Overflow::clip(),
-            ..default()
+            ..cadrs_ui::glass::panel_node(t)
         },
-        BackgroundColor(t.background),
-        BorderColor::all(t.panel_border),
+        cadrs_ui::glass::panel(t),
     )
 }
 

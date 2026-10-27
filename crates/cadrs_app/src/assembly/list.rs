@@ -1184,7 +1184,7 @@ fn list_width(
             crate::viewport::ActiveKind::PcbStudio => crate::pcb::PANEL_W,
             crate::viewport::ActiveKind::Render => crate::render_ui::PANEL_W,
             crate::viewport::ActiveKind::CamStudio => crate::cam::PANEL_W,
-            _ => 190.0,
+            _ => PART_STUDIO_LIST_W,
         });
     for (n, mut st) in &mut q {
         if n.as_str() == "feature-panel" && st.width() != want {
@@ -1195,6 +1195,10 @@ fn list_width(
 
 /// The list panel's width in an assembly (px).
 pub const ASSEMBLY_LIST_W: f32 = 240.0;
+
+/// The feature list's width in a Part Studio (px): the filter beside the panel's ‹ fits its
+/// hint.
+pub const PART_STUDIO_LIST_W: f32 = 220.0;
 
 /// A Part Studio mate connector's row under its instance.
 #[derive(Component, Debug, Clone, Copy)]

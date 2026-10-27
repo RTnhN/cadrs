@@ -4,8 +4,8 @@
 // 20 mm deep: 9 920 mm³). Image, PDF and video files as tabs are out of scope (image tabs).
 // 01 Create ▾ open, the pointer on Import files….
 // 02 the file picker (STEP and STL files), in fixtures, the STL picked.
-// 03 imported: "import_bracket" listed in Owned by me with its thumbnail, selected, its details
-//    shown; the toast "Imported “import_bracket.stl” as a new document" with Undo.
+// 03 imported: "import_bracket" listed with its thumbnail, selected; the toast "Imported
+//    “import_bracket.stl” as a new document" with Undo.
 // 04 Ctrl+Z: the document is gone (one library step).
 // 05 Ctrl+Y: back.
 // 06 double-click: the document opens on Part Studio 1 with Import 1 and the part
@@ -32,7 +32,7 @@ Scenario(
         Wait(5),
         Screenshot("02-import-file-picker"),
         Click(ui("import-picker-open")),
-        WaitFor("details-owner"),
+        WaitFor("toast"),
         MoveTo(900, 900),
         Wait(3),
         Screenshot("03-imported-document"),

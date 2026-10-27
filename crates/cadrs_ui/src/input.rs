@@ -131,6 +131,10 @@ pub struct TextInput {
     focus_border: Option<(f32, Color)>,
     chips: bool,
     cleanable: bool,
+    leading_icon: Option<Cow<'static, str>>,
+    background: Option<Color>,
+    border: Option<Color>,
+    radius: Option<f32>,
 }
 
 impl TextInput {
@@ -150,7 +154,35 @@ impl TextInput {
             focus_border: None,
             chips: false,
             cleanable: false,
+            leading_icon: None,
+            background: None,
+            border: None,
+            radius: None,
         }
+    }
+
+    /// An icon before the text (a search box's magnifier).
+    pub fn leading_icon(mut self, name: impl Into<Cow<'static, str>>) -> Self {
+        self.leading_icon = Some(name.into());
+        self
+    }
+
+    /// The fill (default [`Theme::input_background`]).
+    pub fn background(mut self, color: Color) -> Self {
+        self.background = Some(color);
+        self
+    }
+
+    /// The border while not focused (default [`Theme::input_border`]).
+    pub fn border(mut self, color: Color) -> Self {
+        self.border = Some(color);
+        self
+    }
+
+    /// The corner radius (default [`Theme::radius`]).
+    pub fn radius(mut self, px: f32) -> Self {
+        self.radius = Some(px);
+        self
     }
 
     /// Shows `{…}` tokens (property fields such as `{Part: Name}`) as chips labelled with
@@ -231,10 +263,14 @@ impl TextInput {
         let (focus_width, focus_color) =
             self.focus_border.unwrap_or((2.0, theme.input_border_focus));
         let colors = FrameColors {
-            background: theme.input_background,
+            background: self.background.unwrap_or(theme.input_background),
             disabled_background: theme.input_disabled_background,
-            border: theme.input_border,
-            border_hover: theme.border_strong,
+            border: self.border.unwrap_or(theme.input_border),
+            border_hover: if self.border.is_some() {
+                focus_color
+            } else {
+                theme.border_strong
+            },
             border_focus: focus_color,
         };
         let (font_size, font_weight) = self.font.unwrap_or((theme.font_base, FontWeight::NORMAL));
@@ -272,7 +308,15 @@ impl TextInput {
             focus_border: _,
             chips,
             cleanable,
+            leading_icon,
+            background: _,
+            border: _,
+            radius,
         } = self;
+        let icon_size = (font_size + 3.0).round();
+        let icon_color = theme.muted_foreground;
+        // The placeholder and chips start where the text does.
+        let text_left = pad + leading_icon.as_ref().map_or(0.0, |_| icon_size + 8.0);
         let chip_font = theme.font(font_size * 0.9, FontWeight::NORMAL);
         let chip_colors = ChipColors {
             text: fg,
@@ -294,7 +338,7 @@ impl TextInput {
                 height: Val::Px(height.unwrap_or(theme.input_height)),
                 padding: UiRect::horizontal(Val::Px(pad)),
                 border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(theme.radius)),
+                border_radius: BorderRadius::all(Val::Px(radius.unwrap_or(theme.radius))),
                 align_items: AlignItems::Center,
                 overflow: Overflow::clip(),
                 ..default()
@@ -302,6 +346,21 @@ impl TextInput {
             BackgroundColor(colors.background),
             BorderColor::all(colors.border),
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
+                if let Some(name) = leading_icon {
+                    p.spawn((
+                        crate::icon::icon_in(
+                            name,
+                            icon_size,
+                            icon_color,
+                            Node {
+                                flex_shrink: 0.0,
+                                margin: UiRect::right(Val::Px(8.0)),
+                                ..default()
+                            },
+                        ),
+                        Pickable::IGNORE,
+                    ));
+                }
                 let mut editable = EditableText::new(&value);
                 editable.cursor_blink_period = blink;
                 editable.max_characters = max_characters;
@@ -333,7 +392,7 @@ impl TextInput {
                         },
                         Node {
                             position_type: PositionType::Absolute,
-                            left: Val::Px(pad),
+                            left: Val::Px(text_left),
                             top: Val::Px(0.0),
                             bottom: Val::Px(0.0),
                             align_items: AlignItems::Center,
@@ -357,7 +416,7 @@ impl TextInput {
                         TextLayout::no_wrap(),
                         Node {
                             position_type: PositionType::Absolute,
-                            left: Val::Px(pad),
+                            left: Val::Px(text_left),
                             ..default()
                         },
                         Pickable::IGNORE,

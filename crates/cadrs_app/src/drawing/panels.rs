@@ -33,6 +33,8 @@ use crate::{ActiveDocument, AppState};
 pub const SHEETS_WIDTH: f32 = 220.0;
 /// Width of the Drawing properties panel.
 pub const PROPS_WIDTH: f32 = 262.0;
+/// The gap between a panel and what floats beside it.
+const GAP: f32 = crate::document::PANEL_GAP;
 
 pub struct DrawingPanelsPlugin;
 
@@ -203,15 +205,17 @@ fn ensure_overlay(
             o.spawn((
                 Name::new("drawing-sheet-chip"),
                 SheetChip,
+                // A small glass chip, as the view's other floating bits are.
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Px(6.0),
-                    top: Val::Px(6.0),
-                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(2.0)),
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb_u8(0xcf, 0xcf, 0xcf)),
+                cadrs_ui::glass::panel(&t),
                 Pickable::IGNORE,
                 children![(
                     t.text("", t.font_sm, FontWeight::MEDIUM, t.foreground),
@@ -228,13 +232,13 @@ fn ensure_overlay(
                     bottom: Val::Px(0.0),
                     width: Val::Px(SHEETS_WIDTH),
                     flex_direction: FlexDirection::Column,
-                    border: UiRect::right(Val::Px(1.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
                     display: Display::None,
                     overflow: Overflow::clip(),
                     ..default()
                 },
-                BackgroundColor(t.background),
-                BorderColor::all(t.panel_border),
+                cadrs_ui::glass::panel(&t),
             ));
             o.spawn((
                 Name::new("drawing-properties-panel"),
@@ -246,13 +250,13 @@ fn ensure_overlay(
                     bottom: Val::Px(0.0),
                     width: Val::Px(PROPS_WIDTH),
                     flex_direction: FlexDirection::Column,
-                    border: UiRect::left(Val::Px(1.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
                     display: Display::None,
                     overflow: Overflow::clip(),
                     ..default()
                 },
-                BackgroundColor(t.background),
-                BorderColor::all(t.panel_border),
+                cadrs_ui::glass::panel(&t),
             ));
             o.spawn((
                 ToolButton::new("drawing-sheets-toggle", "list")
@@ -280,17 +284,17 @@ fn ensure_overlay(
     });
 }
 
-/// A white tab with a grey border, like the feature panel's toggle.
+/// A floating glass button's colours: no outline, a fill when hovered or its panel is open.
 fn edge_visuals(t: &Theme) -> cadrs_ui::Visuals {
     let mut v = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
     v.background =
-        cadrs_ui::StateColors::new(t.background, t.ghost_hover, t.ghost_active, t.background)
-            .with_selected(t.ghost_hover);
-    v.border = cadrs_ui::StateColors::all(t.panel_border);
+        cadrs_ui::StateColors::new(Color::NONE, t.control_hover, t.list_active, Color::NONE)
+            .with_selected(t.list_selected);
+    v.border = cadrs_ui::StateColors::all(Color::NONE);
     v
 }
 
-/// The box of a small tab on the sheet area's edge (left or right), halfway down.
+/// A small floating glass button on the sheet area's edge (left or right), halfway down.
 fn edge_button(t: &Theme, left: bool) -> impl Bundle {
     (
         Node {
@@ -298,25 +302,16 @@ fn edge_button(t: &Theme, left: bool) -> impl Bundle {
             left: if left { Val::Px(0.0) } else { Val::Auto },
             right: if left { Val::Auto } else { Val::Px(0.0) },
             top: Val::Percent(50.0),
-            margin: UiRect::top(Val::Px(-14.0)),
-            width: Val::Px(26.0),
-            height: Val::Px(28.0),
+            margin: UiRect::top(Val::Px(-17.0)),
+            width: Val::Px(34.0),
+            height: Val::Px(34.0),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            border: if left {
-                UiRect::new(Val::ZERO, Val::Px(1.0), Val::Px(1.0), Val::Px(1.0))
-            } else {
-                UiRect::new(Val::Px(1.0), Val::ZERO, Val::Px(1.0), Val::Px(1.0))
-            },
-            border_radius: if left {
-                BorderRadius::right(Val::Px(t.radius))
-            } else {
-                BorderRadius::left(Val::Px(t.radius))
-            },
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(t.background),
-        BorderColor::all(t.panel_border),
+        cadrs_ui::glass::panel(t),
     )
 }
 
@@ -426,13 +421,25 @@ fn sync_panels(
     }
     for (mut n, is_sheets) in &mut q_toggles {
         if is_sheets {
-            n.left = Val::Px(if key.sheets_open { SHEETS_WIDTH } else { 0.0 });
+            n.left = Val::Px(if key.sheets_open {
+                SHEETS_WIDTH + GAP
+            } else {
+                0.0
+            });
         } else {
-            n.right = Val::Px(if key.props_open { PROPS_WIDTH } else { 0.0 });
+            n.right = Val::Px(if key.props_open {
+                PROPS_WIDTH + GAP
+            } else {
+                0.0
+            });
         }
     }
     if let Ok((mut n, children)) = q_chip.single_mut() {
-        n.left = Val::Px(6.0 + if key.sheets_open { SHEETS_WIDTH } else { 0.0 });
+        n.left = Val::Px(if key.sheets_open {
+            SHEETS_WIDTH + GAP
+        } else {
+            0.0
+        });
         if let Some(&c) = children.first()
             && let Ok(mut text) = q_text.get_mut(c)
         {

@@ -118,21 +118,20 @@ impl Segmented {
     }
 }
 
-/// The bordered box around a segmented control's buttons, also for a lone button that sits
-/// beside one (the top bar's settings button). The 2 px inset keeps a selected or hovered
-/// button's fill off the border at fractional display scales, where 1 px can round to none.
+/// The track a segmented control's buttons sit in, also for a lone button that sits beside
+/// one (the bell): a soft fill, no border. The 2 px inset keeps a selected or hovered button's
+/// fill inside the track's corners.
 pub fn frame(t: &Theme) -> impl Bundle {
     (
         Node {
             column_gap: Val::Px(1.0),
             padding: UiRect::all(Val::Px(2.0)),
-            border: UiRect::all(Val::Px(1.0)),
             border_radius: BorderRadius::all(Val::Px(t.radius)),
             flex_shrink: 0.0,
             align_items: AlignItems::Center,
             ..default()
         },
-        BorderColor::all(t.border),
+        BackgroundColor(t.control),
     )
 }
 

@@ -378,18 +378,17 @@ pub fn start_tagged(world: &mut World, feature: FeatureId) {
 #[derive(Component)]
 struct PanelRoot(u64, CommentsPanel);
 
+/// A floating glass panel left of the feature list.
 fn panel_node(t: &Theme) -> impl Bundle {
     (
         Node {
             width: Val::Px(290.0),
             flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            border: UiRect::right(Val::Px(1.0)),
+            margin: UiRect::right(Val::Px(crate::document::PANEL_GAP)),
             overflow: Overflow::clip(),
-            ..default()
+            ..cadrs_ui::glass::panel_node(t)
         },
-        BackgroundColor(t.background),
-        BorderColor::all(t.panel_border),
+        cadrs_ui::glass::panel(t),
     )
 }
 

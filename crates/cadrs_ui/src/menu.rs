@@ -196,6 +196,38 @@ pub struct MenuAction {
 pub enum MenuEntry {
     Item(MenuItem),
     Separator,
+    /// A row that is not an action: who or what the menu is about (the account menu's
+    /// identity).
+    Header(MenuHeader),
+}
+
+/// A menu's header row: a title, a line under it and, with `avatar`, the title's avatar
+/// before them.
+#[derive(Debug, Clone)]
+pub struct MenuHeader {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub avatar: bool,
+}
+
+impl MenuHeader {
+    pub fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            subtitle: None,
+            avatar: false,
+        }
+    }
+
+    pub fn subtitle(mut self, s: impl Into<String>) -> Self {
+        self.subtitle = Some(s.into());
+        self
+    }
+
+    pub fn avatar(mut self) -> Self {
+        self.avatar = true;
+        self
+    }
 }
 
 impl From<MenuItem> for MenuEntry {
@@ -401,6 +433,11 @@ impl Menu {
         self
     }
 
+    pub fn header(mut self, header: MenuHeader) -> Self {
+        self.entries.push(MenuEntry::Header(header));
+        self
+    }
+
     pub fn entries(mut self, entries: Vec<MenuEntry>) -> Self {
         self.entries = entries;
         self
@@ -512,6 +549,9 @@ impl Menu {
                                 Pickable::IGNORE,
                             ));
                         }
+                        MenuEntry::Header(h) => {
+                            p.spawn(header_bundle(&theme, h));
+                        }
                         MenuEntry::Item(mut item) => {
                             let tip = item.tooltip.take();
                             let mut e =
@@ -525,6 +565,52 @@ impl Menu {
             })),
         )
     }
+}
+
+/// A header row: the avatar, then the title over the subtitle.
+fn header_bundle(theme: &Theme, h: MenuHeader) -> impl Bundle {
+    let t = theme.clone();
+    (
+        Name::new("menu-header"),
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            padding: UiRect::new(Val::Px(12.0), Val::Px(14.0), Val::Px(6.0), Val::Px(8.0)),
+            ..default()
+        },
+        Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
+            if h.avatar {
+                p.spawn((
+                    crate::avatar::Avatar::new("menu-header-avatar", h.title.clone())
+                        .size(32.0)
+                        .build(&t),
+                    Pickable::IGNORE,
+                ));
+            }
+            p.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(2.0),
+                    min_width: Val::Px(0.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
+                c.spawn((
+                    t.text(h.title, t.font_base, FontWeight::SEMIBOLD, t.foreground),
+                    Pickable::IGNORE,
+                ));
+                if let Some(s) = h.subtitle {
+                    c.spawn((
+                        Name::new("menu-header-subtitle"),
+                        t.text(s, t.font_sm, FontWeight::NORMAL, t.muted_foreground),
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
+        })),
+    )
 }
 
 fn placement(side: PopoverSide, align: PopoverAlign, gap: f32) -> PopoverPlacement {
@@ -553,10 +639,11 @@ fn shown(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
                 out.push(MenuEntry::Item(i));
             }
             MenuEntry::Separator => {
-                if matches!(out.last(), Some(MenuEntry::Item(_))) {
+                if matches!(out.last(), Some(MenuEntry::Item(_) | MenuEntry::Header(_))) {
                     out.push(MenuEntry::Separator);
                 }
             }
+            MenuEntry::Header(h) => out.push(MenuEntry::Header(h)),
         }
     }
     if matches!(out.last(), Some(MenuEntry::Separator)) {
@@ -956,6 +1043,7 @@ mod tests {
                 .map(|e| match e {
                     MenuEntry::Item(i) => i.name.to_string(),
                     MenuEntry::Separator => "-".into(),
+                    MenuEntry::Header(h) => format!("# {}", h.title),
                 })
                 .collect::<Vec<_>>()
         };

@@ -187,10 +187,10 @@ Scenario(
         Click(ui("insert-dialog-cancel")),
         // DV1.5: B gets a version; "Cycle partner" links B's Assembly 1 at it; inserting Cycle
         // partner's Top into B's Assembly 1 is refused.
-        Click(ui("document-create-version")),
+        Click(ui("app-menu")),
+        Click(ui("document-menu-create-version")),
         WaitFor("create-version-dialog"),
         Click(ui("create-version-create")),
-        Hover(ui("document-versions")),
         Wait(40),
         Screenshot("18a-consumer-versioned"),
         MoveTo(1420, 780),

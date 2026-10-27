@@ -41,6 +41,7 @@ pub mod floating_panel;
 pub mod fonts;
 pub mod form;
 pub mod gallery;
+pub mod glass;
 pub mod glyphs;
 pub mod grid_cell;
 pub mod icon;
@@ -63,6 +64,7 @@ pub mod selection_list;
 pub mod shortcut_key;
 pub mod spinner;
 pub mod splitter;
+pub mod spring;
 pub mod style;
 pub mod surface;
 pub mod switch;
@@ -143,7 +145,7 @@ pub use input::{
 };
 pub use list::{GridItem, ListItem};
 pub use menu::{
-    ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuItem,
+    ContextMenuRequested, ContextMenuTarget, Menu, MenuAction, MenuEntry, MenuHeader, MenuItem,
     close_all_menus, open_context_menu, open_menu,
 };
 pub use name_popup::{NamePopup, NamePopupCancel, NamePopupCommit};
@@ -315,6 +317,8 @@ impl Plugin for CadrsUiPlugin {
                 selectable_text::SelectableTextPlugin,
                 color_scheme::ColorSchemePlugin,
                 grid_cell::GridCellPlugin,
+                glass::GlassPlugin,
+                spring::SpringPlugin,
             ))
             .add_message::<ScriptCommand>();
     }

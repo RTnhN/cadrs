@@ -3,24 +3,20 @@
 // (`linked-block`): "Block source" (with version V1, in the folder "Linked parts") and "Block
 // consumer", whose Assembly 1 holds an instance of the block at V1.
 // 01 "Block" searched (Block source is filed in "Linked parts", so the root doesn't list it);
-//    a click on Block source selects it (it does not open): the Details panel with its
-//    thumbnail, Owner, Document description, Document labels, Created by, Created, Modified
-//    and Location "Owned by me › Linked parts".
+//    right-click › Properties… on Block source: the modal with its thumbnail, Owner, Document
+//    description, Document labels, Created by, Created, Modified and the location.
 // 02 the description typed ("Extended hubcap").
 // 03 Enter: saved (a library step), the field shows it.
-// 04 another row selected and Block source again: the description is kept.
-// 05 the rail's Versions tab: V1 from the document's history, with its time and author.
-// 06 the Where used tab: Block consumer's Assembly 1 uses Block (V1).
-// 07 the panel closed with ×: only the rail.
+// 04 closed and opened again: the description is kept.
+// 05 right-click › History…: V1 from the document's history, with its time and author.
+// 06 right-click › Used in…: Block consumer's Assembly 1 uses Block (V1).
+// 07 Escape closes it.
 // 08 double-click on a row (Block consumer): the document opens (loaded).
-// 09 back, the search cleared: Last opened by me, open by default: bordered cards (thumbnail
-//    left, name right), the pointer on a card's name.
-// 10 a click on the name opens that document.
-// 11 back: the Folders section; a click selects the folder "Linked parts" (its details: owner,
+// 11 back, the search cleared: right-click › Properties… on the folder "Linked parts" (owner,
 //    created, 2 documents).
-// 12 double-click: the folder opens, a breadcrumb "‹ Owned by me › Linked parts" and its
+// 12 double-click: the folder opens, a breadcrumb "‹ Documents › Linked parts" and its
 //    documents (Block copy, Block source).
-// 13 the breadcrumb's Owned by me: back at the top.
+// 13 the breadcrumb's root: back at the top.
 // 14 the Type menu (All, Documents, Folders).
 // 15 Type: Folders: only the folder row.
 // 16 Type: All and the grid view: folder and document cards.
@@ -33,66 +29,69 @@ Scenario(
         WaitFor("document-shell"),
         Custom("linked-block"),
         Custom("linked-block consumer 1"),
-        Click(ui("back-to-documents")),
+        Click(ui("app-menu")),
+        Click(ui("app-documents")),
         WaitFor("doc-row-0"),
         // Block source is filed in "Linked parts" (P3E.2: listed inside its folder, not at the
         // root): the search finds it, with Block consumer and Block copy.
         Click(ui("search")),
         Type("Block"),
         Click(ui("col-name")),
-        Click(ui("doc-name-2")),
+        RightClick(ui("doc-name-2")),
+        WaitFor("ctx-properties"),
+        Click(ui("ctx-properties")),
         WaitFor("details-description"),
-        Screenshot("01-row-selected-details"),
+        Screenshot("01-properties"),
         Click(ui("details-description-field")),
         Type("Extended hubcap"),
         Screenshot("02-description-typed"),
         Key("Enter"),
         Screenshot("03-description-saved"),
-        Click(ui("doc-name-0")),
-        Click(ui("doc-name-2")),
+        Click(ui("details-dialog-close")),
+        RightClick(ui("doc-name-2")),
+        WaitFor("ctx-properties"),
+        Click(ui("ctx-properties")),
+        WaitFor("details-description"),
         Screenshot("04-description-kept"),
-        Click(ui("details-versions")),
+        Click(ui("details-dialog-close")),
+        RightClick(ui("doc-name-2")),
+        WaitFor("ctx-history"),
+        Click(ui("ctx-history")),
         WaitFor("details-version-0"),
         Hover(ui("details-version-0")),
         Wait(3),
-        Screenshot("05-versions-tab"),
-        Click(ui("details-where-used")),
+        Screenshot("05-history"),
+        Click(ui("details-dialog-close")),
+        RightClick(ui("doc-name-2")),
+        WaitFor("ctx-used-in"),
+        Click(ui("ctx-used-in")),
         WaitFor("details-used-0"),
-        Screenshot("06-where-used-tab"),
-        Click(ui("details-toggle")),
-        Click(ui("details-close")),
+        Screenshot("06-used-in"),
+        Key("Escape"),
         Screenshot("07-details-closed"),
         DoubleClick(ui("doc-name-0")),
         WaitFor("document-shell"),
         MoveTo(1420, 780),
         Wait(3),
         Screenshot("08-double-click-opens"),
-        Click(ui("back-to-documents")),
+        Click(ui("app-menu")),
+        Click(ui("app-documents")),
         WaitFor("doc-row-0"),
         Click(ui("search")),
         Key("Ctrl+A"),
         Key("Backspace"),
-        WaitFor("recent-name-0"),
-        Hover(ui("recent-name-0")),
-        Wait(3),
-        Screenshot("09-last-opened-strip"),
-        Click(ui("recent-name-0")),
-        WaitFor("document-shell"),
-        MoveTo(1420, 780),
-        Wait(3),
-        Screenshot("10-name-click-opens"),
-        Click(ui("back-to-documents")),
-        WaitFor("doc-row-0"),
-        Click(ui("section-folders-header")),
-        WaitFor("folder-0"),
-        Click(ui("folder-0")),
+        WaitFor("folder-row-0"),
+        RightClick(ui("folder-name-0")),
+        WaitFor("folder-properties"),
+        Click(ui("folder-properties")),
         WaitFor("details-folder-count"),
-        Screenshot("11-folder-selected"),
-        DoubleClick(ui("folder-0")),
+        Screenshot("11-folder-properties"),
+        Key("Escape"),
+        DoubleClick(ui("folder-name-0")),
         WaitFor("crumb-root"),
         Screenshot("12-folder-opened"),
         Click(ui("crumb-root")),
-        WaitFor("section-folders-header"),
+        WaitFor("folder-row-0"),
         Screenshot("13-back-at-top"),
         Click(ui("type-filter")),
         WaitFor("type-menu"),

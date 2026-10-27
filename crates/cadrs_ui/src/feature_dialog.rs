@@ -89,8 +89,8 @@ impl FeatureDialog {
             name: name.into(),
             title: String::new(),
             valid: true,
-            width: 202.0,
-            body_padding: UiRect::new(Val::Px(2.0), Val::Px(3.0), Val::Px(5.0), Val::ZERO),
+            width: 236.0,
+            body_padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(6.0), Val::ZERO),
             body: None,
             footer: None,
             plain_title: false,
@@ -169,41 +169,34 @@ impl FeatureDialog {
                 valid,
                 error: false,
             },
+            // A floating glass panel at the view's top left, like the panels around it.
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
-                top: Val::Px(2.0),
+                top: Val::Px(0.0),
                 width: Val::Px(width),
                 flex_direction: FlexDirection::Column,
-                border: UiRect::new(Val::ZERO, Val::Px(1.0), Val::Px(1.0), Val::Px(1.0)),
-                border_radius: BorderRadius::right(Val::Px(2.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
+                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(t.background),
-            BorderColor::all(Color::srgb_u8(0xe4, 0xe4, 0xe4)),
-            // A soft shadow that reaches about #dbdbdb just under the dialog and fades out
-            // over ~10 px (`screens/22`).
-            BoxShadow::new(
-                Color::srgba(0.0, 0.0, 0.0, 0.5),
-                Val::Px(1.0),
-                Val::Px(2.0),
-                Val::Px(0.0),
-                Val::Px(6.0),
-            ),
+            crate::glass::Glass::panel().material(crate::glass::GlassMaterial::Frosted),
+            crate::glass::panel_shadow(&t),
             GlobalZIndex(crate::z::DIALOG - 10),
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
                 let dialog = p.target_entity();
                 // Header: title, ✓, ✕.
                 p.spawn((
                     Node {
-                        height: Val::Px(26.0),
+                        height: Val::Px(30.0),
                         flex_shrink: 0.0,
-                        padding: UiRect::left(Val::Px(4.0)),
+                        padding: UiRect::new(Val::Px(8.0), Val::Px(2.0), Val::ZERO, Val::ZERO),
                         align_items: AlignItems::Center,
                         border: UiRect::bottom(Val::Px(1.0)),
                         ..default()
                     },
-                    BorderColor::all(Color::srgb_u8(0xda, 0xda, 0xdc)),
+                    BorderColor::all(t.separator),
                 ))
                 .with_children(|h| {
                     let color = if valid || plain_title {

@@ -198,18 +198,12 @@ impl Select {
             .map(|o| o.0.clone())
             .unwrap_or_default();
         let bordered = self.bordered;
+        // Either way a filled control with no outline, as the app's buttons are, so it reads as
+        // something to click.
         let visuals = Visuals {
-            background: if bordered {
-                StateColors::new(t.background, t.list_hover, t.list_active, t.background)
-            } else {
-                StateColors::new(Color::NONE, t.ghost_hover, t.ghost_active, Color::NONE)
-                    .with_selected(t.ghost_hover)
-            },
-            border: StateColors::all(if bordered {
-                Color::srgb_u8(0xc8, 0xc8, 0xc8)
-            } else {
-                underline()
-            }),
+            background: StateColors::new(t.control, t.control_hover, t.list_active, t.control)
+                .with_selected(t.control_hover),
+            border: StateColors::all(Color::NONE),
             foreground: StateColors::new(
                 t.tool_foreground,
                 t.tool_foreground,
@@ -225,29 +219,15 @@ impl Select {
                 options: self.options,
                 selected: self.selected,
             },
-            if bordered {
-                Node {
-                    width: self.width,
-                    flex_grow: 1.0,
-                    min_width: Val::Px(0.0),
-                    height: Val::Px(26.0),
-                    padding: UiRect::horizontal(Val::Px(6.0)),
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                    ..default()
-                }
-            } else {
-                Node {
-                    width: self.width,
-                    flex_grow: 1.0,
-                    min_width: Val::Px(0.0),
-                    height: Val::Px(24.0),
-                    padding: UiRect::new(Val::Px(3.0), Val::Px(4.0), Val::ZERO, Val::ZERO),
-                    align_items: AlignItems::Center,
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                }
+            Node {
+                width: self.width,
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                height: Val::Px(if bordered { 26.0 } else { 24.0 }),
+                padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::ZERO, Val::ZERO),
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(t.radius)),
+                ..default()
             },
             WidgetButton,
             Hovered::default(),
@@ -827,25 +807,6 @@ impl OptionRow {
                 ..default()
             },
             Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
-                if chevron {
-                    p.spawn((
-                        icon_in(
-                            "chevron-right",
-                            10.0,
-                            chevron_grey(),
-                            Node {
-                                margin: UiRect::new(
-                                    Val::Px(3.0),
-                                    Val::Px(5.0),
-                                    Val::ZERO,
-                                    Val::ZERO,
-                                ),
-                                ..default()
-                            },
-                        ),
-                        Pickable::IGNORE,
-                    ));
-                }
                 match glyph {
                     None => {
                         p.spawn(
@@ -882,6 +843,26 @@ impl OptionRow {
                         ))
                         .insert(TextLayout::no_wrap());
                     }
+                }
+                // A row that opens more has its chevron at the end, so every checkbox lines up
+                // at the left.
+                if chevron {
+                    p.spawn(Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    });
+                    p.spawn((
+                        icon_in(
+                            "chevron-right",
+                            10.0,
+                            chevron_grey(),
+                            Node {
+                                margin: UiRect::horizontal(Val::Px(6.0)),
+                                ..default()
+                            },
+                        ),
+                        Pickable::IGNORE,
+                    ));
                 }
             })),
         )

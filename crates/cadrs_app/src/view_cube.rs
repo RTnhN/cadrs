@@ -529,7 +529,8 @@ impl CubeColors for Theme {
         )
     }
     fn view_cube_arrow(&self) -> Color {
-        Color::srgb_u8(0xe1, 0xe9, 0xef)
+        // Readable over the light canvas as over the dark one.
+        Color::srgb_u8(0x9a, 0xab, 0xb3)
     }
     fn view_cube_arc(&self) -> Color {
         by_scheme(self.view_cube_arrow(), Color::srgb_u8(0x8a, 0x90, 0x98))

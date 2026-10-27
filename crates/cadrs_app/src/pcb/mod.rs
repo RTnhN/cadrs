@@ -942,12 +942,13 @@ fn header_add(h: &mut ChildSpawnerCommands, t: &Theme, name: &'static str, tip: 
         flex_grow: 1.0,
         ..default()
     });
+    // Left of the panel's ‹, which sits at the end of the first header (`cadrs_ui::dock`).
     h.spawn(IconButton::new(name, "plus").tooltip(tip).build(t))
         .entry::<Node>()
         .and_modify(|mut n| {
             n.width = Val::Px(18.0);
             n.height = Val::Px(18.0);
-            n.margin.right = Val::Px(6.0);
+            n.margin.right = Val::Px(cadrs_ui::dock::COLLAPSE_ROOM - 4.0);
         });
 }
 

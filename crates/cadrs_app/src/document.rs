@@ -1,17 +1,22 @@
-//! The document shell, laid out like Onshape's (see `reference/onshape/screens/05*`):
+//! The document shell: floating glass panels ([`cadrs_ui::glass`]) over the 3D view, with a
+//! [`PANEL_GAP`] around and between them through which the view shows (the gaps act as the
+//! view: [`ViewportBackdrop`]).
 //!
-//! - **Top bar** (36 px): the cadrs mark (back to documents), ☰, the document name (click to
-//!   rename in place), "Main", the versions and branches counters, Create version, and the
-//!   version and settings on the right (what does nothing yet is left out: issue #13).
-//! - **Icon rail** (36 px) on the left, with the feature-list toggle at the top.
-//! - **Toolbar** (34 px): undo, redo, **Sketch** (the only text button) and the feature tools,
-//!   disabled until later milestones, then "Search tools… alt c". Assemblies get their own
-//!   toolbar (Insert and the mate tools).
-//! - **Feature list** panel (190 px): filter, "Features (4)", the Default geometry tree (Origin,
-//!   Top, Front, Right), the rollback bar and a collapsible "Parts (0)"; assemblies show the
-//!   instance list instead. The panel collapses with the tab on its right edge.
+//! - **Top bar**: the cadrs mark (the app menu, [`crate::app_menu`]: back to the documents,
+//!   rename, export, a version, the workspaces, units, a full rebuild, Preferences), the
+//!   document name (click to rename in place), the workspace's name when it isn't Main; on the
+//!   right the version, the color scheme, Share, notifications and the account
+//!   ([`crate::identity`]).
+//! - **Icon rail** on the left, as tall as its icons; the feature list's icon is on it while
+//!   the panel is hidden.
+//! - **Toolbar**: undo, redo, **Sketch** (the only text button) and the feature tools, then
+//!   "Search tools… alt c". Assemblies get their own toolbar (Insert and the mate tools).
+//! - **Feature list** panel: filter (with the panel's ‹ that hides it), "Features (4)", the
+//!   Default geometry tree (Origin, Top, Front, Right), the rollback bar and a collapsible
+//!   "Parts (0)"; assemblies show the instance list instead. The grip in the gap on its right
+//!   resizes it.
 //! - **Viewport** area: see [`crate::viewport`] and [`crate::view_cube`].
-//! - **Tab bar** (29 px): tab manager, **+** (Create Part Studio / Create Assembly), and the tabs.
+//! - **Tab bar**: tab manager, **+** (Create Part Studio / Create Assembly), and the tabs.
 //!   Double-click a tab to rename it; right-click for Delete (with confirmation), Rename… and
 //!   Duplicate.
 //!
@@ -52,10 +57,6 @@ impl Plugin for DocumentPlugin {
             .add_observer(remember_feature_split)
             .init_resource::<crate::WorkspaceUnits>()
             .add_systems(OnEnter(AppState::Document), spawn_shell)
-            .add_systems(
-                Update,
-                back_viewport_tools.run_if(resource_changed::<cadrs_ui::ActiveTheme>),
-            )
             .add_systems(OnExit(AppState::Document), save_on_exit)
             .add_systems(
                 Update,
@@ -70,6 +71,7 @@ impl Plugin for DocumentPlugin {
                     sync_document_name,
                     crate::units_dialog::sync_units,
                     document_shortcuts,
+                    sync_rail_toggle,
                     auto_save,
                     scroll_to_revealed.after(rebuild_feature_rows),
                 )
@@ -127,7 +129,7 @@ struct TabMenuFor(ElementId);
 
 /// The document name in the top bar.
 #[derive(Component)]
-struct DocumentName;
+pub(crate) struct DocumentName;
 
 /// The toolbar row (its content depends on the active tab's kind).
 #[derive(Component)]
@@ -260,12 +262,28 @@ struct FeatureMenuFor(FeatureId);
 // ---------------------------------------------------------------------------------------------
 // Layout
 
+/// The gap around and between the floating panels, through which the 3D view (or the
+/// schematic, the board) shows.
+pub const PANEL_GAP: f32 = 8.0;
+
+/// The top bar's height: its 32 px controls with room around them.
+const TOP_BAR_HEIGHT: f32 = 44.0;
+
+/// The tab bar's height: its tabs inside a 3 px inset.
+const TAB_BAR_HEIGHT: f32 = 36.0;
+
+/// The 3D view behind the floating panels: the gaps between them are the view's too (the
+/// pointer over a gap orbits, zooms and picks as over the view).
+#[derive(Component)]
+pub struct ViewportBackdrop;
+
 fn spawn_shell(
     mut commands: Commands,
     theme: Res<Theme>,
     doc: Option<Res<ActiveDocument>>,
     cube: Res<crate::view_cube::ViewCubeImage>,
     mut snapshot: ResMut<ShellSnapshot>,
+    profile: Res<UserProfile>,
 ) {
     *snapshot = ShellSnapshot::default();
     let t = theme.clone();
@@ -282,16 +300,48 @@ fn spawn_shell(
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(PANEL_GAP)),
+                row_gap: Val::Px(PANEL_GAP),
                 ..default()
             },
             Pickable::IGNORE,
         ))
         .with_children(|root| {
-            top_bar(root, &t, &doc_name);
+            root.spawn((
+                Name::new("viewport-backdrop"),
+                ViewportBackdrop,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+            ));
+            top_bar(root, &t, &doc_name, &profile);
+            // The toolbar runs the whole width, under the top bar, so the tools have room.
+            root.spawn((
+                Name::new("toolbar"),
+                ToolbarRow,
+                Node {
+                    height: Val::Px(t.toolbar_height),
+                    flex_shrink: 0.0,
+                    padding: UiRect::horizontal(Val::Px(4.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(3.0),
+                    overflow: Overflow::clip(),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
+                    ..default()
+                },
+                cadrs_ui::glass::panel(&t),
+            ));
             root.spawn((
                 Node {
                     flex_grow: 1.0,
                     min_height: Val::Px(0.0),
+                    column_gap: Val::Px(PANEL_GAP),
                     ..default()
                 },
                 Pickable::IGNORE,
@@ -299,7 +349,7 @@ fn spawn_shell(
             .with_children(|body| {
                 icon_rail(body, &t);
                 // P3E.2 (judge r1, `tab_manager_open-01.png`): the Tab manager docks here, full
-                // height, pushing the toolbar and the feature list right (`tab_manager`).
+                // height, pushing the feature list right (`tab_manager`).
                 body.spawn((
                     Name::new("tab-manager-dock"),
                     crate::tab_manager::TabManagerDock,
@@ -308,11 +358,9 @@ fn spawn_shell(
                         flex_shrink: 0.0,
                         display: Display::None,
                         flex_direction: FlexDirection::Column,
-                        border: UiRect::right(Val::Px(1.0)),
-                        ..default()
+                        ..cadrs_ui::glass::panel_node(&t)
                     },
-                    BackgroundColor(t.background),
-                    BorderColor::all(t.border),
+                    cadrs_ui::glass::panel(&t),
                 ));
                 body.spawn((
                     Node {
@@ -325,20 +373,6 @@ fn spawn_shell(
                 ))
                 .with_children(|main| {
                     main.spawn((
-                        Name::new("toolbar"),
-                        ToolbarRow,
-                        Node {
-                            height: Val::Px(t.toolbar_height),
-                            flex_shrink: 0.0,
-                            padding: UiRect::left(Val::Px(1.0)),
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(3.0),
-                            overflow: Overflow::clip(),
-                            ..default()
-                        },
-                        BackgroundColor(t.background),
-                    ));
-                    main.spawn((
                         Node {
                             flex_grow: 1.0,
                             min_height: Val::Px(0.0),
@@ -349,8 +383,8 @@ fn spawn_shell(
                     .with_children(|mid| {
                         mid.spawn((
                             DockPanel::new("feature-panel")
-                                .width(190.0)
-                                .tab_icon("list-details")
+                                .width(crate::assembly::list::PART_STUDIO_LIST_W)
+                                .gap(PANEL_GAP)
                                 .content(|c| {
                                     c.spawn((
                                         Name::new("feature-panel-content"),
@@ -366,7 +400,7 @@ fn spawn_shell(
                                     ));
                                 })
                                 .build(&t),
-                            // Above the viewport so its edge tab stays clickable.
+                            // Above the viewport so its grip stays grabbable.
                             ZIndex(1),
                         ));
                         mid.spawn((
@@ -395,101 +429,24 @@ fn spawn_shell(
         });
 }
 
-fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
+fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str, profile: &UserProfile) {
     root.spawn((
         Name::new("document-top-bar"),
         Node {
-            height: Val::Px(t.top_bar_height),
+            height: Val::Px(TOP_BAR_HEIGHT),
             flex_shrink: 0.0,
-            padding: UiRect::new(Val::Px(6.0), Val::Px(8.0), Val::ZERO, Val::ZERO),
+            padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::ZERO, Val::ZERO),
             align_items: AlignItems::Center,
-            border: UiRect::bottom(Val::Px(1.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(t.title_bar),
-        BorderColor::all(Color::srgb_u8(0xdc, 0xdc, 0xdc)),
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|bar| {
-        let mut dark = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
-        dark.foreground = StateColors::all(t.foreground);
-        // The cadrs mark: back to the documents page (like clicking Onshape's logo).
-        bar.spawn((
-            Button::new("back-to-documents")
-                .ghost()
-                .tooltip("Documents")
-                .build(t),
-            observe(|_: On<Activate>, mut commands: Commands| {
-                commands.queue(crate::thumbnail::close_document);
-            }),
-        ))
-        .insert(Node {
-            height: Val::Px(30.0),
-            padding: UiRect::new(Val::Px(4.0), Val::Px(6.0), Val::ZERO, Val::ZERO),
-            column_gap: Val::Px(7.0),
-            align_items: AlignItems::Center,
-            border_radius: BorderRadius::all(Val::Px(t.radius)),
-            ..default()
-        })
-        .with_children(|logo| {
-            logo.spawn((
-                Node {
-                    width: Val::Px(22.0),
-                    height: Val::Px(22.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(5.0)),
-                    ..default()
-                },
-                BackgroundColor(t.primary),
-                Pickable::IGNORE,
-            ))
-            .with_child((icon("part", 16.0, Color::WHITE), Pickable::IGNORE));
-            logo.spawn((
-                t.text("cadrs", t.font_xl, FontWeight::NORMAL, t.muted_foreground),
-                Pickable::IGNORE,
-            ));
-        });
-        bar.spawn((
-            IconButton::new("document-menu", "menu")
-                .icon_size(20.0)
-                .tooltip("Document menu")
-                .build(t),
-            observe(
-                |a: On<Activate>, theme: Res<Theme>, mut commands: Commands| {
-                    open_menu(&mut commands, a.entity, document_menu().build(&theme));
-                },
-            ),
-            observe(
-                |ev: On<MenuAction>,
-                 q: Query<Entity, With<DocumentName>>,
-                 mut commands: Commands| {
-                    match ev.item.as_str() {
-                        "document-menu-export" => {
-                            commands.queue(crate::native_document::open_export)
-                        }
-                        "document-menu-units" => {
-                            commands.queue(crate::units_dialog::open_units_dialog)
-                        }
-                        "document-menu-full-rebuild" => commands.queue(full_rebuild),
-                        // P3D.3: a version of the document as it is.
-                        "document-menu-create-version" => commands.queue(|world: &mut World| {
-                            crate::linked::open_create_version_dialog(
-                                world,
-                                crate::linked::VersionTarget::Current,
-                            )
-                        }),
-                        "document-menu-rename" => {
-                            // The same as clicking the name.
-                            for e in &q {
-                                commands.trigger(Activate { entity: e });
-                            }
-                        }
-                        _ => {}
-                    }
-                },
-            ),
-        ))
-        .insert(dark.clone());
+        // The cadrs mark: the app menu (the way back to the documents, the document's
+        // commands, Preferences).
+        crate::app_menu::spawn_app_button(bar, t);
         // The document name: click to rename in place.
         bar.spawn((
             DocumentName,
@@ -546,54 +503,21 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             t.text(doc_name, t.font_xl, FontWeight::BOLD, t.foreground),
             Pickable::IGNORE,
         ));
-        // P3E.4: the open workspace's name; a click lists the workspaces to switch to
-        // (see [`crate::workspaces`]).
+        // P3E.4: the open workspace's name, only when it isn't Main (a branch, or a version
+        // shown read-only); a click lists the workspaces to switch to (see
+        // [`crate::workspaces`]).
         bar.spawn((
             Name::new("branch-label"),
             t.text("Main", t.font_md, FontWeight::NORMAL, t.subtle_foreground),
             Node {
                 margin: UiRect::new(Val::Px(4.0), Val::Px(10.0), Val::Px(3.0), Val::ZERO),
+                display: Display::None,
                 ..default()
             },
             bevy::ui_widgets::Button,
             bevy::picking::hover::Hovered::default(),
             Tooltip::new("Workspaces"),
         ));
-        // The versions and branches counters (`crate::linked` keeps them up to date). (Link,
-        // public and likes are left out until they do something: issue #13.)
-        for (name, icon_name, count, tip) in [
-            ("document-versions", "versions", Some("0"), "Versions"),
-            ("document-branches", "branches", Some("0"), "Branches"),
-        ] {
-            bar.spawn((
-                Name::new(name),
-                Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(4.0),
-                    margin: UiRect::right(Val::Px(10.0)),
-                    ..default()
-                },
-                Tooltip::new(tip),
-            ))
-            .with_children(|c| {
-                c.spawn((icon(icon_name, 16.0, t.tool_foreground), Pickable::IGNORE));
-                if let Some(n) = count {
-                    c.spawn((
-                        t.text(n, t.font_base, FontWeight::NORMAL, t.tool_foreground),
-                        Pickable::IGNORE,
-                    ));
-                }
-            });
-        }
-        // P3G.1 (ER2.2, ER6.2): Create version (see [`crate::linked`]). After the counters, so
-        // nothing else in the bar moves.
-        bar.spawn(
-            IconButton::new("document-create-version", "versions")
-                .icon_size(18.0)
-                .tooltip("Create version")
-                .build(t),
-        )
-        .insert(dark.clone());
         bar.spawn(Node {
             flex_grow: 1.0,
             ..default()
@@ -606,11 +530,14 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
         .with_children(|r| {
             crate::update::spawn_version(r, t);
             // Light, dark or the system's scheme.
-            r.spawn(cadrs_ui::scheme_toggle(t))
-                .entry::<Node>()
-                .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            // The collaborators' avatars (`crate::collab::presence`), then Share (Onshape's blue
-            // button; `crate::collab`).
+            r.spawn((
+                cadrs_ui::scheme_toggle(t),
+                cadrs_ui::glass::GlassFrame::bar(),
+            ))
+            .entry::<Node>()
+            .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
+            // The collaborators' avatars (`crate::collab::presence`), then Share
+            // (`crate::collab`).
             r.spawn((
                 Name::new("collab-people"),
                 crate::collab::presence::PeopleBar,
@@ -621,8 +548,6 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
                     ..default()
                 },
             ));
-            // (Explore, notifications, apps and help are left out until they do something:
-            // issue #13.)
             r.spawn((
                 Button::new("document-share")
                     .label("Share")
@@ -636,40 +561,31 @@ fn top_bar(root: &mut ChildSpawnerCommands, t: &Theme, doc_name: &str) {
             ))
             .entry::<Node>()
             .and_modify(|mut n| n.margin = UiRect::right(Val::Px(6.0)));
-            crate::preferences_ui::spawn_settings_button(r, t);
+            crate::notifications::spawn_bell(r, t);
+            crate::identity::spawn_identity_button(r, t, profile);
         });
     });
 }
 
 fn icon_rail(body: &mut ChildSpawnerCommands, t: &Theme) {
+    // A floating column as tall as its icons.
     body.spawn((
         Name::new("icon-rail"),
         Node {
-            width: Val::Px(36.0),
+            width: Val::Px(RAIL_WIDTH),
             flex_shrink: 0.0,
+            align_self: AlignSelf::FlexStart,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            padding: UiRect::top(Val::Px(3.0)),
+            padding: UiRect::vertical(Val::Px(4.0)),
             row_gap: Val::Px(4.0),
-            border: UiRect::right(Val::Px(1.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(t.rail_background),
-        BorderColor::all(Color::srgb_u8(0xe2, 0xe2, 0xe2)),
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|rail| {
-        rail.spawn((
-            ToolButton::new("rail-feature-list", "list-details")
-                .tooltip("Feature list")
-                .build(t),
-            observe(
-                |_: On<Activate>, q: Query<(Entity, &Name)>, mut commands: Commands| {
-                    if let Some((e, _)) = q.iter().find(|(_, n)| n.as_str() == "feature-panel") {
-                        commands.trigger(ToggleDockPanel { entity: e });
-                    }
-                },
-            ),
-        ));
         for (name, icon_name, tip) in [
             ("rail-insert", "file-import", "Insert"),
             ("rail-comments", "comments", "Comments"),
@@ -680,7 +596,71 @@ fn icon_rail(body: &mut ChildSpawnerCommands, t: &Theme) {
         ] {
             rail.spawn(ToolButton::new(name, icon_name).tooltip(tip).build(t));
         }
+        // At the end, shown while the feature panel is hidden ([`sync_rail_toggle`]), so the
+        // other icons never move: it brings the panel back.
+        rail.spawn((
+            RailPanelToggle,
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(4.0),
+                display: Display::None,
+                ..default()
+            },
+        ))
+        .with_children(|g| {
+            g.spawn((
+                Node {
+                    width: Val::Px(20.0),
+                    height: Val::Px(1.0),
+                    ..default()
+                },
+                BackgroundColor(t.separator),
+            ));
+            g.spawn((
+                ToolButton::new("rail-feature-list", "list-details")
+                    .tooltip("Show the feature list")
+                    .build(t),
+                observe(
+                    |_: On<Activate>, q: Query<(Entity, &Name)>, mut commands: Commands| {
+                        if let Some((e, _)) = q.iter().find(|(_, n)| n.as_str() == "feature-panel")
+                        {
+                            commands.trigger(ToggleDockPanel { entity: e });
+                        }
+                    },
+                ),
+            ));
+        });
     });
+}
+
+const RAIL_WIDTH: f32 = 40.0;
+
+/// The rail's feature list button: there while the panel is hidden.
+#[derive(Component)]
+struct RailPanelToggle;
+
+/// The rail shows the feature list's button only while the panel is hidden (the panel's own ‹
+/// hides it).
+fn sync_rail_toggle(
+    q_panel: Query<(&Name, &cadrs_ui::dock::DockPanelState, &Node), Without<RailPanelToggle>>,
+    mut q_button: Query<&mut Node, With<RailPanelToggle>>,
+) {
+    let Some((_, state, node)) = q_panel.iter().find(|(n, ..)| n.as_str() == "feature-panel")
+    else {
+        return;
+    };
+    // A drawing or a Variable Studio hides the panel itself: nothing to bring back.
+    let want = if state.open || node.display == Display::None {
+        Display::None
+    } else {
+        Display::Flex
+    };
+    for mut n in &mut q_button {
+        if n.display != want {
+            n.display = want;
+        }
+    }
 }
 
 /// The small strip of panel toggles on the viewport's right edge.
@@ -693,12 +673,13 @@ fn right_strip(vp: &mut ChildSpawnerCommands, t: &Theme) {
             top: Val::Percent(50.0),
             margin: UiRect::top(Val::Px(-60.0)),
             flex_direction: FlexDirection::Column,
-            border: UiRect::new(Val::Px(1.0), Val::ZERO, Val::Px(1.0), Val::Px(1.0)),
-            border_radius: BorderRadius::left(Val::Px(t.radius)),
+            padding: UiRect::all(Val::Px(3.0)),
+            row_gap: Val::Px(2.0),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(t.background),
-        BorderColor::all(t.panel_border),
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|s| {
         // Appearances (P3.5), Custom tables (P3.11) and Variables (a placeholder table until
@@ -754,32 +735,23 @@ fn right_strip(vp: &mut ChildSpawnerCommands, t: &Theme) {
 #[derive(Component)]
 struct ViewportTools;
 
-/// Behind the bottom-right tools: nothing on white, a dark veil in dark, where the light icons
-/// would vanish over a light part.
-fn viewport_tools_backing() -> Color {
-    cadrs_ui::by_scheme(Color::NONE, Color::srgba(0.12, 0.13, 0.15, 0.72))
-}
-
-fn back_viewport_tools(mut q: Query<&mut BackgroundColor, With<ViewportTools>>) {
-    for mut bg in &mut q {
-        bg.0 = viewport_tools_backing();
-    }
-}
-
 fn bottom_right_tools(vp: &mut ChildSpawnerCommands, t: &Theme) {
+    // A glass pill, so the icons read over a part of any colour.
     vp.spawn((
         Name::new("viewport-tools"),
         ViewportTools,
         Node {
             position_type: PositionType::Absolute,
-            right: Val::Px(6.0),
-            bottom: Val::Px(2.0),
-            column_gap: Val::Px(4.0),
-            border_radius: BorderRadius::all(Val::Px(t.radius)),
+            right: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            column_gap: Val::Px(2.0),
+            padding: UiRect::all(Val::Px(3.0)),
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(viewport_tools_backing()),
-        cadrs_ui::KeepFill,
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|s| {
         // "Area: … mm²" while a region is selected (`intro-to-sketching/ex1-step8.png`).
@@ -806,47 +778,34 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
     root.spawn((
         Name::new("tab-bar"),
         Node {
-            height: Val::Px(t.tab_bar_height),
+            height: Val::Px(TAB_BAR_HEIGHT),
             flex_shrink: 0.0,
             align_items: AlignItems::Stretch,
+            padding: UiRect::all(Val::Px(3.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(t.radius_panel)),
             ..default()
         },
-        BackgroundColor(t.tab_bar),
+        cadrs_ui::glass::panel(t),
     ))
     .with_children(|bar| {
         let mut dark = cadrs_ui::button::visuals_for(t, cadrs_ui::ButtonVariant::Ghost);
         dark.foreground = StateColors::all(t.tool_foreground);
-        dark.background = StateColors::new(
-            Color::NONE,
-            Color::srgb_u8(0xc8, 0xc8, 0xc8),
-            Color::srgb_u8(0xbc, 0xbc, 0xbc),
-            Color::NONE,
-        )
-        .with_selected(Color::srgb_u8(0xc8, 0xc8, 0xc8));
-        // The tab manager sits on the icon rail, which runs down through the tab bar's row
-        // (`screens/05e`): the grey bar starts after it.
-        let mut on_rail = dark.clone();
-        on_rail.background = StateColors::new(
-            t.rail_background,
-            Color::srgb_u8(0xe8, 0xe8, 0xe8),
-            Color::srgb_u8(0xdc, 0xdc, 0xdc),
-            t.rail_background,
-        )
-        .with_selected(Color::srgb_u8(0xe8, 0xe8, 0xe8));
-        on_rail.border = StateColors::all(Color::srgb_u8(0xe2, 0xe2, 0xe2));
+        dark.background =
+            StateColors::new(Color::NONE, t.control_hover, t.list_active, Color::NONE)
+                .with_selected(t.control_hover);
         bar.spawn(
             IconButton::new("tab-manager", "tab-manager")
                 .icon_size(18.0)
                 .tooltip("Tab manager")
                 .build(t),
         )
-        .insert((on_rail,))
+        .insert(dark.clone())
         .entry::<Node>()
         .and_modify(|mut n| {
-            n.width = Val::Px(36.0);
+            n.width = Val::Px(32.0);
             n.height = Val::Auto;
-            n.border_radius = BorderRadius::ZERO;
-            n.border = UiRect::right(Val::Px(1.0));
+            n.border = UiRect::ZERO;
         });
         bar.spawn((
             IconButton::new("insert-tab", "plus")
@@ -867,9 +826,9 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
         .insert(dark.clone())
         .entry::<Node>()
         .and_modify(|mut n| {
-            n.width = Val::Px(36.0);
+            n.width = Val::Px(32.0);
             n.height = Val::Auto;
-            n.border_radius = BorderRadius::ZERO;
+            n.border = UiRect::ZERO;
         });
         // P3F.3 (T1.2): 40 tabs scroll sideways (`scale_ui`): by whole tabs, with a chevron and
         // a fade at each end that has more tabs (P3F.3–P3F.4 judge).
@@ -978,41 +937,11 @@ fn tab_bar(root: &mut ChildSpawnerCommands, t: &Theme) {
     });
 }
 
-/// The "+" menu, like Onshape's: only Part Studios and Assemblies can be created.
-/// The document menu (☰): rename, a version, the workspace units (X1) and a full rebuild. The
-/// rest is shown disabled.
-fn document_menu() -> Menu {
-    Menu::new("document-menu-popup")
-        .min_width(200.0)
-        .item(MenuItem::new("document-menu-rename", "Rename document…").icon("edit"))
-        .item(MenuItem::new("document-menu-export", "Export document…").icon("file-export"))
-        .item(
-            MenuItem::new("document-menu-copy", "Copy workspace…")
-                .icon("copy")
-                .planned(),
-        )
-        .item(
-            MenuItem::new("document-menu-properties", "Properties…")
-                .icon("info")
-                .planned(),
-        )
-        .item(MenuItem::new("document-menu-create-version", "Create version…").icon("versions"))
-        .separator()
-        .item(MenuItem::new("document-menu-units", "Workspace units…").icon("measure"))
-        .separator()
-        .item(
-            MenuItem::new("document-menu-full-rebuild", "Full rebuild (clear cache)")
-                .icon("sync-document"),
-        )
-        .separator()
-        .item(MenuItem::new("document-menu-print", "Print…").planned())
-}
-
-/// Document menu › Full rebuild: reloads the document from the store (a re-import made while it
+/// App menu › Full rebuild: reloads the document from the store (a re-import made while it
 /// was open comes in; edits not yet saved are saved first, unless the stored file changed
 /// elsewhere, which then wins), empties the rebuild cache and stops restoring saved rebuild
 /// snapshots, so the open tab is rebuilt from scratch (other tabs when next shown).
-fn full_rebuild(world: &mut World) {
+pub(crate) fn full_rebuild(world: &mut World) {
     cadrs_core::rebuild::clear_cache();
     let stored = world
         .get_resource::<ActiveDocument>()
@@ -1123,7 +1052,7 @@ fn insert_menu(paste: Option<String>) -> Menu {
 }
 
 fn loading_overlay(root: &mut ChildSpawnerCommands, t: &Theme) {
-    // Covers everything below the top bar, like Onshape's "Loading studio data…".
+    // Covers everything below the top bar while the document loads.
     root.spawn((
         Name::new("document-loading"),
         LoadingOverlay {
@@ -1131,60 +1060,16 @@ fn loading_overlay(root: &mut ChildSpawnerCommands, t: &Theme) {
         },
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(t.top_bar_height),
+            top: Val::Px(2.0 * PANEL_GAP + TOP_BAR_HEIGHT),
             left: Val::Px(0.0),
             right: Val::Px(0.0),
             bottom: Val::Px(0.0),
             ..default()
         },
-        BackgroundColor(t.background),
+        BackgroundColor(t.viewport_background),
         GlobalZIndex(cadrs_ui::z::DIALOG - 1),
     ))
     .with_children(|l| {
-        l.spawn((
-            Name::new("document-loading-rail"),
-            Node {
-                width: Val::Px(36.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::top(Val::Px(8.0)),
-                row_gap: Val::Px(14.0),
-                border: UiRect::right(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(t.rail_background),
-            BorderColor::all(t.separator),
-        ))
-        .with_children(|rail| {
-            for name in [
-                "list-details",
-                "file-import",
-                "comments",
-                "details",
-                "properties",
-                "history",
-                "find",
-            ] {
-                rail.spawn(icon(name, 18.0, t.foreground));
-            }
-            // The tab manager, where the tab bar will be.
-            rail.spawn(Node {
-                flex_grow: 1.0,
-                ..default()
-            });
-            rail.spawn((
-                Name::new("document-loading-tab-manager"),
-                cadrs_ui::icon::icon_in(
-                    "tab-manager",
-                    18.0,
-                    t.tool_foreground,
-                    Node {
-                        margin: UiRect::bottom(Val::Px(5.0)),
-                        ..default()
-                    },
-                ),
-            ));
-        });
         l.spawn(Node {
             flex_grow: 1.0,
             flex_direction: FlexDirection::Column,
@@ -1196,15 +1081,15 @@ fn loading_overlay(root: &mut ChildSpawnerCommands, t: &Theme) {
         .with_children(|c| {
             c.spawn(
                 Spinner::new("document-loading-spinner")
-                    .size(92.0)
-                    .thickness(8.0)
+                    .size(40.0)
+                    .thickness(4.0)
                     .build(t),
             );
             c.spawn(t.text(
-                "Loading studio data…",
+                "Loading…",
                 t.font_base,
                 FontWeight::NORMAL,
-                t.foreground,
+                t.muted_foreground,
             ));
         });
     });
@@ -2222,7 +2107,13 @@ fn filter_row(p: &mut ChildSpawnerCommands, t: &Theme, name: &'static str, place
     p.spawn(Node {
         height: Val::Px(34.0),
         flex_shrink: 0.0,
-        padding: UiRect::new(Val::Px(7.0), Val::Px(8.0), Val::Px(4.0), Val::ZERO),
+        // Room on the right for the panel's ‹ (`cadrs_ui::dock`).
+        padding: UiRect::new(
+            Val::Px(9.0),
+            Val::Px(cadrs_ui::dock::COLLAPSE_ROOM),
+            Val::Px(4.0),
+            Val::ZERO,
+        ),
         align_items: AlignItems::Center,
         column_gap: Val::Px(8.0),
         ..default()
@@ -2540,177 +2431,220 @@ fn instance_list(p: &mut ChildSpawnerCommands, t: &Theme, assembly_name: &str) {
         },
     ))
     .with_children(|frame| {
-        let list = frame
+        // The filter stays put above the scrolling lists, clear of their scrollbar.
+        frame
+            .spawn(Node {
+                height: Val::Px(34.0),
+                flex_shrink: 0.0,
+                // Room on the right for the panel's ‹ (`cadrs_ui::dock`).
+                padding: UiRect::new(
+                    Val::Px(7.0),
+                    Val::Px(cadrs_ui::dock::COLLAPSE_ROOM),
+                    Val::Px(4.0),
+                    Val::ZERO,
+                ),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn((icon("filter", 18.0, t.tool_foreground), Pickable::IGNORE));
+                r.spawn(
+                    TextInput::new("instance-filter")
+                        .placeholder("Filter by name")
+                        .height(28.0)
+                        .width(Val::Px(118.0))
+                        .build(t),
+                );
+                r.spawn(
+                    ToolButton::new("instance-list-view", "list")
+                        .icon_size(18.0)
+                        .selected(true)
+                        .tooltip("List view")
+                        .build(t),
+                );
+            });
+        // The lists and their scrollbar, under the filter.
+        frame
             .spawn((
-                Name::new("instances-pane"),
-                bevy::ui_widgets::ScrollArea,
-                cadrs_ui::scrollbar::ScrollGutter(6.0),
+                Name::new("instances-lists"),
                 Node {
                     flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    // A long assembly's lists scroll (Ex2 has 17 instances and 14 mates).
                     min_height: Val::Px(0.0),
-                    overflow: Overflow::scroll_y(),
+                    flex_direction: FlexDirection::Column,
                     ..default()
                 },
             ))
-            .with_children(|pane| {
-                pane.spawn(Node {
-                    height: Val::Px(34.0),
-                    flex_shrink: 0.0,
-                    padding: UiRect::new(Val::Px(7.0), Val::Px(6.0), Val::Px(4.0), Val::ZERO),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|r| {
-                    r.spawn((icon("filter", 18.0, t.tool_foreground), Pickable::IGNORE));
-                    r.spawn(
-                        TextInput::new("instance-filter")
-                            .placeholder("Filter by name")
-                            .height(28.0)
-                            .width(Val::Px(118.0))
-                            .build(t),
-                    );
-                    r.spawn(
-                        ToolButton::new("instance-list-view", "list")
-                            .icon_size(18.0)
-                            .selected(true)
-                            .tooltip("List view")
-                            .build(t),
-                    );
-                });
-                pane.spawn((
-                    Name::new("instances-header"),
-                    Node {
-                        height: Val::Px(28.0),
-                        flex_shrink: 0.0,
-                        padding: UiRect::new(Val::Px(4.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|h| {
-                    h.spawn((
-                        t.text("Instances (0)", t.font_base, FontWeight::BOLD, t.foreground),
+            .with_children(|frame| {
+                let list = frame
+                    .spawn((
+                        Name::new("instances-pane"),
+                        bevy::ui_widgets::ScrollArea,
+                        cadrs_ui::scrollbar::ScrollGutter(6.0),
                         Node {
                             flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            // A long assembly's lists scroll (Ex2 has 17 instances and 14 mates).
+                            min_height: Val::Px(0.0),
+                            overflow: Overflow::scroll_y(),
                             ..default()
                         },
-                        crate::assembly::list::InstanceCount,
-                    ));
-                    header_button(h, "instance-new-folder", "folder-new", "New folder", t, 0.0);
-                });
-                // P3B.1: the root row selects the whole assembly (Mass properties measures it).
-                pane.spawn((
-                    TreeItem::new("instance-root", assembly_name)
-                        .icon("assembly", 16.0)
-                        .icon_color(t.tool_foreground)
-                        .left(4.0)
-                        .build(t),
-                    PickRow(Pick::Assembly),
-                    crate::assembly::list::RootRow,
-                ));
-                pane.spawn((
-                    TreeItem::new("instance-origin", "Origin")
-                        .icon("origin", 12.0)
-                        .muted(true)
-                        .left(22.0)
-                        .build(t),
-                    PickRow(Pick::Origin),
-                ));
-                // The instances' rows (P3B.1, `crate::assembly::list`).
-                pane.spawn((
-                    Name::new("instance-rows"),
-                    crate::assembly::list::InstanceRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                // P3B.8 (A1.7): the Items group, with its + and rows (`crate::assembly::items`).
-                pane.spawn((
-                    TreeItem::new("assembly-items", "Items (0)")
-                        .disclosure(Some(true))
-                        .left(2.0)
-                        .build(t),
-                    crate::assembly::items::ItemsHeader,
-                    ContextMenuTarget,
-                ))
-                .with_children(|h| {
-                    h.spawn(Node {
-                        flex_grow: 1.0,
-                        ..default()
-                    });
-                    h.spawn(
-                        IconButton::new("assembly-items-add", "plus")
-                            .tooltip("Add item")
-                            .build(t),
-                    )
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.width = Val::Px(18.0);
-                        n.height = Val::Px(18.0);
-                        n.margin.right = Val::Px(8.0);
-                    });
-                });
-                pane.spawn((
-                    Name::new("item-rows"),
-                    crate::assembly::items::ItemRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                // P3F.5 (A1.7): the simulation's loads (`crate::simulation_ui`).
-                pane.spawn((
-                    TreeItem::new("assembly-loads", "Loads (0)")
-                        .disclosure(Some(true))
-                        .left(2.0)
-                        .build(t),
-                    crate::simulation_ui::LoadsHeader,
-                ));
-                pane.spawn((
-                    Name::new("load-rows"),
-                    crate::simulation_ui::LoadRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                // P3B.2: the mates and groups (`crate::assembly::mates_list`).
-                pane.spawn((
-                    TreeItem::new("mate-features", "Mate Features (0)")
-                        .disclosure(Some(true))
-                        .left(2.0)
-                        .build(t),
-                    crate::assembly::mates_list::MateFeaturesHeader,
-                ));
-                pane.spawn((
-                    Name::new("mate-rows"),
-                    crate::assembly::mates_list::MateRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                pane.spawn((
-                    crate::assembly::list::EmptyHint,
-                    Name::new("assembly-empty-hint"),
-                    t.text(
-                        "Insert parts to start (I)",
-                        t.font_base,
-                        FontWeight::NORMAL,
-                        t.subtle_foreground,
-                    ),
-                    Node {
-                        margin: UiRect::new(Val::Px(8.0), Val::ZERO, Val::Px(10.0), Val::ZERO),
-                        ..default()
-                    },
-                ));
-            })
-            .id();
-        frame.spawn(cadrs_ui::vertical_scrollbar(t, "instances-scrollbar", list));
+                    ))
+                    .with_children(|pane| {
+                        pane.spawn((
+                            Name::new("instances-header"),
+                            Node {
+                                height: Val::Px(28.0),
+                                flex_shrink: 0.0,
+                                padding: UiRect::new(
+                                    Val::Px(4.0),
+                                    Val::Px(12.0),
+                                    Val::ZERO,
+                                    Val::ZERO,
+                                ),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|h| {
+                            h.spawn((
+                                t.text(
+                                    "Instances (0)",
+                                    t.font_base,
+                                    FontWeight::BOLD,
+                                    t.foreground,
+                                ),
+                                Node {
+                                    flex_grow: 1.0,
+                                    ..default()
+                                },
+                                crate::assembly::list::InstanceCount,
+                            ));
+                            header_button(
+                                h,
+                                "instance-new-folder",
+                                "folder-new",
+                                "New folder",
+                                t,
+                                0.0,
+                            );
+                        });
+                        // P3B.1: the root row selects the whole assembly (Mass properties measures it).
+                        pane.spawn((
+                            TreeItem::new("instance-root", assembly_name)
+                                .icon("assembly", 16.0)
+                                .icon_color(t.tool_foreground)
+                                .left(4.0)
+                                .build(t),
+                            PickRow(Pick::Assembly),
+                            crate::assembly::list::RootRow,
+                        ));
+                        pane.spawn((
+                            TreeItem::new("instance-origin", "Origin")
+                                .icon("origin", 12.0)
+                                .muted(true)
+                                .left(22.0)
+                                .build(t),
+                            PickRow(Pick::Origin),
+                        ));
+                        // The instances' rows (P3B.1, `crate::assembly::list`).
+                        pane.spawn((
+                            Name::new("instance-rows"),
+                            crate::assembly::list::InstanceRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        // P3B.8 (A1.7): the Items group, with its + and rows (`crate::assembly::items`).
+                        pane.spawn((
+                            TreeItem::new("assembly-items", "Items (0)")
+                                .disclosure(Some(true))
+                                .left(2.0)
+                                .build(t),
+                            crate::assembly::items::ItemsHeader,
+                            ContextMenuTarget,
+                        ))
+                        .with_children(|h| {
+                            h.spawn(Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            });
+                            h.spawn(
+                                IconButton::new("assembly-items-add", "plus")
+                                    .tooltip("Add item")
+                                    .build(t),
+                            )
+                            .entry::<Node>()
+                            .and_modify(|mut n| {
+                                n.width = Val::Px(18.0);
+                                n.height = Val::Px(18.0);
+                                n.margin.right = Val::Px(8.0);
+                            });
+                        });
+                        pane.spawn((
+                            Name::new("item-rows"),
+                            crate::assembly::items::ItemRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        // P3F.5 (A1.7): the simulation's loads (`crate::simulation_ui`).
+                        pane.spawn((
+                            TreeItem::new("assembly-loads", "Loads (0)")
+                                .disclosure(Some(true))
+                                .left(2.0)
+                                .build(t),
+                            crate::simulation_ui::LoadsHeader,
+                        ));
+                        pane.spawn((
+                            Name::new("load-rows"),
+                            crate::simulation_ui::LoadRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        // P3B.2: the mates and groups (`crate::assembly::mates_list`).
+                        pane.spawn((
+                            TreeItem::new("mate-features", "Mate Features (0)")
+                                .disclosure(Some(true))
+                                .left(2.0)
+                                .build(t),
+                            crate::assembly::mates_list::MateFeaturesHeader,
+                        ));
+                        pane.spawn((
+                            Name::new("mate-rows"),
+                            crate::assembly::mates_list::MateRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        pane.spawn((
+                            crate::assembly::list::EmptyHint,
+                            Name::new("assembly-empty-hint"),
+                            t.text(
+                                "Insert parts to start (I)",
+                                t.font_base,
+                                FontWeight::NORMAL,
+                                t.subtle_foreground,
+                            ),
+                            Node {
+                                margin: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::ZERO,
+                                    Val::Px(10.0),
+                                    Val::ZERO,
+                                ),
+                                ..default()
+                            },
+                        ));
+                    })
+                    .id();
+                frame.spawn(cadrs_ui::vertical_scrollbar(t, "instances-scrollbar", list));
+            });
     });
 }
 
@@ -3971,7 +3905,8 @@ fn rebuild_feature_rows(
                 // Show dependencies (P3.9, PS11.2): parents amber, children blue.
                 bg
             } else if *kind == RowKind::ReferencedSketch {
-                Color::srgb_u8(0xe6, 0xe9, 0xec)
+                // The open dialog's input: a soft fill, in either scheme.
+                t.control_hover
             } else {
                 Color::NONE
             };
