@@ -62,20 +62,28 @@ impl Notifications {
 #[derive(Component)]
 struct BellDot;
 
-/// The bell for a top bar.
+/// The bell for a top bar: a plain icon button, as the top bar's others are.
 pub fn spawn_bell(r: &mut ChildSpawnerCommands, t: &Theme) {
     r.spawn((
         Name::new("notifications-frame"),
-        cadrs_ui::segmented::frame(t),
-        cadrs_ui::glass::GlassFrame::bar(),
+        Node {
+            flex_shrink: 0.0,
+            ..default()
+        },
     ))
     .with_children(|f| {
         f.spawn(
             IconButton::new("notifications", "notifications")
-                .icon_size(15.0)
+                .icon_size(16.0)
                 .tooltip("Notifications")
                 .build(t),
         )
+        .entry::<Node>()
+        .and_modify(|mut n| {
+            n.width = Val::Px(32.0);
+            n.height = Val::Px(32.0);
+        })
+        .entity()
         .with_child((
             Name::new("notifications-dot"),
             BellDot,

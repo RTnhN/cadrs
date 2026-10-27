@@ -1,7 +1,6 @@
-//! A slim vertical scrollbar for a scroll area, like gpui-component's `Scrollbar` and the one
-//! Onshape's document list shows (`reference/onshape/screens/01`: a 6 px grey thumb in a light
-//! track at the right edge, with small ▲/▼ steppers). Built on Bevy's headless
-//! [`Scrollbar`] widget, so dragging the thumb and clicking the track work.
+//! A slim vertical scrollbar for a scroll area, like gpui-component's `Scrollbar`: a 5 px
+//! rounded thumb over the content's right edge, with no track drawn and no steppers. Built on
+//! Bevy's headless [`Scrollbar`] widget, so dragging the thumb and clicking the track work.
 //!
 //! The scrollbar hides itself while the content fits.
 
@@ -19,7 +18,6 @@ impl Plugin for ScrollbarPlugin {
             PostUpdate,
             (hide_unneeded, sync_gutters).after(bevy::ui::UiSystems::Layout),
         )
-        .add_observer(on_step)
         .add_observer(on_wheel);
     }
 }
@@ -103,90 +101,41 @@ pub fn horizontal_scrollbar(name: &str, target: Entity) -> impl Bundle {
     )
 }
 
-/// A ▲ or ▼ stepper: scrolls the target by one row.
-#[derive(Component, Debug, Clone, Copy)]
-struct Stepper {
-    target: Entity,
-    dir: f32,
-}
-
-/// How far a stepper click scrolls (px).
-const STEP: f32 = 38.0;
-
 /// A vertical scrollbar for `target` (a node with `overflow: scroll_y` and `ScrollArea`),
 /// positioned absolutely along the right edge of its parent. Name it with `name`.
 pub fn vertical_scrollbar(theme: &Theme, name: &str, target: Entity) -> impl Bundle {
-    let arrow = theme.muted_foreground;
     (
         Name::new(name.to_string()),
         SlimScrollbar { target },
+        // Clear of a rounded panel's corners.
         Node {
             position_type: PositionType::Absolute,
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            width: Val::Px(12.0),
+            right: Val::Px(2.0),
+            top: Val::Px(6.0),
+            bottom: Val::Px(6.0),
+            width: Val::Px(8.0),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             ..default()
         },
-        children![
-            stepper(target, -1.0, "caret-up-filled", arrow),
-            (
-                Name::new(format!("{name}-track")),
-                Node {
-                    flex_grow: 1.0,
-                    width: Val::Px(6.0),
-                    margin: UiRect::vertical(Val::Px(2.0)),
-                    ..default()
+        children![(
+            Name::new(format!("{name}-track")),
+            Node {
+                flex_grow: 1.0,
+                width: Val::Px(5.0),
+                ..default()
+            },
+            Scrollbar::new(target, ControlOrientation::Vertical, 24.0),
+            children![(
+                Name::new(format!("{name}-thumb")),
+                ScrollbarThumb {
+                    border_radius: BorderRadius::all(Val::Px(2.5)),
+                    border: UiRect::ZERO,
                 },
-                Scrollbar::new(target, ControlOrientation::Vertical, 24.0),
-                children![(
-                    Name::new(format!("{name}-thumb")),
-                    ScrollbarThumb {
-                        border_radius: BorderRadius::all(Val::Px(3.0)),
-                        border: UiRect::ZERO,
-                    },
-                    BackgroundColor(theme.scrollbar_thumb),
-                )],
-            ),
-            stepper(target, 1.0, "caret-down-filled", arrow),
-        ],
+                BackgroundColor(theme.scrollbar_thumb),
+            )],
+        )],
     )
-}
-
-fn stepper(target: Entity, dir: f32, icon_name: &'static str, color: Color) -> impl Bundle {
-    (
-        Stepper { target, dir },
-        Node {
-            width: Val::Px(12.0),
-            height: Val::Px(10.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            flex_shrink: 0.0,
-            ..default()
-        },
-        bevy::ui_widgets::Button,
-        bevy::picking::hover::Hovered::default(),
-        children![(crate::icon::icon(icon_name, 10.0, color), Pickable::IGNORE)],
-    )
-}
-
-fn on_step(
-    ev: On<bevy::ui_widgets::Activate>,
-    q: Query<&Stepper>,
-    mut q_target: Query<(&ComputedNode, &mut ScrollPosition)>,
-) {
-    let Ok(s) = q.get(ev.entity) else {
-        return;
-    };
-    let Ok((node, mut pos)) = q_target.get_mut(s.target) else {
-        return;
-    };
-    let visible = node.size().y * node.inverse_scale_factor();
-    let content = node.content_size().y * node.inverse_scale_factor();
-    let max = (content - visible).max(0.0);
-    pos.y = (pos.y + s.dir * STEP).clamp(0.0, max);
 }
 
 fn hide_unneeded(

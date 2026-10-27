@@ -136,10 +136,10 @@ impl Checkbox {
                 p.spawn((
                     CheckboxBox(row),
                     Node {
-                        width: Val::Px(12.0),
-                        height: Val::Px(12.0),
+                        width: Val::Px(14.0),
+                        height: Val::Px(14.0),
                         border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         flex_shrink: 0.0,
@@ -150,7 +150,7 @@ impl Checkbox {
                 ))
                 .with_child((
                     CheckboxMark(row),
-                    icon("check-bold", 10.0, Color::WHITE),
+                    icon("check-bold", 11.0, Color::WHITE),
                     if checked {
                         Visibility::Inherited
                     } else {

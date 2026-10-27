@@ -584,20 +584,6 @@ fn icon_rail(body: &mut ChildSpawnerCommands, t: &Theme) {
         cadrs_ui::glass::panel(t),
     ))
     .with_children(|rail| {
-        // Shown while the feature panel is hidden: it brings it back ([`sync_rail_toggle`]).
-        rail.spawn((
-            ToolButton::new("rail-feature-list", "list-details")
-                .tooltip("Show the feature list")
-                .build(t),
-            RailPanelToggle,
-            observe(
-                |_: On<Activate>, q: Query<(Entity, &Name)>, mut commands: Commands| {
-                    if let Some((e, _)) = q.iter().find(|(_, n)| n.as_str() == "feature-panel") {
-                        commands.trigger(ToggleDockPanel { entity: e });
-                    }
-                },
-            ),
-        ));
         for (name, icon_name, tip) in [
             ("rail-insert", "file-import", "Insert"),
             ("rail-comments", "comments", "Comments"),
@@ -608,6 +594,41 @@ fn icon_rail(body: &mut ChildSpawnerCommands, t: &Theme) {
         ] {
             rail.spawn(ToolButton::new(name, icon_name).tooltip(tip).build(t));
         }
+        // At the end, shown while the feature panel is hidden ([`sync_rail_toggle`]), so the
+        // other icons never move: it brings the panel back.
+        rail.spawn((
+            RailPanelToggle,
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(4.0),
+                display: Display::None,
+                ..default()
+            },
+        ))
+        .with_children(|g| {
+            g.spawn((
+                Node {
+                    width: Val::Px(20.0),
+                    height: Val::Px(1.0),
+                    ..default()
+                },
+                BackgroundColor(t.separator),
+            ));
+            g.spawn((
+                ToolButton::new("rail-feature-list", "list-details")
+                    .tooltip("Show the feature list")
+                    .build(t),
+                observe(
+                    |_: On<Activate>, q: Query<(Entity, &Name)>, mut commands: Commands| {
+                        if let Some((e, _)) = q.iter().find(|(_, n)| n.as_str() == "feature-panel")
+                        {
+                            commands.trigger(ToggleDockPanel { entity: e });
+                        }
+                    },
+                ),
+            ));
+        });
     });
 }
 
@@ -2407,183 +2428,220 @@ fn instance_list(p: &mut ChildSpawnerCommands, t: &Theme, assembly_name: &str) {
         },
     ))
     .with_children(|frame| {
-        let list = frame
+        // The filter stays put above the scrolling lists, clear of their scrollbar.
+        frame
+            .spawn(Node {
+                height: Val::Px(34.0),
+                flex_shrink: 0.0,
+                // Room on the right for the panel's ‹ (`cadrs_ui::dock`).
+                padding: UiRect::new(
+                    Val::Px(7.0),
+                    Val::Px(cadrs_ui::dock::COLLAPSE_ROOM),
+                    Val::Px(4.0),
+                    Val::ZERO,
+                ),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|r| {
+                r.spawn((icon("filter", 18.0, t.tool_foreground), Pickable::IGNORE));
+                r.spawn(
+                    TextInput::new("instance-filter")
+                        .placeholder("Filter by name")
+                        .height(28.0)
+                        .width(Val::Px(118.0))
+                        .build(t),
+                );
+                r.spawn(
+                    ToolButton::new("instance-list-view", "list")
+                        .icon_size(18.0)
+                        .selected(true)
+                        .tooltip("List view")
+                        .build(t),
+                );
+            });
+        // The lists and their scrollbar, under the filter.
+        frame
             .spawn((
-                Name::new("instances-pane"),
-                bevy::ui_widgets::ScrollArea,
-                cadrs_ui::scrollbar::ScrollGutter(6.0),
+                Name::new("instances-lists"),
                 Node {
                     flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    // A long assembly's lists scroll (Ex2 has 17 instances and 14 mates).
                     min_height: Val::Px(0.0),
-                    overflow: Overflow::scroll_y(),
+                    flex_direction: FlexDirection::Column,
                     ..default()
                 },
             ))
-            .with_children(|pane| {
-                pane.spawn(Node {
-                    height: Val::Px(34.0),
-                    flex_shrink: 0.0,
-                    // Room on the right for the panel's ‹ (`cadrs_ui::dock`).
-                    padding: UiRect::new(
-                        Val::Px(7.0),
-                        Val::Px(cadrs_ui::dock::COLLAPSE_ROOM),
-                        Val::Px(4.0),
-                        Val::ZERO,
-                    ),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    ..default()
-                })
-                .with_children(|r| {
-                    r.spawn((icon("filter", 18.0, t.tool_foreground), Pickable::IGNORE));
-                    r.spawn(
-                        TextInput::new("instance-filter")
-                            .placeholder("Filter by name")
-                            .height(28.0)
-                            .width(Val::Px(118.0))
-                            .build(t),
-                    );
-                    r.spawn(
-                        ToolButton::new("instance-list-view", "list")
-                            .icon_size(18.0)
-                            .selected(true)
-                            .tooltip("List view")
-                            .build(t),
-                    );
-                });
-                pane.spawn((
-                    Name::new("instances-header"),
-                    Node {
-                        height: Val::Px(28.0),
-                        flex_shrink: 0.0,
-                        padding: UiRect::new(Val::Px(4.0), Val::Px(12.0), Val::ZERO, Val::ZERO),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|h| {
-                    h.spawn((
-                        t.text("Instances (0)", t.font_base, FontWeight::BOLD, t.foreground),
+            .with_children(|frame| {
+                let list = frame
+                    .spawn((
+                        Name::new("instances-pane"),
+                        bevy::ui_widgets::ScrollArea,
+                        cadrs_ui::scrollbar::ScrollGutter(6.0),
                         Node {
                             flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            // A long assembly's lists scroll (Ex2 has 17 instances and 14 mates).
+                            min_height: Val::Px(0.0),
+                            overflow: Overflow::scroll_y(),
                             ..default()
                         },
-                        crate::assembly::list::InstanceCount,
-                    ));
-                    header_button(h, "instance-new-folder", "folder-new", "New folder", t, 0.0);
-                });
-                // P3B.1: the root row selects the whole assembly (Mass properties measures it).
-                pane.spawn((
-                    TreeItem::new("instance-root", assembly_name)
-                        .icon("assembly", 16.0)
-                        .icon_color(t.tool_foreground)
-                        .left(4.0)
-                        .build(t),
-                    PickRow(Pick::Assembly),
-                    crate::assembly::list::RootRow,
-                ));
-                pane.spawn((
-                    TreeItem::new("instance-origin", "Origin")
-                        .icon("origin", 12.0)
-                        .muted(true)
-                        .left(22.0)
-                        .build(t),
-                    PickRow(Pick::Origin),
-                ));
-                // The instances' rows (P3B.1, `crate::assembly::list`).
-                pane.spawn((
-                    Name::new("instance-rows"),
-                    crate::assembly::list::InstanceRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                // P3B.8 (A1.7): the Items group, with its + and rows (`crate::assembly::items`).
-                pane.spawn((
-                    TreeItem::new("assembly-items", "Items (0)")
-                        .disclosure(Some(true))
-                        .left(2.0)
-                        .build(t),
-                    crate::assembly::items::ItemsHeader,
-                    ContextMenuTarget,
-                ))
-                .with_children(|h| {
-                    h.spawn(Node {
-                        flex_grow: 1.0,
-                        ..default()
-                    });
-                    h.spawn(
-                        IconButton::new("assembly-items-add", "plus")
-                            .tooltip("Add item")
-                            .build(t),
-                    )
-                    .entry::<Node>()
-                    .and_modify(|mut n| {
-                        n.width = Val::Px(18.0);
-                        n.height = Val::Px(18.0);
-                        n.margin.right = Val::Px(8.0);
-                    });
-                });
-                pane.spawn((
-                    Name::new("item-rows"),
-                    crate::assembly::items::ItemRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                // P3F.5 (A1.7): the simulation's loads (`crate::simulation_ui`).
-                pane.spawn((
-                    TreeItem::new("assembly-loads", "Loads (0)")
-                        .disclosure(Some(true))
-                        .left(2.0)
-                        .build(t),
-                    crate::simulation_ui::LoadsHeader,
-                ));
-                pane.spawn((
-                    Name::new("load-rows"),
-                    crate::simulation_ui::LoadRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                // P3B.2: the mates and groups (`crate::assembly::mates_list`).
-                pane.spawn((
-                    TreeItem::new("mate-features", "Mate Features (0)")
-                        .disclosure(Some(true))
-                        .left(2.0)
-                        .build(t),
-                    crate::assembly::mates_list::MateFeaturesHeader,
-                ));
-                pane.spawn((
-                    Name::new("mate-rows"),
-                    crate::assembly::mates_list::MateRows,
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    },
-                ));
-                pane.spawn((
-                    crate::assembly::list::EmptyHint,
-                    Name::new("assembly-empty-hint"),
-                    t.text(
-                        "Insert parts to start (I)",
-                        t.font_base,
-                        FontWeight::NORMAL,
-                        t.subtle_foreground,
-                    ),
-                    Node {
-                        margin: UiRect::new(Val::Px(8.0), Val::ZERO, Val::Px(10.0), Val::ZERO),
-                        ..default()
-                    },
-                ));
-            })
-            .id();
-        frame.spawn(cadrs_ui::vertical_scrollbar(t, "instances-scrollbar", list));
+                    ))
+                    .with_children(|pane| {
+                        pane.spawn((
+                            Name::new("instances-header"),
+                            Node {
+                                height: Val::Px(28.0),
+                                flex_shrink: 0.0,
+                                padding: UiRect::new(
+                                    Val::Px(4.0),
+                                    Val::Px(12.0),
+                                    Val::ZERO,
+                                    Val::ZERO,
+                                ),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|h| {
+                            h.spawn((
+                                t.text(
+                                    "Instances (0)",
+                                    t.font_base,
+                                    FontWeight::BOLD,
+                                    t.foreground,
+                                ),
+                                Node {
+                                    flex_grow: 1.0,
+                                    ..default()
+                                },
+                                crate::assembly::list::InstanceCount,
+                            ));
+                            header_button(
+                                h,
+                                "instance-new-folder",
+                                "folder-new",
+                                "New folder",
+                                t,
+                                0.0,
+                            );
+                        });
+                        // P3B.1: the root row selects the whole assembly (Mass properties measures it).
+                        pane.spawn((
+                            TreeItem::new("instance-root", assembly_name)
+                                .icon("assembly", 16.0)
+                                .icon_color(t.tool_foreground)
+                                .left(4.0)
+                                .build(t),
+                            PickRow(Pick::Assembly),
+                            crate::assembly::list::RootRow,
+                        ));
+                        pane.spawn((
+                            TreeItem::new("instance-origin", "Origin")
+                                .icon("origin", 12.0)
+                                .muted(true)
+                                .left(22.0)
+                                .build(t),
+                            PickRow(Pick::Origin),
+                        ));
+                        // The instances' rows (P3B.1, `crate::assembly::list`).
+                        pane.spawn((
+                            Name::new("instance-rows"),
+                            crate::assembly::list::InstanceRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        // P3B.8 (A1.7): the Items group, with its + and rows (`crate::assembly::items`).
+                        pane.spawn((
+                            TreeItem::new("assembly-items", "Items (0)")
+                                .disclosure(Some(true))
+                                .left(2.0)
+                                .build(t),
+                            crate::assembly::items::ItemsHeader,
+                            ContextMenuTarget,
+                        ))
+                        .with_children(|h| {
+                            h.spawn(Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            });
+                            h.spawn(
+                                IconButton::new("assembly-items-add", "plus")
+                                    .tooltip("Add item")
+                                    .build(t),
+                            )
+                            .entry::<Node>()
+                            .and_modify(|mut n| {
+                                n.width = Val::Px(18.0);
+                                n.height = Val::Px(18.0);
+                                n.margin.right = Val::Px(8.0);
+                            });
+                        });
+                        pane.spawn((
+                            Name::new("item-rows"),
+                            crate::assembly::items::ItemRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        // P3F.5 (A1.7): the simulation's loads (`crate::simulation_ui`).
+                        pane.spawn((
+                            TreeItem::new("assembly-loads", "Loads (0)")
+                                .disclosure(Some(true))
+                                .left(2.0)
+                                .build(t),
+                            crate::simulation_ui::LoadsHeader,
+                        ));
+                        pane.spawn((
+                            Name::new("load-rows"),
+                            crate::simulation_ui::LoadRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        // P3B.2: the mates and groups (`crate::assembly::mates_list`).
+                        pane.spawn((
+                            TreeItem::new("mate-features", "Mate Features (0)")
+                                .disclosure(Some(true))
+                                .left(2.0)
+                                .build(t),
+                            crate::assembly::mates_list::MateFeaturesHeader,
+                        ));
+                        pane.spawn((
+                            Name::new("mate-rows"),
+                            crate::assembly::mates_list::MateRows,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                ..default()
+                            },
+                        ));
+                        pane.spawn((
+                            crate::assembly::list::EmptyHint,
+                            Name::new("assembly-empty-hint"),
+                            t.text(
+                                "Insert parts to start (I)",
+                                t.font_base,
+                                FontWeight::NORMAL,
+                                t.subtle_foreground,
+                            ),
+                            Node {
+                                margin: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::ZERO,
+                                    Val::Px(10.0),
+                                    Val::ZERO,
+                                ),
+                                ..default()
+                            },
+                        ));
+                    })
+                    .id();
+                frame.spawn(cadrs_ui::vertical_scrollbar(t, "instances-scrollbar", list));
+            });
     });
 }
 
@@ -3844,7 +3902,8 @@ fn rebuild_feature_rows(
                 // Show dependencies (P3.9, PS11.2): parents amber, children blue.
                 bg
             } else if *kind == RowKind::ReferencedSketch {
-                Color::srgb_u8(0xe6, 0xe9, 0xec)
+                // The open dialog's input: a soft fill, in either scheme.
+                t.control_hover
             } else {
                 Color::NONE
             };

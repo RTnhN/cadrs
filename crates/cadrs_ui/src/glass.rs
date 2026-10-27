@@ -136,7 +136,7 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
     // Raven: panels and inputs take the panel color, controls their own; the rim catches
     // more light on a pale surface.
     let alpha = match (kind, dark) {
-        (GlassKind::Panel, false) => 0.8,
+        (GlassKind::Panel, false) => 0.9,
         // Dark glass over the grid wallpaper: nearly solid, so the crosses don't show through
         // the rows.
         (GlassKind::Panel, true) => 0.86,
@@ -151,7 +151,7 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
     let base = if dark {
         Color::srgb_u8(0x2a, 0x29, 0x25)
     } else {
-        Color::srgb_u8(0xf4, 0xf8, 0xf9)
+        Color::WHITE
     };
     // Raven's 0.55 in dark reads as an outline on our charcoal: a faint catch of light.
     let mut rim = if dark { 0.2 } else { 0.85 };
@@ -178,8 +178,8 @@ fn glass_look(t: &Theme, dark: bool, kind: GlassKind, material: GlassMaterial) -
     }
     // A palette made for solid surfaces would hide everything: glass keeps some of what is
     // behind.
-    if tint.alpha() > 0.8 {
-        tint = tint.with_alpha(0.8);
+    if tint.alpha() > 0.9 {
+        tint = tint.with_alpha(0.9);
     }
     if matches!(kind, GlassKind::Input) {
         rim *= 0.55;

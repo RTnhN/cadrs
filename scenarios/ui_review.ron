@@ -1,5 +1,5 @@
 // The new look on real work (for review, with `ui_new_look`): a part with its features; a
-// feature's dialog; a sketch; an assembly with its instance list; a drawing.
+// feature's dialog; an assembly with its instance list (a drawing: `ui_review_drawing`).
 Scenario(
     start: Some("document"),
     steps: [
@@ -26,10 +26,5 @@ Scenario(
         MoveTo(1420, 900),
         Wait(5),
         Screenshot("04-assembly"),
-        Custom("ujoint-drawing"),
-        Key("F"),
-        MoveTo(1500, 960),
-        Wait(5),
-        Screenshot("05-drawing"),
     ],
 )

@@ -227,7 +227,8 @@ impl Theme {
             title_bar: hex("#eaeaea"),
             tab_bar: hex("#d7d7d7"),
             sidebar: hex("#ffffff"),
-            viewport_background: hex("#ffffff"),
+            // A soft canvas, so the white glass panels float over it.
+            viewport_background: hex("#eef2f3"),
             popover: hex("#ffffff"),
             floating: hex("#ffffff"),
             // UI blends in linear space: 0.79 alpha dims white to about #7f7f7f, like the browser's 50%.

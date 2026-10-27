@@ -184,11 +184,16 @@ fn on_identity(
     menu = menu
         .item(MenuItem::new("identity-new", "New identity…").icon("plus"))
         .item(MenuItem::new("identity-edit", "Edit profile…").icon("user"))
-        .item(
+        .item(if cadrs_id.is_some() {
+            MenuItem::new("identity-copy-id", "Copy cadrs ID").icon("copy")
+        } else {
             MenuItem::new("identity-copy-id", "Copy cadrs ID")
                 .icon("copy")
-                .disabled(cadrs_id.is_none()),
-        );
+                .disabled(true)
+                .tooltip("cadrs is offline: no cadrs ID to share")
+        })
+        .separator()
+        .item(MenuItem::new("identity-preferences", "Preferences…").icon("settings"));
     open_menu(&mut commands, a.entity, menu.build(&theme));
 }
 
@@ -205,6 +210,7 @@ fn on_identity_action(
         "identity-new" => open_dialog(world, IdentityDialog::New),
         "identity-edit" => open_dialog(world, IdentityDialog::Edit),
         "identity-copy-id" => copy_id(world),
+        "identity-preferences" => crate::preferences_ui::open_preferences(world),
         i => {
             if let Some(n) = i
                 .strip_prefix("identity-use-")

@@ -355,7 +355,6 @@ pub fn list_toolbar(a: &mut ChildSpawnerCommands, t: &Theme, state: &LandingStat
                     .icon(icon_name)
                     .icon_size(16.0)
                     .ghost()
-                    .caps()
                     .tooltip(tip)
                     .build(t),
                 observe(
@@ -407,7 +406,6 @@ pub fn list_toolbar(a: &mut ChildSpawnerCommands, t: &Theme, state: &LandingStat
             Button::new("type-filter")
                 .label(label)
                 .outline()
-                .caps()
                 .dropdown_caret()
                 .tooltip("Show only one type of item")
                 .build(t),

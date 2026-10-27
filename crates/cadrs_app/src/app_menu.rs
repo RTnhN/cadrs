@@ -81,14 +81,31 @@ fn app_entries() -> Vec<MenuEntry> {
 /// The document's part of the app menu; `workspaces` lists Main and the branches to switch to
 /// (their items are `crate::workspaces`'s).
 fn document_entries(workspaces: Vec<MenuEntry>) -> Vec<MenuEntry> {
-    let workspace = MenuItem::new("document-menu-workspaces", "Workspace").icon("branches");
-    let workspace = if workspaces.len() > 1 {
-        workspace.submenu(workspaces)
-    } else {
-        workspace
+    // Main alone: how to get another.
+    let mut workspaces = workspaces;
+    if workspaces.is_empty() {
+        workspaces.push(
+            MenuItem::new("workspace-item-0", "Main")
+                .icon("location")
+                .checked(true)
+                .into(),
+        );
+    }
+    if workspaces.len() <= 1 {
+        workspaces.push(MenuEntry::Separator);
+        workspaces.push(
+            MenuItem::new(
+                "document-menu-workspace-hint",
+                "Branch from a version in History",
+            )
+            .icon("history")
             .disabled(true)
-            .tooltip("Branch from a version (History) to have another workspace")
-    };
+            .into(),
+        );
+    }
+    let workspace = MenuItem::new("document-menu-workspaces", "Workspace")
+        .icon("branches")
+        .submenu(workspaces);
     vec![
         MenuItem::new("app-documents", "All documents")
             .icon("home")

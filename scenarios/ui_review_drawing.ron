@@ -1,0 +1,12 @@
+// The new look on a drawing (for review, with `ui_new_look` and `ui_review`).
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("ujoint-drawing"),
+        Key("F"),
+        MoveTo(1500, 960),
+        Wait(5),
+        Screenshot("01-drawing"),
+    ],
+)

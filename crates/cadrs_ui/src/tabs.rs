@@ -19,6 +19,9 @@ use crate::menu::ContextMenuTarget;
 use crate::style::{InheritFg, InitState, StateColors, VisualState, Visuals};
 use crate::theme::Theme;
 
+/// The narrowest a tab is (a short name still makes a good target).
+pub const MIN_TAB_WIDTH: f32 = 120.0;
+
 /// Builder for a tab.
 pub struct Tab {
     name: Cow<'static, str>,
@@ -38,7 +41,7 @@ impl Tab {
             icon: None,
             selected: false,
             force: None,
-            width: 183.0,
+            width: 240.0,
             marked: false,
         }
     }
@@ -58,6 +61,7 @@ impl Tab {
         self
     }
 
+    /// The widest the tab gets: it is as wide as its name, from [`MIN_TAB_WIDTH`] up to this.
     pub fn width(mut self, w: f32) -> Self {
         self.width = w;
         self
@@ -107,7 +111,8 @@ impl Tab {
         (
             Name::new(self.name.into_owned()),
             Node {
-                width: Val::Px(self.width),
+                min_width: Val::Px(MIN_TAB_WIDTH.min(self.width)),
+                max_width: Val::Px(self.width),
                 flex_shrink: 0.0,
                 padding: UiRect::new(Val::Px(10.0), Val::Px(8.0), Val::ZERO, Val::ZERO),
                 align_items: AlignItems::Center,

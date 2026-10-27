@@ -684,16 +684,19 @@ fn rebuild_mate_rows(
             } else if r.error.is_some() {
                 // P3G.5: a lost entity is an error (red, as a failed feature).
                 t.danger
-            } else if r.shown || r.group {
-                // A Group (or another row without an eye) has nothing to hide: normal text
-                // (P3H.6 judge: "Group 1" read as suppressed).
-                t.foreground
             } else {
-                Color::srgb_u8(0x8a, 0x8f, 0x94)
+                // A mate whose glyph isn't shown reads as any other row (it read as suppressed
+                // in grey); its icon is quieter instead.
+                t.foreground
+            };
+            let icon_fg = if r.suppressed || r.error.is_some() || r.shown || r.group {
+                fg
+            } else {
+                t.muted_foreground
             };
             let mut item = TreeItem::new(row_name.clone(), r.name.clone())
                 .icon(r.icon, 15.0)
-                .icon_color(fg)
+                .icon_color(icon_fg)
                 .left(
                     if r.group && r.replicate.is_none() {
                         22.0

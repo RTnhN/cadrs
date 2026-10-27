@@ -193,7 +193,7 @@ impl DockPanel {
                     // filter leaves it room).
                     let mut collapse = b.spawn((
                         crate::button::IconButton::new(collapse_name, "chevron-left")
-                            .icon_size(16.0)
+                            .icon_size(18.0)
                             .tooltip("Hide panel")
                             .build(&theme),
                         DockCollapse(root),
@@ -211,8 +211,8 @@ impl DockPanel {
                         ..default()
                     });
                 });
-                // The grip, centred in the gap on the right, a few px wider than its line to
-                // grab.
+                // The grip, just outside the panel's right edge (its line against the edge), a
+                // few px wider than the line to grab.
                 p.spawn((
                     Name::new(grip_name),
                     DockGrip {
@@ -226,9 +226,10 @@ impl DockPanel {
                         position_type: PositionType::Absolute,
                         top: Val::Px(0.0),
                         bottom: Val::Px(0.0),
-                        right: Val::Px(-(gap / 2.0) - GRIP_WIDTH / 2.0),
+                        right: Val::Px(-GRIP_WIDTH),
                         width: Val::Px(GRIP_WIDTH),
-                        justify_content: JustifyContent::Center,
+                        padding: UiRect::left(Val::Px(2.0)),
+                        justify_content: JustifyContent::FlexStart,
                         align_items: AlignItems::Center,
                         display: if open { Display::Flex } else { Display::None },
                         ..default()
@@ -239,9 +240,9 @@ impl DockPanel {
                     children![(
                         GripLine,
                         Node {
-                            width: Val::Px(2.0),
-                            height: Val::Px(36.0),
-                            border_radius: BorderRadius::all(Val::Px(1.0)),
+                            width: Val::Px(3.0),
+                            height: Val::Px(40.0),
+                            border_radius: BorderRadius::all(Val::Px(1.5)),
                             ..default()
                         },
                         BackgroundColor(theme.scrollbar_thumb),
@@ -255,8 +256,8 @@ impl DockPanel {
 
 /// The ‹'s size and its distance from the panel's top, so it lines up with a 28 px field in a
 /// 34 px first row.
-pub const COLLAPSE_SIZE: f32 = 24.0;
-pub const COLLAPSE_TOP: f32 = 6.0;
+pub const COLLAPSE_SIZE: f32 = 26.0;
+pub const COLLAPSE_TOP: f32 = 5.0;
 /// The room a panel's first row leaves for the ‹ at its right end.
 pub const COLLAPSE_ROOM: f32 = COLLAPSE_SIZE + 10.0;
 

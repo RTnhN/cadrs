@@ -357,20 +357,14 @@ fn spawn_landing(mut commands: Commands, theme: Res<Theme>, profile: Res<UserPro
             // The page: a column, centered in a wide window.
             root.spawn((
                 Name::new("landing-page"),
+                // On the top bar's grid: the same 8 px from the window's edges.
                 Node {
                     flex_grow: 1.0,
                     min_height: Val::Px(0.0),
                     width: Val::Percent(100.0),
-                    max_width: Val::Px(1440.0),
-                    align_self: AlignSelf::Center,
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    padding: UiRect::new(
-                        Val::Px(20.0),
-                        Val::Px(20.0),
-                        Val::Px(12.0),
-                        Val::Px(20.0),
-                    ),
+                    row_gap: Val::Px(8.0),
+                    padding: UiRect::all(Val::Px(8.0)),
                     ..default()
                 },
             ))
@@ -555,7 +549,6 @@ fn actions(p: &mut ChildSpawnerCommands, t: &Theme) {
                 .icon("folder-new")
                 .icon_size(16.0)
                 .outline()
-                .caps()
                 .tooltip("New folder")
                 .build(t),
             observe(
@@ -624,7 +617,6 @@ fn create_button(p: &mut ChildSpawnerCommands, t: &Theme) {
                 .icon("file-new")
                 .icon_size(16.0)
                 .primary()
-                .caps()
                 .tooltip("Create a new document")
                 .build(t),
             observe(
@@ -1311,7 +1303,6 @@ fn empty_state(
                         .label("New document")
                         .icon("file-new")
                         .primary()
-                        .caps()
                         .build(t),
                     observe(
                         |_: On<Activate>, mut commands: Commands, theme: Res<Theme>| {
@@ -1326,7 +1317,6 @@ fn empty_state(
                         .label("Open a sample")
                         .icon("idea")
                         .outline()
-                        .caps()
                         .build(t),
                     observe(|_: On<Activate>, mut commands: Commands| {
                         commands.queue(|w: &mut World| show_filter(w, Filter::Explore));
