@@ -134,22 +134,26 @@ fn render(name: &str, size: u32, px: u32, accent: bool, dark: bool) -> Option<Ve
     if dark {
         icon.svg = icon.svg_dark;
     }
-    // A solid tool icon's accent (what the tool makes) in its family's colour, lighter on a
-    // dark background as icon-rs's own accent is.
+    // A solid tool icon in its family's colour. On light, its accent (what the tool makes)
+    // takes the colour; on dark the two swap, so the outlines and arrows are coloured (lighter,
+    // as icon-rs's own dark accent is) and what the tool makes is drawn in the line colour,
+    // since white outlines around a coloured shape read as noise.
     if let Some([r, g, b]) = family_accent(name)
         && !accent
         && !icon.kind.is_tintable()
     {
         let family = icon_rs::Rgb(r, g, b);
-        let (from, to) = if dark {
-            (
-                icon_rs::Palette::DARK.accent,
-                family.mix(icon_rs::Rgb::WHITE, 30),
-            )
+        let svg = if dark {
+            let (ink, accent) = (icon_rs::Palette::DARK.ink, icon_rs::Palette::DARK.accent);
+            // Through a placeholder, so the accent turned ink isn't coloured again.
+            icon.svg
+                .replace(&accent.to_hex(), "#\0")
+                .replace(&ink.to_hex(), &family.mix(icon_rs::Rgb::WHITE, 30).to_hex())
+                .replace("#\0", &ink.to_hex())
         } else {
-            (icon_rs::Palette::LIGHT.accent, family)
+            icon.svg
+                .replace(&icon_rs::Palette::LIGHT.accent.to_hex(), &family.to_hex())
         };
-        let svg = icon.svg.replace(&from.to_hex(), &to.to_hex());
         return crate::icon_raster::rasterize(&svg, px)
             .inspect_err(|e| warn!("cannot render icon {name:?} at {px} px: {e}"))
             .ok();
