@@ -11,8 +11,9 @@
 //!   **Hide all planes** (each one undo step; the default planes are view state, not undone).
 //! - **Zoom to selection**: fits the view to what the feature made (its faces), or to the
 //!   sketch.
-//! - **Dynamic suppression ▸**: suppression driven by a variable or a configuration; cadrs has
-//!   neither yet, so its entries are shown disabled.
+//! - **Dynamic suppression ▸**: suppression driven by a variable (`crate::suppress_variable`)
+//!   or a configuration (`crate::configuration_ui`); **Configure ▸** configures the feature's
+//!   fields.
 //! - **Edit healthy moment of …**: shown disabled until Repair (P3D.4).
 
 use cadrs_ui::ShortcutKey;
