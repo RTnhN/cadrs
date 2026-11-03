@@ -239,6 +239,13 @@ pub fn show_all_sketches(world: &mut World) {
 /// step for the features; the default planes are view state).
 pub fn set_all_planes_visible(world: &mut World, visible: bool) {
     world.resource_mut::<crate::viewport::PlanesVisible>().0 = [visible; 3];
+    // The planes Derived features brought in are drawn too (`plane_display::shown`).
+    let derived: Vec<FeatureId> = world
+        .resource::<crate::parts::PartCache>()
+        .derived
+        .values()
+        .flat_map(|d| d.planes.iter().map(|(id, _)| *id))
+        .collect();
     let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
         return;
     };
@@ -250,8 +257,9 @@ pub fn set_all_planes_visible(world: &mut World, visible: bool) {
         .features()
         .iter()
         .filter(|f| matches!(f.kind, cadrs_core::FeatureKind::Plane(_)))
-        .filter(|f| plane_shown(el, f.id) != visible)
         .map(|f| f.id)
+        .chain(derived)
+        .filter(|id| plane_shown(el, *id) != visible)
         .collect();
     if ids.is_empty() {
         return;
