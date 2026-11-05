@@ -608,6 +608,12 @@ struct SketchLabel(usize);
 #[derive(Component)]
 struct SketchLabelIcon;
 
+/// The text of a [`SketchLabel`]: a child of its own, so the label's box is measured from it (a
+/// text node with children isn't measured, and laid out as its padding alone, its glyphs
+/// hanging off its corner).
+#[derive(Component)]
+struct SketchLabelText;
+
 /// Everything drawn for the sketches of the active Part Studio.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn draw_sketches(
@@ -3256,9 +3262,6 @@ fn sync_labels(
     mut q: Query<(
         Entity,
         &SketchLabel,
-        &mut Text,
-        &mut TextColor,
-        &mut TextFont,
         &mut Node,
         &mut UiTransform,
         &ComputedNode,
@@ -3268,6 +3271,7 @@ fn sync_labels(
     )>,
     q_children: Query<&Children>,
     mut q_icon: Query<(&mut Node, &mut ImageNode), (With<SketchLabelIcon>, Without<SketchLabel>)>,
+    mut q_text: Query<(&mut Text, &mut TextColor, &mut TextFont), With<SketchLabelText>>,
     mut commands: Commands,
 ) {
     // In the viewport area, or the flat view while a sketch on the flat is edited (P3I.6): a
@@ -3282,20 +3286,7 @@ fn sync_labels(
         return;
     }
     let mut have = 0;
-    for (
-        e,
-        l,
-        mut text,
-        mut color,
-        mut font,
-        mut node,
-        mut transform,
-        computed,
-        mut vis,
-        mut bg,
-        mut name,
-    ) in &mut q
-    {
+    for (e, l, mut node, mut transform, computed, mut vis, mut bg, mut name) in &mut q {
         let Some(spec) = labels.0.get(l.0) else {
             commands.entity(e).try_despawn();
             continue;
@@ -3315,21 +3306,23 @@ fn sync_labels(
                     image.color = spec.color;
                 }
             }
+            if let Ok((mut text, mut color, mut font)) = q_text.get_mut(*c) {
+                if text.0 != spec.text {
+                    text.0 = spec.text.clone();
+                }
+                color.set_if_neq(TextColor(spec.color));
+                let want_size = bevy::text::FontSize::Px(spec.size);
+                if font.font_size != want_size {
+                    font.font_size = want_size;
+                }
+                if font.weight != spec.weight {
+                    font.weight = spec.weight;
+                }
+            }
         }
         let want_name = label_name(spec);
         if name.as_str() != want_name {
             name.set(want_name);
-        }
-        if text.0 != spec.text {
-            text.0 = spec.text.clone();
-        }
-        color.set_if_neq(TextColor(spec.color));
-        let want_size = bevy::text::FontSize::Px(spec.size);
-        if font.font_size != want_size {
-            font.font_size = want_size;
-        }
-        if font.weight != spec.weight {
-            font.weight = spec.weight;
         }
         bg.set_if_neq(BackgroundColor(spec.background.unwrap_or(Color::NONE)));
         let pad = UiRect::all(Val::Px(if spec.background.is_some() { 2.0 } else { 0.0 }));
@@ -3386,7 +3379,6 @@ fn sync_labels(
             .spawn((
                 Name::new(label_name(spec)),
                 SketchLabel(i),
-                theme.text(spec.text.clone(), spec.size, spec.weight, spec.color),
                 Node {
                     position_type: PositionType::Absolute,
                     ..default()
@@ -3399,25 +3391,34 @@ fn sync_labels(
                 Pickable::IGNORE,
                 // Over the glyphs, under the sketch dialog and other overlays in the viewport.
                 ZIndex(-1),
-                children![(
-                    Name::new("dim-label-variable"),
-                    SketchLabelIcon,
-                    cadrs_ui::Icon::new("variables", spec.size),
-                    ImageNode {
-                        color: spec.color,
-                        ..default()
-                    },
-                    Node {
-                        display: Display::None,
-                        position_type: PositionType::Absolute,
-                        right: Val::Percent(100.0),
-                        margin: UiRect::right(Val::Px(3.0)),
-                        width: Val::Px(spec.size),
-                        height: Val::Px(spec.size),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                )],
+                children![
+                    (
+                        SketchLabelText,
+                        theme.text(spec.text.clone(), spec.size, spec.weight, spec.color),
+                        // Drawn in the sketch's own colors for the scheme, like the lines.
+                        KeepColors,
+                        Pickable::IGNORE,
+                    ),
+                    (
+                        Name::new("dim-label-variable"),
+                        SketchLabelIcon,
+                        cadrs_ui::Icon::new("variables", spec.size),
+                        ImageNode {
+                            color: spec.color,
+                            ..default()
+                        },
+                        Node {
+                            display: Display::None,
+                            position_type: PositionType::Absolute,
+                            right: Val::Percent(100.0),
+                            margin: UiRect::right(Val::Px(3.0)),
+                            width: Val::Px(spec.size),
+                            height: Val::Px(spec.size),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    )
+                ],
             ))
             .id();
         commands.entity(area).add_child(label);
