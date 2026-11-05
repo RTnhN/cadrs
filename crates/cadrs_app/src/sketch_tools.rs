@@ -1427,6 +1427,10 @@ pub(crate) fn sketch_pointer(
                                 })
                                 .map(|h| h.entity);
                             crate::sketch_text::text_under(sketch, hit)
+                                .map(Ok)
+                                .or_else(|| {
+                                    crate::sketch_pattern::pattern_under(sketch, hit).map(Err)
+                                })
                         })
                         .flatten();
                     if let Some(id) = select
@@ -1443,10 +1447,15 @@ pub(crate) fn sketch_pointer(
                         commands.queue(move |world: &mut World| {
                             crate::sketch_dimension::open_dimension_menu(world, id, pos)
                         });
-                    } else if let Some(id) = text {
+                    } else if let Some(Ok(id)) = text {
                         // S16.3: Edit text.
                         commands.queue(move |world: &mut World| {
                             crate::sketch_text::open_text_menu(world, id, pos)
+                        });
+                    } else if let Some(Err(id)) = text {
+                        // A patterned curve: Edit linear pattern.
+                        commands.queue(move |world: &mut World| {
+                            crate::sketch_pattern::open_pattern_menu(world, id, pos)
                         });
                     } else if !draw.state.is_drawing() {
                         // S1.5: the sketch's own menu (Confirm, View normal to sketch plane…).

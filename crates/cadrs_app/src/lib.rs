@@ -117,6 +117,7 @@ pub mod sketch_entity_tools;
 pub mod sketch_glyphs;
 pub mod sketch_links;
 pub mod sketch_modify_tools;
+pub mod sketch_pattern;
 pub mod sketch_text;
 pub mod sketch_tools;
 pub mod spacemouse;
@@ -964,6 +965,7 @@ impl Plugin for CadrsAppPlugin {
             ))
             .add_plugins((
                 sketch_diagnostics::SketchDiagnosticsPlugin,
+                sketch_pattern::SketchPatternPlugin,
                 feature_menu::FeatureMenuPlugin,
             ))
             // P3I.6: the flat pattern export and the sketch's Insert DXF or DWG.

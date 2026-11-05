@@ -1953,6 +1953,33 @@ sketch-mirror-select-entities = Select entities to be mirrored. Enter or Esc to 
 # A sketch text's context menu.
 sketch-text-edit = Edit text
 
+## crates/cadrs_app/src/sketch_pattern.rs
+# The Linear pattern dialog's entities field, empty: pick the curves to copy.
+sketch-pattern-entities = Entities to pattern
+# How many curves are patterned: { $count } is the number (1 in the singular key).
+sketch-pattern-entity-count = { $count } entity
+sketch-pattern-entities-count = { $count } entities
+sketch-pattern-distance = Distance
+# How many instances along a direction, the original included.
+sketch-pattern-instances = Instances
+sketch-pattern-angle = Angle
+sketch-pattern-second-direction = Second direction
+# Right-click on a patterned sketch curve.
+sketch-pattern-edit = Edit linear pattern
+sketch-pattern-edit-circular = Edit circular pattern
+# A linear pattern direction's field, empty: pick a sketch line or axis to run along (else the
+# Angle sets it).
+sketch-pattern-direction = Direction (line or axis)
+# What a direction runs along, once picked.
+sketch-pattern-line = Sketch line
+sketch-pattern-x-axis = X axis
+sketch-pattern-y-axis = Y axis
+# A circular pattern's center field, empty.
+sketch-pattern-center = Center point
+# What a circular pattern turns about: the sketch origin until a point is picked.
+sketch-pattern-origin = Sketch origin
+sketch-pattern-point = Sketch point
+
 ## crates/cadrs_app/src/selection_readout.rs
 # What is selected (a heading or a field's placeholder; a noun).
 model-selection = Selection

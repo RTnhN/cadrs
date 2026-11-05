@@ -172,7 +172,10 @@ pub enum SketchTool {
     Offset,
     Slot,
     Mirror,
+    /// Linear pattern (Pattern ▾).
     Pattern,
+    /// Circular pattern (Pattern ▾).
+    CircularPattern,
     Dimension,
     /// A constraint tool (Constraints ▾): applies to the selection, or, with nothing selected,
     /// stays active and constrains each set of entities picked.
@@ -216,7 +219,8 @@ impl SketchTool {
             SketchTool::Offset => "common-offset",
             SketchTool::Slot => "sketch-tool-slot",
             SketchTool::Mirror => "sketch-tool-mirror",
-            SketchTool::Pattern => "sketch-tool-pattern",
+            SketchTool::Pattern => "sketch-toolbar-linear-pattern",
+            SketchTool::CircularPattern => "shell-tool-circular-pattern",
             SketchTool::Dimension => "common-dimension",
             SketchTool::Constrain(k) => constraint_label_key(k),
         }
@@ -224,8 +228,9 @@ impl SketchTool {
 
     /// True for the tools cadrs has. The others' buttons stay disabled and their shortcuts do
     /// nothing (`intro-to-sketching-gaps.md`: a tool that is not there must not look like one).
+    /// Every tool is built now; menu variants that are not are `None` in [`tool_variants`].
     pub fn implemented(self) -> bool {
-        !matches!(self, SketchTool::Pattern)
+        true
     }
 
     /// The toolbar button a tool belongs to (variants share their group's button).
@@ -242,6 +247,7 @@ impl SketchTool {
             SketchTool::Chamfer => SketchTool::Fillet,
             SketchTool::Slot => SketchTool::Offset,
             SketchTool::Extend | SketchTool::Split => SketchTool::Trim,
+            SketchTool::CircularPattern => SketchTool::Pattern,
             SketchTool::Constrain(_) => SketchTool::Constrain(ConstraintKind::Coincident),
             t => t,
         }
@@ -882,8 +888,9 @@ pub(crate) fn sketch_keys(
     frame: Res<bevy::diagnostic::FrameCount>,
     mut dim: ResMut<crate::sketch_dimension::DimensionTool>,
     mut regions: ResMut<crate::region_select::SketchRegionSelection>,
-    (text, search, mut commands): (
+    (text, pattern, search, mut commands): (
         Res<crate::sketch_text::TextEditing>,
+        Res<crate::sketch_pattern::PatternEditing>,
         Res<crate::search_tools::SearchClosedFrame>,
         Commands,
     ),
@@ -925,6 +932,23 @@ pub(crate) fn sketch_keys(
                 _ => {}
             }
             continue;
+        }
+        // So does the Linear pattern dialog; other keys (tool shortcuts) still work.
+        if pattern.closed_frame == Some(frame.0) {
+            continue;
+        }
+        if pattern.open.is_some() {
+            match k.shortcut_code() {
+                KeyCode::Enter | KeyCode::NumpadEnter => {
+                    commands.queue(crate::sketch_pattern::accept_open);
+                    continue;
+                }
+                KeyCode::Escape => {
+                    commands.queue(crate::sketch_pattern::close_dialog);
+                    continue;
+                }
+                _ => {}
+            }
         }
         match k.shortcut_code() {
             // Shift+Enter accepts and starts the next sketch ("accept and repeat").
@@ -1292,6 +1316,23 @@ fn tool_variants(family: SketchTool) -> &'static [Variant] {
                 Some(SketchTool::Slot),
                 "sketch-tool-slot",
                 "slot",
+                "",
+            ),
+        ],
+        // Onshape's Pattern ▾: Linear pattern and Circular pattern.
+        SketchTool::Pattern => &[
+            (
+                "sketch-variant-linear-pattern",
+                Some(SketchTool::Pattern),
+                "sketch-toolbar-linear-pattern",
+                "linear-pattern",
+                "",
+            ),
+            (
+                "sketch-variant-circular-pattern",
+                Some(SketchTool::CircularPattern),
+                "shell-tool-circular-pattern",
+                "circular-pattern",
                 "",
             ),
         ],
@@ -2759,8 +2800,8 @@ mod toolbar_tests {
     #[test]
     fn unimplemented_tools_are_disabled_and_their_keys_do_nothing() {
         use SketchTool as T;
-        assert!(!T::Pattern.implemented());
-        assert!(!SketchToolButton::Tool(T::Pattern).implemented());
+        assert!(T::Pattern.implemented());
+        assert!(SketchToolButton::Tool(T::Pattern).implemented());
         assert!(T::Spline.implemented());
         for t in [
             T::Line,
@@ -2808,6 +2849,7 @@ mod toolbar_tests {
             T::Fillet,
             T::Trim,
             T::Offset,
+            T::Pattern,
         ] {
             for v in tool_variants(family) {
                 let tool = v.1.expect("every variant is a tool");
