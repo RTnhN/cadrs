@@ -270,6 +270,23 @@ pub enum SketchOp {
         start: Option<Vec2>,
         end: Option<Vec2>,
     },
+    /// Copies curves along one or two directions (the Linear pattern tool), each copy held to
+    /// its seed (see [`crate::pattern::add_pattern`]).
+    LinearPattern {
+        curves: Vec<CurveId>,
+        dirs: Vec<crate::pattern::PatternDir>,
+    },
+    /// Copies curves round a center (the Circular pattern tool), each copy held to its seed.
+    CircularPattern {
+        curves: Vec<CurveId>,
+        circular: crate::pattern::Circular,
+    },
+    /// A new layout for a pattern (of the same kind: directions, distances, counts, center,
+    /// angle); copies are added or deleted to match (see [`crate::pattern::edit_pattern`]).
+    EditPattern {
+        id: crate::PatternId,
+        layout: crate::pattern::Layout,
+    },
 }
 
 impl SketchOp {
@@ -326,6 +343,11 @@ impl SketchOp {
                 .map_or_else(|| "Edit".into(), |o| o.label()),
             SketchOp::AddSpline { .. } => "Add spline".into(),
             SketchOp::SetSplineTangents { .. } => "Spline handle".into(),
+            SketchOp::LinearPattern { .. } => "Linear pattern".into(),
+            SketchOp::CircularPattern { .. } => "Circular pattern".into(),
+            SketchOp::EditPattern { layout, .. } => {
+                format!("Edit {}", layout.name().to_lowercase())
+            }
         }
     }
 
@@ -951,6 +973,17 @@ impl SketchOp {
                 Ok(())
             }
             SketchOp::Mirror { axis, curves } => crate::edit::mirror(s, *axis, curves).map(|_| ()),
+            SketchOp::LinearPattern { curves, dirs } => {
+                crate::pattern::add_pattern(s, curves, crate::pattern::Layout::Linear(dirs.clone()))
+                    .map(|_| ())
+            }
+            SketchOp::CircularPattern { curves, circular } => {
+                crate::pattern::add_pattern(s, curves, crate::pattern::Layout::Circular(*circular))
+                    .map(|_| ())
+            }
+            SketchOp::EditPattern { id, layout } => {
+                crate::pattern::edit_pattern(s, *id, layout.clone())
+            }
             SketchOp::Offset {
                 chain,
                 distance,

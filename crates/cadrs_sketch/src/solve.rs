@@ -312,6 +312,18 @@ impl Off {
 pub enum Kind {
     /// `[p, q]`: `p − q`.
     Diff,
+    /// `[p, q, line…]` (`p`, `q` one coordinate each, then `lines` lines of four inputs): a
+    /// linear pattern copy's offset from its seed along coordinate `c`, less `fixed` (the steps
+    /// at fixed angles) and each line's unit direction times its `k` (steps × spacing).
+    Translate {
+        c: usize,
+        fixed: f64,
+        k: [f64; 2],
+        lines: usize,
+    },
+    /// `[p, q, center]`: coordinate `c` of a circular pattern copy `q` less its seed `p` turned
+    /// by the angle (its cosine and sine) about the center.
+    Rotate { c: usize, cos: f64, sin: f64 },
     /// `[a1, b1, a2, b2]`: the sine of the angle between `b1 − a1` and `b2 − a2`.
     Cross,
     /// `[a1, b1, a2, b2]`: the cosine of that angle.
@@ -395,6 +407,26 @@ impl Kind {
     pub fn eval(self, x: &[D]) -> D {
         match self {
             Kind::Diff => x[0] - x[1],
+            Kind::Translate { c, fixed, k, lines } => {
+                let mut r = x[1] - x[0] - D::c(fixed);
+                for (j, kj) in k.iter().enumerate().take(lines) {
+                    let d = pt(x, 2 + 4 * j + 2).sub(pt(x, 2 + 4 * j));
+                    let u = (if c == 0 { d.x } else { d.y }) / d.len();
+                    r = r - u * *kj;
+                }
+                r
+            }
+            Kind::Rotate { c, cos, sin } => {
+                let (p, q, o) = (pt(x, 0), pt(x, 2), pt(x, 4));
+                let v = p.sub(o);
+                let turned = if c == 0 {
+                    v.x * cos - v.y * sin
+                } else {
+                    v.x * sin + v.y * cos
+                };
+                let (qc, oc) = if c == 0 { (q.x, o.x) } else { (q.y, o.y) };
+                qc - oc - turned
+            }
             Kind::Cross | Kind::Dot => {
                 let d1 = pt(x, 2).sub(pt(x, 0));
                 let d2 = pt(x, 6).sub(pt(x, 4));
@@ -621,6 +653,8 @@ pub enum Source {
     Arc(CurveId),
     Constraint(ConstraintId),
     Dimension(DimensionId),
+    /// A linear pattern holding its copies to their seeds.
+    Pattern(crate::PatternId),
     /// A drag target.
     Pin,
 }
@@ -670,6 +704,8 @@ impl Equation {
 pub const TOLERANCE: f64 = 1e-9;
 /// Lines shorter than this (mm), and radii smaller, have collapsed.
 const MIN_SIZE: f64 = 1e-6;
+/// The weight of a pattern copy's unknowns against others' (see [`System::light`]).
+const LIGHT: f64 = 1e-6;
 /// Gauss–Newton/Levenberg–Marquardt steps per solve. A big change to a dimension that turns a
 /// mirror axis can creep for most of them before converging (#93 took 79).
 const MAX_ITERATIONS: usize = 100;
@@ -686,6 +722,9 @@ pub struct System {
     /// Lengths and radii that must not collapse: a solution that shrinks a line to a point or
     /// a circle to nothing is not a solution (Horizontal plus Vertical on one line conflict).
     guards: Vec<(Kind, Vec<In>)>,
+    /// The unknowns of pattern copies: moving them costs (almost) nothing, as the pattern
+    /// drives them, so turning a direction line moves the copies rather than shifting the line.
+    light: HashSet<usize>,
 }
 
 impl System {
@@ -719,6 +758,7 @@ impl System {
             radius_var: HashMap::new(),
             fixed,
             guards: Vec::new(),
+            light: HashSet::new(),
         };
         for (k, p) in &s.points {
             if !sys.fixed.contains_key(&k) {
@@ -815,7 +855,115 @@ impl System {
                 sys.add_dimension(s, k, d.kind, d.value);
             }
         }
+        for (k, p) in &s.patterns {
+            if !skip.contains(&Source::Pattern(k)) {
+                sys.add_pattern(s, k, p);
+            }
+        }
         sys
+    }
+
+    /// A pattern's equations: each copied point is where the copy's transform puts its seed
+    /// point (along the directions' lines as they are, or about the center where it is), and a
+    /// copied circle's or ellipse's radius its seed's.
+    fn add_pattern(&mut self, s: &Sketch, id: crate::PatternId, p: &crate::pattern::SketchPattern) {
+        use crate::pattern::Layout;
+        let src = Source::Pattern(id);
+        let free = |ins: &[In]| ins.iter().any(|i| matches!(i, In::Var(_)));
+        for c in &p.copies {
+            // The equations' formula and extra inputs (the lines, or the center) for this copy.
+            let (kinds, extra): ([Kind; 2], Vec<In>) = match &p.layout {
+                Layout::Linear(dirs) => {
+                    let mut fixed = Vec2::ZERO;
+                    let mut k = [0.0; 2];
+                    let mut lines = 0;
+                    let mut extra = Vec::new();
+                    for (d, i) in dirs.iter().zip(c.index) {
+                        if i == 0 {
+                            continue;
+                        }
+                        let along = d
+                            .along
+                            .and_then(|l| crate::pattern::line_dir(s, l).and(self.line(s, l)));
+                        match along {
+                            Some(ins) => {
+                                k[lines] = d.spacing * i as f64;
+                                lines += 1;
+                                extra.extend(ins);
+                            }
+                            None => fixed += d.step(s) * i as f64,
+                        }
+                    }
+                    let kind = |c, fixed| Kind::Translate { c, fixed, k, lines };
+                    ([kind(0, fixed.x), kind(1, fixed.y)], extra)
+                }
+                Layout::Circular(circ) => {
+                    let (sin, cos) = (circ.step() * c.index[0] as f64).sin_cos();
+                    (
+                        [
+                            Kind::Rotate { c: 0, cos, sin },
+                            Kind::Rotate { c: 1, cos, sin },
+                        ],
+                        self.point(s, circ.center).to_vec(),
+                    )
+                }
+            };
+            for &(a, b) in &c.points {
+                if !s.points.contains_key(a) || !s.points.contains_key(b) {
+                    continue;
+                }
+                let (pa, pb) = (
+                    self.point(s, PointRef::Point(a)),
+                    self.point(s, PointRef::Point(b)),
+                );
+                for i in pb {
+                    if let In::Var(k) = i {
+                        self.light.insert(k);
+                    }
+                }
+                for (ci, kind) in kinds.iter().enumerate() {
+                    let ins = match kind {
+                        Kind::Rotate { .. } => [pa.to_vec(), pb.to_vec(), extra.clone()].concat(),
+                        _ => [vec![pa[ci], pb[ci]], extra.clone()].concat(),
+                    };
+                    if free(&ins) {
+                        self.push(*kind, ins, src);
+                    }
+                }
+            }
+            for &(a, b) in &c.curves {
+                let (Some(ra), Some(rb)) = (self.scalar(s, a), self.scalar(s, b)) else {
+                    continue;
+                };
+                if let In::Var(k) = rb {
+                    self.light.insert(k);
+                }
+                let ins = vec![ra, rb];
+                if free(&ins) {
+                    self.push(Kind::EqualRadius(Rad::Scalar, Rad::Scalar), ins, src);
+                }
+            }
+        }
+    }
+
+    /// How far an unknown resists moving (the square root of its weight): a pattern copy's
+    /// hardly at all.
+    fn mass(&self, v: usize, weight: &dyn Fn(usize) -> f64) -> f64 {
+        let w = weight(v);
+        if self.light.contains(&v) {
+            (w * LIGHT).sqrt()
+        } else {
+            w.sqrt()
+        }
+    }
+
+    /// A circle's radius or an ellipse's minor radius as an input.
+    fn scalar(&self, s: &Sketch, c: CurveId) -> Option<In> {
+        let v = s.curves.get(c)?.kind.scalar()?;
+        Some(match self.radius_var.get(&c) {
+            Some(&i) => In::Var(i),
+            None => In::Const(v),
+        })
     }
 
     /// The inputs of a point.
@@ -1570,7 +1718,7 @@ impl System {
             return false;
         }
         let n = vars.len();
-        let scale: Vec<f64> = vars.iter().map(|v| 1.0 / weight(*v).sqrt()).collect();
+        let scale: Vec<f64> = vars.iter().map(|v| 1.0 / self.mass(*v, weight)).collect();
         let scaled = |mut j: DMatrix<f64>| {
             for (c, k) in scale.iter().enumerate() {
                 j.column_mut(c).scale_mut(*k);
@@ -1638,7 +1786,7 @@ impl System {
         if eqs.is_empty() {
             return true;
         }
-        let scale: Vec<f64> = vars.iter().map(|v| 1.0 / weight(*v).sqrt()).collect();
+        let scale: Vec<f64> = vars.iter().map(|v| 1.0 / self.mass(*v, weight)).collect();
         let mut r = self.residuals(eqs);
         let mut err = r.norm();
         let mut lambda = 1e-3;
@@ -1831,7 +1979,7 @@ impl System {
         groups.sort_by_key(|(s, _)| match s {
             Source::Arc(_) => 0,
             Source::Pin => 1,
-            Source::Constraint(_) => 2,
+            Source::Constraint(_) | Source::Pattern(_) => 2,
             Source::Dimension(_) => 3,
         });
         let mut accepted: Vec<usize> = Vec::new();
@@ -2119,7 +2267,11 @@ pub fn conflict_set_cached(s: &Sketch, conflicting: &[Source]) -> Vec<Source> {
     }
     let key = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        format!("{:?}|{:?}|{conflicting:?}", s.constraints, s.dimensions).hash(&mut h);
+        format!(
+            "{:?}|{:?}|{:?}|{conflicting:?}",
+            s.constraints, s.dimensions, s.patterns
+        )
+        .hash(&mut h);
         for (k, c) in &s.curves {
             if let CurveKind::Spline { .. } = c.kind {
                 format!("{:?}", s.splines.get(k)).hash(&mut h);

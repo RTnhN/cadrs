@@ -510,6 +510,7 @@ impl Sketch {
         if live.len() != self.broken.len() {
             self.broken = live.into_iter().collect();
         }
+        self.prune_patterns();
     }
 }
 

@@ -29,6 +29,7 @@ pub mod hit;
 pub mod infer;
 pub mod modify;
 pub mod ops;
+pub mod pattern;
 pub mod projection;
 pub mod region;
 pub mod solve;
@@ -59,6 +60,8 @@ new_key_type! {
     pub struct ConstraintId;
     /// Identifies a text entity (S16) in a [`Sketch`].
     pub struct TextId;
+    /// Identifies a pattern ([`pattern::SketchPattern`]) in a [`Sketch`].
+    pub struct PatternId;
 }
 
 /// A 2D vector in sketch-plane coordinates, in millimetres.
@@ -1151,6 +1154,9 @@ pub struct Sketch {
     /// is held fixed like any used curve (sketches saved before, until they regenerate).
     #[serde(default, skip_serializing_if = "slotmap::SecondaryMap::is_empty")]
     pub carriers: slotmap::SecondaryMap<CurveId, (Vec2, Vec2)>,
+    /// Linear and circular patterns: copies of curves held to their seeds ([`pattern`]).
+    #[serde(default, skip_serializing_if = "SlotMap::is_empty")]
+    pub patterns: SlotMap<PatternId, pattern::SketchPattern>,
 }
 
 /// A boundary imprinted from a part face's edge (S21): see [`Sketch::imprint`].
@@ -1746,6 +1752,7 @@ impl Sketch {
                 *p = swap(*p);
             }
         }
+        self.merge_pattern_points(keep, gone);
         let touched: Vec<ConstraintId> = self
             .constraints
             .iter()
