@@ -126,6 +126,7 @@ ui-color-scheme-system = 시스템 설정에 맞춤
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = 패널 숨기기
+ui-menu-no-matches = 일치 항목 없음
 
 ## crates/cadrs_ui/src/document_browser.rs
 ui-document-browser-search = 검색 또는 문서 ID 붙여넣기

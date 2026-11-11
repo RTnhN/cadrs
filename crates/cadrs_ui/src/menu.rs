@@ -11,6 +11,12 @@
 //! [`ContextMenuRequested`] with the pointer position. Answer it with [`open_context_menu`],
 //! which opens a menu at that position; its invisible anchor entity receives the bubbling
 //! [`MenuAction`], so put whatever the handler needs (such as the clicked row's id) on it.
+//!
+//! Typing in an open context menu filters it ([`MenuTypeahead`]): only the items whose label
+//! holds every typed word stay, submenu items join them as "Submenu › Item" rows, and the best
+//! match is highlighted. The arrow keys move the highlight and Enter chooses it; Backspace
+//! deletes a letter and Escape clears what was typed (then closes the menu). The menu takes the
+//! keys meanwhile, so they don't also reach the app's shortcuts.
 
 use crate::shortcut_key::ShortcutKey;
 use std::borrow::Cow;
@@ -42,6 +48,13 @@ impl Plugin for MenuPlugin {
             .add_observer(on_dismiss_press)
             .add_observer(on_secondary_click)
             .add_systems(Update, (update_submenus, close_on_escape))
+            // Before the keys reach anything else, focused widgets included.
+            .add_systems(
+                PreUpdate,
+                menu_typeahead
+                    .after(bevy::input::InputSystems)
+                    .before(bevy::input_focus::InputFocusSystems::Dispatch),
+            )
             .add_systems(
                 PostUpdate,
                 fit_menus_to_window.before(bevy::ui::UiSystems::Layout),
@@ -583,9 +596,17 @@ impl Menu {
         let vertical = matches!(self.side, PopoverSide::Top | PopoverSide::Bottom);
         // Its submenus open upward too.
         let up = self.upward || matches!(self.side, PopoverSide::Top);
+        let style = MenuStyle {
+            theme: Box::new(theme.clone()),
+            item_height,
+            icon_column,
+            look,
+            up,
+        };
         (
             Name::new(self.name.into_owned()),
             MenuPopup,
+            style,
             MenuFit {
                 cap: max_height,
                 vertical,
@@ -642,10 +663,11 @@ impl Menu {
                                 },
                                 BackgroundColor(theme.separator),
                                 Pickable::IGNORE,
+                                MenuDecor,
                             ));
                         }
                         MenuEntry::Header(h) => {
-                            p.spawn(header_bundle(&theme, h));
+                            p.spawn((header_bundle(&theme, h), MenuDecor));
                         }
                         MenuEntry::Item(mut item) => {
                             let tip = item.tooltip.take();
@@ -757,6 +779,8 @@ fn shown(entries: Vec<MenuEntry>) -> Vec<MenuEntry> {
 #[derive(Component, Debug, Clone)]
 pub struct MenuItemState {
     pub item: String,
+    /// What the row reads, which typing matches ([`MenuTypeahead`]).
+    label: String,
     submenu: Option<Vec<MenuEntry>>,
     theme: Box<Theme>,
     /// Its menu opened upward: so does its submenu.
@@ -831,6 +855,7 @@ fn item_bundle(
         Name::new(name.to_string()),
         MenuItemState {
             item: name.into_owned(),
+            label: label.clone(),
             submenu,
             theme: Box::new(theme.clone()),
             up,
@@ -1040,6 +1065,7 @@ pub fn open_context_menu(commands: &mut Commands, position: Vec2, menu: impl Bun
         .spawn((
             Name::new("context-menu-anchor"),
             ContextMenuAnchor,
+            MenuTypeahead::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(position.x),
@@ -1179,6 +1205,315 @@ fn close_on_escape(
     }
 }
 
+/// What was typed into an open context menu, on its anchor: the menu shows only the items that
+/// match it, and highlights one that Enter chooses (see the module docs).
+#[derive(Component, Debug, Default)]
+pub struct MenuTypeahead {
+    query: String,
+    /// The highlighted row.
+    active: Option<Entity>,
+    /// The rows the arrow keys move over, in order (enabled items that match).
+    rows: Vec<Entity>,
+    /// `rows` is up to date with `query`.
+    built: bool,
+}
+
+/// How a menu's rows are built, for the rows typing adds ([`TypeaheadRow`]).
+#[derive(Component, Debug, Clone)]
+struct MenuStyle {
+    theme: Box<Theme>,
+    item_height: f32,
+    icon_column: bool,
+    look: ItemLook,
+    up: bool,
+}
+
+/// A separator or header: hidden while typing filters the menu.
+#[derive(Component, Debug, Clone, Copy)]
+struct MenuDecor;
+
+/// A submenu's item shown in its menu ("Submenu › Item") because it matches what was typed.
+#[derive(Component, Debug, Clone, Copy)]
+struct TypeaheadRow;
+
+/// The line at a filtered menu's top showing what was typed.
+#[derive(Component, Debug, Clone, Copy)]
+struct TypeaheadQuery;
+
+/// Whether `label` holds every word of `query` (lower case, trimmed), in any order.
+fn label_matches(label: &str, query: &str) -> bool {
+    let label = label.to_lowercase();
+    query.split_whitespace().all(|w| label.contains(w))
+}
+
+/// How well `label` matches `query` (lower case, trimmed): 0 when it starts with it, 1 when one
+/// of its words does, 2 otherwise. The best is highlighted.
+fn match_rank(label: &str, query: &str) -> u8 {
+    let label = label.to_lowercase();
+    if label.starts_with(query) {
+        0
+    } else if label
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| !w.is_empty() && w.starts_with(query))
+    {
+        1
+    } else {
+        2
+    }
+}
+
+/// The items of submenu `entries` (and theirs) that match `query`, labelled with their path
+/// from `prefix`; with their own label, which ranks them.
+fn matching_leaves(
+    entries: &[MenuEntry],
+    prefix: &str,
+    query: &str,
+    out: &mut Vec<(MenuItem, String)>,
+) {
+    for e in entries {
+        let MenuEntry::Item(i) = e else { continue };
+        let path = format!("{prefix} \u{203a} {}", i.label);
+        match &i.submenu {
+            Some(sub) => matching_leaves(sub, &path, query, out),
+            None if label_matches(&path, query) => {
+                let own = i.label.clone();
+                let mut row = i.clone().label(path);
+                row.tooltip = None;
+                out.push((row, own));
+            }
+            None => {}
+        }
+    }
+}
+
+/// Typing in an open context menu (see the module docs). Runs before the keys reach anything
+/// else and takes every key pressed while the menu is open, so they aren't also shortcuts.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn menu_typeahead(
+    mut messages: ResMut<bevy::ecs::message::Messages<KeyboardInput>>,
+    mut cursor: Local<bevy::ecs::message::MessageCursor<KeyboardInput>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut q_anchor: Query<(&mut MenuTypeahead, &Children)>,
+    q_popup: Query<(Entity, &Children, &MenuStyle), With<MenuPopup>>,
+    q_items: Query<(&MenuItemState, Has<InteractionDisabled>)>,
+    q_added: Query<(), Or<(With<TypeaheadRow>, With<TypeaheadQuery>)>>,
+    q_decor: Query<(), With<MenuDecor>>,
+    mut q_node: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    // Read every frame, so a menu that opens sees only the keys pressed since.
+    let (mut fresh, mut pressed) = (0, false);
+    for k in cursor.read(&messages) {
+        fresh += 1;
+        pressed |= k.state == ButtonState::Pressed;
+    }
+    let Some((mut t, children)) = q_anchor.iter_mut().next() else {
+        return;
+    };
+    let Some((popup, rows, style)) = children.iter().find_map(|c| q_popup.get(c).ok()) else {
+        return;
+    };
+    if !pressed {
+        return;
+    }
+    // The keys since last frame (the older ones everything has read); the releases go back.
+    let new: Vec<KeyboardInput> = {
+        let all: Vec<KeyboardInput> = messages.drain().collect();
+        let skip = all.len().saturating_sub(fresh);
+        all.into_iter().skip(skip).collect()
+    };
+    let ctrl = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+        KeyCode::AltLeft,
+        KeyCode::AltRight,
+    ]);
+    let mut query = t.query.clone();
+    let (mut step, mut enter, mut close) = (0i32, false, false);
+    for k in new {
+        if k.state != ButtonState::Pressed {
+            messages.write(k);
+            continue;
+        }
+        keys.clear_just_pressed(k.key_code);
+        match k.shortcut_code() {
+            KeyCode::Escape if query.is_empty() => close = true,
+            KeyCode::Escape => query.clear(),
+            KeyCode::Enter | KeyCode::NumpadEnter => enter = true,
+            KeyCode::ArrowDown => step += 1,
+            KeyCode::ArrowUp => step -= 1,
+            KeyCode::Backspace => {
+                query.pop();
+            }
+            _ if ctrl => {}
+            _ => {
+                for c in k.text.iter().flat_map(|s| s.chars()) {
+                    if !c.is_control() && !(c.is_whitespace() && query.is_empty()) {
+                        query.push(c);
+                    }
+                }
+            }
+        }
+    }
+    if close {
+        commands.queue(close_all_menus);
+        return;
+    }
+    let before = t.active;
+    if query != t.query || !t.built {
+        t.query = query;
+        t.built = true;
+        let q = t.query.trim().to_lowercase();
+        let mut matched: Vec<(u8, Entity)> = Vec::new();
+        let mut leaves = Vec::new();
+        for row in rows.iter() {
+            if q_added.contains(row) {
+                commands.entity(row).try_despawn();
+                continue;
+            }
+            let show = if q_decor.contains(row) {
+                q.is_empty()
+            } else if let Ok((item, disabled)) = q_items.get(row) {
+                match &item.submenu {
+                    // Filtered, a submenu shows its matching items instead.
+                    Some(sub) if !q.is_empty() => {
+                        matching_leaves(sub, &item.label, &q, &mut leaves);
+                        false
+                    }
+                    Some(_) => true,
+                    None => {
+                        let m = label_matches(&item.label, &q);
+                        if m && !disabled {
+                            matched.push((match_rank(&item.label, &q), row));
+                        }
+                        m
+                    }
+                }
+            } else {
+                true
+            };
+            if let Ok(mut n) = q_node.get_mut(row) {
+                let d = if show { Display::Flex } else { Display::None };
+                if n.display != d {
+                    n.display = d;
+                }
+            }
+        }
+        for (item, own) in leaves {
+            let disabled = item.disabled;
+            let e = commands
+                .spawn((
+                    item_bundle(
+                        &style.theme,
+                        item,
+                        style.item_height,
+                        style.icon_column,
+                        style.look,
+                        style.up,
+                    ),
+                    TypeaheadRow,
+                    ChildOf(popup),
+                ))
+                .id();
+            if !disabled {
+                matched.push((match_rank(&own, &q), e));
+            }
+        }
+        if !q.is_empty() {
+            let line = commands
+                .spawn(query_line(&style.theme, &t.query, matched.is_empty()))
+                .id();
+            commands.entity(popup).insert_children(0, &[line]);
+        }
+        t.rows = matched.iter().map(|(_, e)| *e).collect();
+        t.active = if q.is_empty() {
+            before.filter(|a| t.rows.contains(a))
+        } else {
+            // The best match, the first of equals.
+            matched.iter().min_by_key(|(r, _)| *r).map(|(_, e)| *e)
+        };
+        if q.is_empty() {
+            // Unfiltered, the arrows move over every enabled item.
+            t.rows = rows
+                .iter()
+                .filter(|r| {
+                    q_items
+                        .get(*r)
+                        .is_ok_and(|(i, d)| i.submenu.is_none() && !d)
+                })
+                .collect();
+        }
+    }
+    if step != 0 && !t.rows.is_empty() {
+        let n = t.rows.len() as i32;
+        let at = match t.active.and_then(|a| t.rows.iter().position(|r| *r == a)) {
+            Some(i) => (i as i32 + step).rem_euclid(n),
+            None if step > 0 => (step - 1).rem_euclid(n),
+            None => step.rem_euclid(n),
+        };
+        t.active = Some(t.rows[at as usize]);
+    }
+    if t.active != before {
+        if let Some(b) = before {
+            commands.entity(b).try_remove::<crate::style::Selected>();
+        }
+        if let Some(a) = t.active {
+            commands.entity(a).try_insert(crate::style::Selected);
+        }
+    }
+    if enter && let Some(a) = t.active {
+        commands.trigger(Activate { entity: a });
+    }
+}
+
+/// The line at a filtered menu's top: a search icon, what was typed and, when nothing matches,
+/// "No matches".
+fn query_line(theme: &Theme, query: &str, none: bool) -> impl Bundle {
+    let t = theme.clone();
+    let query = query.to_string();
+    (
+        Name::new("menu-typeahead"),
+        TypeaheadQuery,
+        Node {
+            height: Val::Px(theme.menu_item_height),
+            flex_shrink: 0.0,
+            padding: UiRect::horizontal(Val::Px(theme.space[5])),
+            margin: UiRect::bottom(Val::Px(theme.space[2])),
+            border: UiRect::bottom(Val::Px(1.0)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(theme.space[3]),
+            ..default()
+        },
+        BorderColor::all(theme.separator),
+        Pickable::IGNORE,
+        Children::spawn(SpawnWith(move |p: &mut ChildSpawner| {
+            p.spawn((icon("search", 14.0, t.muted_foreground), Pickable::IGNORE));
+            p.spawn((
+                Name::new("menu-typeahead-text"),
+                t.text(query, t.font_base, FontWeight::NORMAL, t.foreground),
+                Pickable::IGNORE,
+                Node {
+                    flex_grow: 1.0,
+                    ..default()
+                },
+            ));
+            if none {
+                p.spawn((
+                    t.text(
+                        crate::i18n::tr("ui-menu-no-matches"),
+                        t.font_sm,
+                        FontWeight::NORMAL,
+                        t.muted_foreground,
+                    ),
+                    Pickable::IGNORE,
+                ));
+            }
+        })),
+    )
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1210,7 +1545,34 @@ mod tests {
         assert_eq!(names(&shown(entries)), ["rename", "-", "export"]);
     }
 
-    use super::{MenuEntry, MenuItem, menu_cap, shown};
+    use super::{MenuEntry, MenuItem, label_matches, match_rank, matching_leaves, menu_cap, shown};
+
+    // Typing filters a context menu: every typed word must be in the label; a label starting
+    // with it ranks first, then one with a word starting with it.
+    #[test]
+    fn typing_matches_labels() {
+        assert!(label_matches("Rename…", "ren"));
+        assert!(label_matches("Show dimensions", "dim sh"));
+        assert!(!label_matches("Show dimensions", "hide"));
+        assert!(label_matches("Anything", ""));
+        assert_eq!(match_rank("Hide", "hi"), 0);
+        assert_eq!(match_rank("Show all sketches", "sk"), 1);
+        assert_eq!(match_rank("Unsuppress", "sup"), 2);
+        let sub = vec![
+            MenuItem::new("insert-sketch", "Sketch").into(),
+            MenuItem::new("insert-plane", "Plane").into(),
+            MenuEntry::Separator,
+            MenuItem::new("more", "More")
+                .submenu(vec![MenuItem::new("insert-helix", "Helix").into()])
+                .into(),
+        ];
+        let mut out = Vec::new();
+        matching_leaves(&sub, "Insert", "ins hel", &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0.name, "insert-helix");
+        assert_eq!(out[0].0.label, "Insert \u{203a} More \u{203a} Helix");
+        assert_eq!(out[0].1, "Helix");
+    }
 
     #[test]
     fn a_long_menu_is_capped_and_stays_capped() {

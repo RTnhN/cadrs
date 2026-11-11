@@ -126,6 +126,7 @@ ui-color-scheme-system = 跟随系统
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = 隐藏面板
+ui-menu-no-matches = 无匹配项
 
 ## crates/cadrs_ui/src/document_browser.rs
 ui-document-browser-search = 搜索或粘贴文档 ID

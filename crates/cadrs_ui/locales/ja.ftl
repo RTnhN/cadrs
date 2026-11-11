@@ -126,6 +126,7 @@ ui-color-scheme-system = システムに合わせる
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = パネルを隠す
+ui-menu-no-matches = 一致なし
 
 ## crates/cadrs_ui/src/document_browser.rs
 ui-document-browser-search = 検索、またはドキュメント ID を貼り付け

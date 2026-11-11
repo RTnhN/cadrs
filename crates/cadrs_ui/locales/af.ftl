@@ -126,6 +126,7 @@ ui-color-scheme-system = Volg die stelsel
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = Versteek paneel
+ui-menu-no-matches = Geen resultate
 
 ## crates/cadrs_ui/src/document_browser.rs
 ui-document-browser-search = Soek of plak 'n dokument-ID

@@ -152,6 +152,7 @@ ui-color-scheme-system = Match the system
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = Hide panel
+ui-menu-no-matches = No matches
 
 ## crates/cadrs_ui/src/document_browser.rs
 # The placeholder of the document browser's search field.

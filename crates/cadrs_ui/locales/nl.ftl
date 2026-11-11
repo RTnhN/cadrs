@@ -126,6 +126,7 @@ ui-color-scheme-system = Systeem volgen
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = Paneel verbergen
+ui-menu-no-matches = Geen overeenkomsten
 
 ## crates/cadrs_ui/src/document_browser.rs
 ui-document-browser-search = Zoeken of document-id plakken

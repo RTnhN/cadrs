@@ -126,6 +126,7 @@ ui-color-scheme-system = Come il sistema
 
 ## crates/cadrs_ui/src/dock.rs
 ui-dock-hide-panel = Nascondi pannello
+ui-menu-no-matches = Nessun risultato
 
 ## crates/cadrs_ui/src/document_browser.rs
 ui-document-browser-search = Cerca o incolla l'ID del documento
