@@ -1337,7 +1337,11 @@ fn menu_typeahead(
             messages.write(k);
             continue;
         }
-        keys.clear_just_pressed(k.key_code);
+        // `ButtonInput` holds the physical key, not the layout's (`shortcut_code`).
+        let KeyboardInput {
+            key_code: physical, ..
+        } = k;
+        keys.clear_just_pressed(physical);
         match k.shortcut_code() {
             KeyCode::Escape if query.is_empty() => close = true,
             KeyCode::Escape => query.clear(),
