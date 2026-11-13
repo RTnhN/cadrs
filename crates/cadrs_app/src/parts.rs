@@ -5286,4 +5286,96 @@ mod tests {
         let tallest = seen.iter().copied().fold(0.0, f64::max);
         assert!(tallest > 20.0, "the preview stood still: {seen:?}");
     }
+
+    /// Show all sketches shows the hidden ones (by their eye or used by a feature), Hide all
+    /// sketches hides the shown ones, each one undo step.
+    #[test]
+    fn show_and_hide_all_sketches() {
+        use cadrs_core::commands::{AddExtrude, AddSketch, EditSketch, SetSketchVisibility};
+        use cadrs_core::document::RegionRef;
+        use cadrs_core::{Document, ExtrudeFeature};
+        let mut doc = ActiveDocument::new(Document::new("Sketches"));
+        let el = doc.doc.elements[0].id;
+        let (shown, eyed, used, ex) = (
+            FeatureId::new(),
+            FeatureId::new(),
+            FeatureId::new(),
+            FeatureId::new(),
+        );
+        for sk in [shown, eyed, used] {
+            doc.execute(&AddSketch {
+                element: el,
+                feature: sk,
+                plane: Some(PlaneRef::Top),
+            })
+            .unwrap();
+        }
+        doc.execute(&EditSketch {
+            element: el,
+            feature: used,
+            op: cadrs_sketch::SketchOp::AddPolyline {
+                points: vec![
+                    cadrs_sketch::Vec2::new(0.0, 0.0),
+                    cadrs_sketch::Vec2::new(40.0, 0.0),
+                    cadrs_sketch::Vec2::new(40.0, 20.0),
+                ],
+                closed: true,
+                construction: false,
+                label: "Add triangle",
+            },
+        })
+        .unwrap();
+        let g = &doc
+            .doc
+            .element(el)
+            .unwrap()
+            .feature(used)
+            .unwrap()
+            .sketch()
+            .unwrap()
+            .geometry;
+        let regions: Vec<RegionRef> = cadrs_sketch::region::regions(g)
+            .iter()
+            .map(|r| RegionRef::new(used, r))
+            .collect();
+        doc.execute(&AddExtrude {
+            element: el,
+            feature: ex,
+            extrude: ExtrudeFeature {
+                regions,
+                ..ExtrudeFeature::default()
+            },
+        })
+        .unwrap();
+        doc.execute(&SetSketchVisibility {
+            element: el,
+            sketch: eyed,
+            visible: Some(false),
+        })
+        .unwrap();
+        let mut app = App::new();
+        app.insert_resource(doc)
+            .init_resource::<PartOverride>()
+            .insert_resource(RebuildBudget(Some(std::time::Duration::ZERO)))
+            .init_resource::<PartCache>()
+            .init_resource::<crate::assembly::AssemblyParts>()
+            .init_resource::<crate::scale_ui::RebuildLog>()
+            .add_systems(Update, update_part_cache);
+        app.update();
+        let hidden = |app: &App| {
+            let h = &app.world().resource::<PartCache>().hidden_sketches;
+            [shown, eyed, used].map(|s| h.contains(&s))
+        };
+        let undo = |app: &App| app.world().resource::<ActiveDocument>().history.undo_len();
+        assert_eq!(hidden(&app), [false, true, true]);
+        let before = undo(&app);
+        crate::feature_menu::show_all_sketches(app.world_mut());
+        app.update();
+        assert_eq!(hidden(&app), [false, false, false]);
+        assert_eq!(undo(&app), before + 1);
+        crate::feature_menu::set_all_sketches_visible(app.world_mut(), false);
+        app.update();
+        assert_eq!(hidden(&app), [true, true, true]);
+        assert_eq!(undo(&app), before + 2);
+    }
 }

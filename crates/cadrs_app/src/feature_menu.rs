@@ -206,7 +206,8 @@ pub fn set_all_sketches_visible(world: &mut World, visible: bool) {
         .filter(|(i, f)| {
             f.sketch().is_some()
                 && *i < bar
-                && hidden.contains(&f.id) != visible
+                // (Showing: the hidden ones; hiding: the shown ones.)
+                && hidden.contains(&f.id) == visible
                 && !off.contains(&f.id)
         })
         .map(|(_, f)| f.id)
