@@ -2855,6 +2855,7 @@ render-background = 배경
 render-ground-shadow = 바닥 그림자
 render-camera = 카메라
 render-current-view = 현재 뷰
+render-custom-view = 사용자 지정
 render-view = 뷰
 render-perspective = 원근
 render-output = 출력

@@ -2855,6 +2855,7 @@ render-background = Arrière-plan
 render-ground-shadow = Ombre au sol
 render-camera = Caméra
 render-current-view = Vue actuelle
+render-custom-view = Personnalisée
 render-view = Vue
 render-perspective = Perspective
 render-output = Sortie

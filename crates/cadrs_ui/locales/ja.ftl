@@ -2855,6 +2855,7 @@ render-background = 背景
 render-ground-shadow = 地面の影
 render-camera = カメラ
 render-current-view = 現在のビュー
+render-custom-view = カスタム
 render-view = ビュー
 render-perspective = 透視投影
 render-output = 出力

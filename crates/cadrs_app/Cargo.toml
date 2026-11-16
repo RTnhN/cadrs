@@ -22,7 +22,7 @@ cadrs_kernel.workspace = true
 cadrs_pcb.workspace = true
 cadrs_idf.workspace = true
 cadrs_fea.workspace = true
-cadrs_render.workspace = true
+cadrs_render = { workspace = true, features = ["gpu"] }
 nalgebra.workspace = true
 uuid.workspace = true
 serde.workspace = true

@@ -13,7 +13,16 @@
 //!   appearance, metal or dielectric and roughness from the material). Every change is a
 //!   [`SetRenderStudio`] command, so it undoes.
 //! - **The view**: a live path-traced preview of the scene at the viewport's size (16 samples,
-//!   accumulated off the main thread, denoised when done); after a render, its result.
+//!   accumulated off the main thread, denoised when done); after a render, its result. Samples
+//!   are traced on the GPU when there is one (`cadrs_render::gpu`, the caption says "GPU"),
+//!   else on the CPU; the scene (its BVH, and its GPU buffers) is kept while the model is
+//!   the same, so a new camera starts at once.
+//! - **Moving the camera in the view**: a drag turns it (left, or the mouse preference's
+//!   rotate gestures), pans it or zooms it (the preference's gestures), the wheel zooms toward
+//!   the cursor, as in the 3D view. While it moves, the preview follows at a lower
+//!   resolution; the camera becomes the studio's **Custom** view (with its zoom and pan) in
+//!   one undo step when the drag ends or the wheel rests. Picking a view in Camera frames the
+//!   whole model again.
 //! - **Render…** (the toolbar and the panel) opens the Render dialog (file name, size,
 //!   quality, folder); **Render** accumulates the samples on a background thread with progress
 //!   in the panel and the view (Cancel stops it), then writes the PNG and says where. The image
@@ -27,6 +36,9 @@ use std::sync::{Arc, Mutex};
 use web_time::Instant;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::input::mouse::MouseScrollUnit;
+use bevy::picking::hover::HoverMap;
+use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::text::{EditableText, FontWeight, TextEdit};
@@ -61,6 +73,7 @@ impl Plugin for RenderUiPlugin {
                 Update,
                 (
                     drive_jobs,
+                    navigate,
                     start_preview,
                     sync_view,
                     sync_panel,
@@ -106,6 +119,8 @@ struct Shared {
     held: bool,
     /// The file written (a final render).
     saved: Option<Result<PathBuf, String>>,
+    /// The samples are traced on the GPU.
+    on_gpu: bool,
 }
 
 struct Job {
@@ -160,6 +175,12 @@ pub struct RenderState {
     hold: Arc<AtomicU32>,
     /// The last error (no source, nothing to render).
     error: Option<String>,
+    /// The camera moved in the view.
+    nav: Nav,
+    /// The last scene built, by [`content_key`]: a new camera or setting reuses it.
+    scenes: SceneCache,
+    /// The last preview ran on the GPU.
+    on_gpu: bool,
 }
 
 impl Default for RenderState {
@@ -173,6 +194,9 @@ impl Default for RenderState {
             uploaded: 0,
             hold: Arc::new(AtomicU32::new(u32::MAX)),
             error: None,
+            nav: Nav::default(),
+            scenes: SceneCache::default(),
+            on_gpu: false,
         }
     }
 }
@@ -269,11 +293,54 @@ fn scene_input(world: &mut World, source: ElementId) -> Option<SceneInput> {
     model::source_parts(&doc, source, |e| parts_of.build(&doc, e))
 }
 
+/// The last scene built and its [`content_key`].
+type SceneCache = Arc<Mutex<Option<(u64, Arc<cadrs_render::Scene>)>>>;
+
+/// A job's scene: built already, or to build (and keep) from the parts.
+enum SceneSource {
+    Ready(Arc<cadrs_render::Scene>),
+    Build {
+        input: SceneInput,
+        key: u64,
+        cache: SceneCache,
+    },
+}
+
+/// What the scene depends on: the source and, for an assembly, the Part Studios.
+fn content_key(doc: &ActiveDocument, source: ElementId) -> u64 {
+    let mut parts: Vec<&cadrs_core::Element> = Vec::new();
+    if let Some(s) = doc.doc.element(source) {
+        parts.push(s);
+        if s.assembly_model().is_some() {
+            parts.extend(
+                doc.doc
+                    .elements
+                    .iter()
+                    .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })),
+            );
+        }
+    }
+    hash_of(&(source, parts))
+}
+
+/// The scene of `source`: the kept one when the model is the same, else its parts to build.
+fn scene_source(world: &mut World, source: ElementId) -> Option<SceneSource> {
+    let key = content_key(world.get_resource::<ActiveDocument>()?, source);
+    let cache = world.resource::<RenderState>().scenes.clone();
+    if let Some((k, scene)) = cache.lock().unwrap().as_ref()
+        && *k == key
+    {
+        return Some(SceneSource::Ready(scene.clone()));
+    }
+    let input = scene_input(world, source)?;
+    Some(SceneSource::Build { input, key, cache })
+}
+
 /// Starts rendering `input` with `studio`'s settings at `width` × `height`.
 #[allow(clippy::too_many_arguments)]
 fn spawn_job(
     element: ElementId,
-    input: SceneInput,
+    source: SceneSource,
     studio: RenderStudio,
     width: u32,
     height: u32,
@@ -289,8 +356,20 @@ fn spawn_job(
     let (c2, s2) = (cancel.clone(), shared.clone());
     let final_render = save.is_some();
     cadrs_core::background::spawn("render", move || {
-        let (parts, props, appearances) = input;
-        let scene = Arc::new(model::scene(&parts, &props, &appearances));
+        let scene = match source {
+            SceneSource::Ready(scene) => scene,
+            SceneSource::Build { input, key, cache } => {
+                let (parts, props, appearances) = input;
+                let scene = Arc::new(model::scene(&parts, &props, &appearances));
+                if scene.triangle_count() > 0 {
+                    *cache.lock().unwrap() = Some((key, scene.clone()));
+                }
+                scene
+            }
+        };
+        if c2.load(Ordering::Relaxed) {
+            return;
+        }
         let camera = model::camera(&studio, &scene, width as f32 / height as f32);
         let settings = model::settings(&studio, width, height, samples);
         // The preview leaves the app some threads; a final render takes the renderer's share.
@@ -299,7 +378,14 @@ fn spawn_job(
         } else {
             cadrs_render::default_threads().min(4)
         };
-        let mut r = cadrs_render::Renderer::new(scene, camera, settings, threads);
+        let mut r = cadrs_render::Renderer::with_backend(
+            scene,
+            camera,
+            settings,
+            threads,
+            cadrs_render::Backend::Auto,
+        );
+        s2.lock().unwrap().on_gpu = r.on_gpu();
         let publish = |r: &cadrs_render::Renderer, img: RgbaImage, finished: bool| {
             let mut s = s2.lock().unwrap();
             s.done = r.samples_done();
@@ -325,9 +411,12 @@ fn spawn_job(
             }
             s2.lock().unwrap().held = false;
             r.pass();
-            // Progress images: every pass of a preview, about twice a second for a big render.
+            // Progress images: the first pass, then at most 30 a second for a preview (a GPU's
+            // passes come faster than reading them back pays), twice a second for a big render.
             let big = (width as u64) * (height as u64) > 1_500_000;
-            if !r.is_done() && (!big || last_publish.elapsed().as_millis() > 500) {
+            let every = if big { 500 } else { 33 };
+            if !r.is_done() && (r.samples_done() == 1 || last_publish.elapsed().as_millis() > every)
+            {
                 publish(&r, r.image_noisy(), false);
                 last_publish = Instant::now();
             } else if !r.is_done() {
@@ -388,31 +477,44 @@ fn preview_key(
     studio: &RenderStudio,
     size: (u32, u32),
 ) -> u64 {
-    let mut parts: Vec<&cadrs_core::Element> = Vec::new();
-    if let Some(s) = studio.source.and_then(|s| doc.doc.element(s)) {
-        parts.push(s);
-        if s.assembly_model().is_some() {
-            parts.extend(
-                doc.doc
-                    .elements
-                    .iter()
-                    .filter(|e| matches!(e.kind, ElementKind::PartStudio { .. })),
-            );
-        }
+    let content = studio.source.map(|s| content_key(doc, s));
+    hash_of(&(element, studio, content, size))
+}
+
+/// The studio as the view shows it: with the camera being moved.
+fn shown_studio(state: &RenderState, element: ElementId, studio: &RenderStudio) -> RenderStudio {
+    let mut s = studio.clone();
+    if let Some(e) = state.nav.edit.filter(|e| e.element == element) {
+        e.apply(&mut s);
     }
-    hash_of(&(element, studio, parts, size))
+    s
+}
+
+/// The preview's size: smaller while the camera moves (a CPU more so), so it keeps up.
+fn shown_size(state: &RenderState, rect: Rect, studio: &RenderStudio) -> (u32, u32) {
+    let (w, h) = preview_size(rect, studio);
+    if state.nav.edit.is_none() {
+        return (w, h);
+    }
+    let s = if state.on_gpu { 0.75 } else { 0.35 };
+    (
+        ((w as f32 * s).round() as u32).max(16),
+        ((h as f32 * s).round() as u32).max(16),
+    )
 }
 
 /// The preview key of the active Render tab now.
 fn current_key(world: &World) -> Option<u64> {
     let rect = world.resource::<ViewportRect>().0;
     let doc = world.get_resource::<ActiveDocument>()?;
+    let state = world.resource::<RenderState>();
     let (element, studio) = active_studio(doc)?;
+    let studio = shown_studio(state, element, studio);
     Some(preview_key(
         doc,
         element,
-        studio,
-        preview_size(rect, studio),
+        &studio,
+        shown_size(state, rect, &studio),
     ))
 }
 
@@ -428,15 +530,26 @@ fn start_preview(world: &mut World) {
     let Some((element, studio)) = active_studio(doc).map(|(e, s)| (e, s.clone())) else {
         return;
     };
-    let size = preview_size(rect, &studio);
-    let key = preview_key(doc, element, &studio, size);
     let state = world.resource::<RenderState>();
+    let studio = shown_studio(state, element, &studio);
+    let size = shown_size(state, rect, &studio);
+    let key = preview_key(doc, element, &studio, size);
     if state.last_key == Some(key) {
         return;
     }
     // Don't compete with a final render.
     if state.final_job.is_some() {
         return;
+    }
+    // While the camera moves, let a preview show its first pass before the next replaces it
+    // (a slow pass would otherwise never be seen).
+    if state.nav.edit.is_some()
+        && let Some((_, j)) = &state.preview
+    {
+        let (done, ..) = j.snapshot();
+        if done == 0 && j.started.elapsed().as_millis() < 400 {
+            return;
+        }
     }
     let mut state = world.resource_mut::<RenderState>();
     state.last_key = Some(key);
@@ -448,16 +561,16 @@ fn start_preview(world: &mut World) {
         state.shown = Shown::None;
         return;
     };
-    let Some(input) = scene_input(world, source) else {
+    let Some(input) = scene_source(world, source) else {
         world.resource_mut::<RenderState>().error = Some(tr("render-error-model-unavailable"));
         return;
     };
     let mut state = world.resource_mut::<RenderState>();
-    state.error = if input.0.is_empty() {
-        Some(tr("render-error-no-parts"))
-    } else {
-        None
+    let empty = match &input {
+        SceneSource::Ready(s) => s.triangle_count() == 0,
+        SceneSource::Build { input, .. } => input.0.is_empty(),
     };
+    state.error = empty.then(|| tr("render-error-no-parts"));
     let job = spawn_job(
         element,
         input,
@@ -557,6 +670,15 @@ fn drive_jobs(world: &mut World) {
     } else {
         None
     };
+    let on_gpu = state
+        .preview
+        .as_ref()
+        .map(|(_, j)| j.shared.lock().unwrap().on_gpu);
+    if let Some(g) = on_gpu
+        && g != world.resource::<RenderState>().on_gpu
+    {
+        world.resource_mut::<RenderState>().on_gpu = g;
+    }
     if let Some((version, Some(img))) = img {
         world.resource_mut::<RenderState>().uploaded = version;
         upload(world, &img);
@@ -773,10 +895,328 @@ fn sync_view(
         }
         _ => state.error.clone().unwrap_or_default(),
     };
+    let gpu = match (&state.final_job, &state.preview) {
+        (Some(f), _) => f.job.shared.lock().unwrap().on_gpu,
+        (None, Some((_, j))) if matches!(state.shown, Shown::Preview(_)) => {
+            j.shared.lock().unwrap().on_gpu
+        }
+        _ => false,
+    };
+    let caption = if gpu && !caption.is_empty() {
+        format!("{caption} · GPU")
+    } else {
+        caption
+    };
     for mut t in &mut q_caption {
         if t.0 != caption {
             t.0 = caption.clone();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Moving the camera in the view
+
+/// The camera being moved in the view, not yet a command.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CameraEdit {
+    element: ElementId,
+    azimuth: f32,
+    elevation: f32,
+    roll: f32,
+    zoom: f32,
+    pan: [f32; 3],
+}
+
+impl CameraEdit {
+    fn of(element: ElementId, s: &RenderStudio) -> Self {
+        let (azimuth, elevation, roll) = s.view.angles();
+        CameraEdit {
+            element,
+            azimuth,
+            elevation,
+            roll,
+            zoom: s.zoom,
+            pan: s.pan,
+        }
+    }
+
+    fn apply(&self, s: &mut RenderStudio) {
+        s.view = RenderView::Custom {
+            azimuth: self.azimuth,
+            elevation: self.elevation,
+            roll: self.roll,
+        };
+        s.zoom = self.zoom;
+        s.pan = self.pan;
+    }
+
+    /// Its orientation as the 3D view's, whose turns it takes.
+    fn view(&self) -> crate::camera::ViewState {
+        crate::camera::ViewState {
+            azimuth: self.azimuth,
+            elevation: self.elevation,
+            roll: self.roll,
+            ..default()
+        }
+    }
+
+    fn turn(&mut self, f: impl FnOnce(&mut crate::camera::ViewState)) {
+        let mut v = self.view();
+        f(&mut v);
+        (self.azimuth, self.elevation, self.roll) = (v.azimuth, v.elevation, v.roll);
+    }
+
+    /// Moves what it looks at by a screen offset (px, y down) at `mm` per px.
+    fn shift(&mut self, offset: Vec2, mm: f32) {
+        let v = self.view();
+        let d = (v.right() * offset.x - v.up() * offset.y) * mm;
+        for (p, d) in self.pan.iter_mut().zip(d.to_array()) {
+            *p += d;
+        }
+    }
+}
+
+/// The camera moved in the view: the edit, the buttons held over it, what it did.
+#[derive(Default)]
+struct Nav {
+    edit: Option<CameraEdit>,
+    buttons: [bool; 3],
+    pointer: Vec2,
+    /// The undo label of what the edit did ("Camera rotate").
+    label: Option<&'static str>,
+    /// When the wheel last zoomed (s): the edit is kept once it rests.
+    wheel_at: Option<f32>,
+}
+
+fn button_index(b: PointerButton) -> usize {
+    match b {
+        PointerButton::Primary => 0,
+        PointerButton::Secondary => 1,
+        PointerButton::Middle => 2,
+    }
+}
+
+/// Seconds the wheel rests before its zoom becomes a command.
+const WHEEL_REST: f32 = 0.4;
+const MIN_ZOOM: f32 = 0.05;
+const MAX_ZOOM: f32 = 200.0;
+
+/// The view's nodes (the backdrop and the image), which a drag starts over.
+type ViewNodes = Or<(With<RenderView3>, With<RenderImage>)>;
+
+/// Drags and the wheel over a Render tab's view move its camera ([`Nav`]); the edit becomes a
+/// [`SetRenderStudio`] when the drag ends or the wheel rests ([`keep_camera`]).
+#[allow(clippy::too_many_arguments)]
+fn navigate(
+    mut inputs: MessageReader<PointerInput>,
+    kind: Res<ActiveKind>,
+    mut state: ResMut<RenderState>,
+    rect: Res<ViewportRect>,
+    hover: Res<HoverMap>,
+    q_view: Query<(), ViewNodes>,
+    keys: Res<ButtonInput<KeyCode>>,
+    prefs: Res<crate::preferences_ui::LocalPreferences>,
+    doc: Option<Res<ActiveDocument>>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    let studio = doc
+        .as_deref()
+        .filter(|_| *kind == ActiveKind::Render)
+        .and_then(|d| active_studio(d).map(|(e, s)| (e, s.clone())));
+    let Some((element, studio)) = studio else {
+        inputs.clear();
+        if state.nav.buttons.iter().any(|b| *b) {
+            state.nav.buttons = [false; 3];
+        }
+        if state.nav.edit.is_some() {
+            commands.queue(keep_camera);
+        }
+        return;
+    };
+    let over = hover
+        .get(&PointerId::Mouse)
+        .is_some_and(|hits| hits.keys().any(|e| q_view.contains(*e)));
+    // The kept scene's bounds (what the camera frames).
+    let bounds = studio.source.and_then(|s| {
+        let key = content_key(doc.as_deref()?, s);
+        let c = state.scenes.lock().unwrap();
+        c.as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, scene)| scene.bounds())
+    });
+    let aspect = studio.width as f32 / studio.height.max(1) as f32;
+    // The height (mm) the camera sees with `edit`, or framing the model from its angles.
+    let seen = |edit: &CameraEdit, fitted: bool| {
+        let mut s = studio.clone();
+        edit.apply(&mut s);
+        if fitted {
+            (s.zoom, s.pan) = (1.0, [0.0; 3]);
+        }
+        Some(model::camera_for(&s, bounds?, aspect).1)
+    };
+    let (_, shown_h) = preview_size(rect.0, &studio);
+    let mods = crate::preferences_ui::modifiers(&keys);
+    let mouse = prefs.mouse();
+    let now = time.elapsed_secs();
+    let nav = &mut state.nav;
+    let mut ended = false;
+    let mut moves: Vec<(cadrs_core::preferences::ViewAction, Vec2)> = Vec::new();
+    let mut wheel = Vec::new();
+    for input in inputs.read() {
+        if input.pointer_id != PointerId::Mouse {
+            continue;
+        }
+        let pos = input.location.position;
+        match input.action {
+            PointerAction::Press(b) => {
+                if over {
+                    nav.buttons[button_index(b)] = true;
+                    nav.pointer = pos;
+                }
+            }
+            PointerAction::Release(b) => {
+                let was = nav.buttons.iter().any(|b| *b);
+                nav.buttons[button_index(b)] = false;
+                if was && !nav.buttons.iter().any(|b| *b) {
+                    ended = true;
+                }
+            }
+            PointerAction::Move { .. } => {
+                let delta = pos - nav.pointer;
+                nav.pointer = pos;
+                if delta == Vec2::ZERO {
+                    continue;
+                }
+                use cadrs_core::preferences::ViewAction;
+                // The mouse preference's gestures, as in the 3D view; a left drag turns (the
+                // view has nothing to select).
+                let action = [(2, PointerButton::Middle), (1, PointerButton::Secondary)]
+                    .into_iter()
+                    .filter(|(i, _)| nav.buttons[*i])
+                    .find_map(|(_, b)| mouse.action(crate::preferences_ui::mouse_button(b), mods))
+                    .or_else(|| {
+                        nav.buttons[0].then_some(if mods.shift || mods.ctrl {
+                            ViewAction::Pan
+                        } else {
+                            ViewAction::Rotate
+                        })
+                    });
+                if let Some(a) = action {
+                    moves.push((a, delta));
+                }
+            }
+            PointerAction::Scroll { unit, y, .. } => {
+                if over {
+                    let lines = match unit {
+                        MouseScrollUnit::Line => y,
+                        MouseScrollUnit::Pixel => y / 40.0,
+                    };
+                    wheel.push((lines, rect.offset(pos)));
+                }
+            }
+            PointerAction::Cancel => {
+                nav.buttons = [false; 3];
+                ended = true;
+            }
+        }
+    }
+    if !moves.is_empty() || !wheel.is_empty() {
+        let nav = &mut state.nav;
+        let edit = nav
+            .edit
+            .filter(|e| e.element == element)
+            .unwrap_or_else(|| CameraEdit::of(element, &studio));
+        let mut edit = edit;
+        // A turn keeps the camera's distance (the model would grow and shrink as framing it
+        // from each angle needs): the zoom takes what the framing changes.
+        let turn = |edit: &mut CameraEdit, f: &dyn Fn(&mut crate::camera::ViewState)| {
+            let before = seen(edit, true);
+            edit.turn(f);
+            if let (Some(a), Some(b)) = (before, seen(edit, true))
+                && a > 0.0
+            {
+                edit.zoom = (edit.zoom * b / a).clamp(MIN_ZOOM, MAX_ZOOM);
+            }
+        };
+        // What one screen pixel is on the plane the camera looks at (mm).
+        let mm = |edit: &CameraEdit| seen(edit, false).unwrap_or(0.0) / shown_h.max(1) as f32;
+        use cadrs_core::preferences::ViewAction;
+        for (action, delta) in moves {
+            match action {
+                ViewAction::Rotate => {
+                    turn(&mut edit, &|v| v.orbit(delta));
+                    nav.label = Some("Camera rotate");
+                }
+                ViewAction::RotateTurntable => {
+                    turn(&mut edit, &|v| v.orbit_turntable(delta));
+                    nav.label = Some("Camera rotate");
+                }
+                ViewAction::Pan => {
+                    // The scene follows the pointer.
+                    let mm = mm(&edit);
+                    edit.shift(-delta, mm);
+                    nav.label.get_or_insert("Camera pan");
+                }
+                ViewAction::Zoom => {
+                    let f = crate::viewport::DRAG_ZOOM_PER_PX.powf(-delta.y);
+                    edit.zoom = (edit.zoom * f).clamp(MIN_ZOOM, MAX_ZOOM);
+                    nav.label.get_or_insert("Camera zoom");
+                }
+            }
+        }
+        for (lines, cursor) in wheel {
+            // Toward the cursor: the point under it stays there.
+            let f = crate::camera::ZOOM_PER_LINE.powf(lines);
+            let before = edit.zoom;
+            let px_mm = mm(&edit);
+            edit.zoom = (edit.zoom * f).clamp(MIN_ZOOM, MAX_ZOOM);
+            edit.shift(cursor, px_mm * (1.0 - before / edit.zoom));
+            nav.label.get_or_insert("Camera zoom");
+            nav.wheel_at = Some(now);
+        }
+        nav.edit = Some(edit);
+    }
+    let nav = &state.nav;
+    let resting = nav
+        .wheel_at
+        .is_some_and(|t| now - t > WHEEL_REST && !nav.buttons.iter().any(|b| *b));
+    if nav.edit.is_some() && (ended || resting) {
+        commands.queue(keep_camera);
+    }
+}
+
+/// The camera moved in the view becomes its tab's camera, in one undo step.
+fn keep_camera(world: &mut World) {
+    let (edit, label) = {
+        let mut state = world.resource_mut::<RenderState>();
+        let nav = &mut state.nav;
+        if nav.buttons.iter().any(|b| *b) && nav.wheel_at.is_none() {
+            // Still dragging.
+            return;
+        }
+        nav.wheel_at = None;
+        (nav.edit.take(), nav.label.take())
+    };
+    let Some(edit) = edit else { return };
+    let Some(mut doc) = world.get_resource_mut::<ActiveDocument>() else {
+        return;
+    };
+    let Some(studio) = model::studio(&doc.doc, edit.element).cloned() else {
+        return;
+    };
+    let mut new = studio.clone();
+    edit.apply(&mut new);
+    if new == studio {
+        return;
+    }
+    if let Err(e) = doc.execute(&SetRenderStudio {
+        element: edit.element,
+        studio: new,
+        label: label.unwrap_or("Camera").to_string(),
+    }) {
+        warn!("render camera: {e}");
     }
 }
 
@@ -1125,15 +1565,22 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
         );
 
         section(b, t, "render-camera-heading", &tr("render-camera"));
-        let mut views: Vec<String> = vec![tr("render-current-view")];
+        // Custom (the view turned in the Render tab) leads the list while it is the camera.
+        let custom = usize::from(matches!(s.view, RenderView::Custom { .. }));
+        let mut views: Vec<String> = Vec::new();
+        if custom == 1 {
+            views.push(tr("render-custom-view"));
+        }
+        views.push(tr("render-current-view"));
         views.extend(RenderView::NAMED.iter().map(|v| v.label().to_string()));
         let sel = match s.view {
-            RenderView::Current { .. } => 0,
+            RenderView::Custom { .. } => 0,
+            RenderView::Current { .. } => custom,
             v => RenderView::NAMED
                 .iter()
                 .position(|x| *x == v)
-                .map(|i| i + 1)
-                .unwrap_or(2),
+                .map(|i| i + 1 + custom)
+                .unwrap_or(2 + custom),
         };
         field_row(
             b,
@@ -1548,11 +1995,11 @@ fn capture_view(world: &mut World) {
     };
     let v = v.unwrap_or_default();
     edit_studio(world, "Camera Current view", |s| {
-        s.view = RenderView::Current {
+        *s = s.clone().fitted(RenderView::Current {
             azimuth: v.azimuth,
             elevation: v.elevation,
             roll: v.roll,
-        }
+        })
     });
 }
 
@@ -1613,10 +2060,20 @@ fn on_select(ev: On<SelectChange>, q: Query<&Name>, mut commands: Commands) {
             });
         }
         "render-view" => {
+            let custom = world
+                .get_resource::<ActiveDocument>()
+                .and_then(|d| active_studio(d).map(|(_, s)| s.view))
+                .is_some_and(|v| matches!(v, RenderView::Custom { .. }));
+            // Custom, picked again, stays as it is.
+            let Some(i) = i.checked_sub(usize::from(custom)) else {
+                return;
+            };
             if i == 0 {
                 capture_view(world);
             } else if let Some(v) = RenderView::NAMED.get(i - 1).copied() {
-                edit_studio(world, format!("Camera {}", v.label()), |s| s.view = v);
+                edit_studio(world, format!("Camera {}", v.label()), |s| {
+                    *s = s.clone().fitted(v)
+                });
             }
         }
         "render-resolution" => {
@@ -1958,7 +2415,7 @@ fn start_final(world: &mut World) {
         return;
     };
     let Some(source) = studio.source else { return };
-    let Some(input) = scene_input(world, source) else {
+    let Some(input) = scene_source(world, source) else {
         return;
     };
     let dir = PathBuf::from(folder);

@@ -4053,6 +4053,7 @@ render-ground-shadow = Ground shadow
 render-camera = Camera
 # The view as it is in the 3D view now.
 render-current-view = Current view
+render-custom-view = Custom
 # The camera's view direction (a field's label).
 render-view = View
 # A camera projection with depth (not orthographic).

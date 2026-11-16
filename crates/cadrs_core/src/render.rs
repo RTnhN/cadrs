@@ -95,6 +95,12 @@ pub enum RenderView {
         elevation: f32,
         roll: f32,
     },
+    /// Turned in the Render tab's view itself (a drag): azimuth, elevation and roll (degrees).
+    Custom {
+        azimuth: f32,
+        elevation: f32,
+        roll: f32,
+    },
     Isometric,
     #[default]
     Trimetric,
@@ -122,6 +128,7 @@ impl RenderView {
     pub fn label(self) -> &'static str {
         match self {
             RenderView::Current { .. } => "Current view",
+            RenderView::Custom { .. } => "Custom",
             RenderView::Isometric => "Isometric",
             RenderView::Trimetric => "Trimetric",
             RenderView::Front => "Front",
@@ -137,6 +144,11 @@ impl RenderView {
     pub fn angles(self) -> (f32, f32, f32) {
         match self {
             RenderView::Current {
+                azimuth,
+                elevation,
+                roll,
+            }
+            | RenderView::Custom {
                 azimuth,
                 elevation,
                 roll,
@@ -204,10 +216,29 @@ pub struct RenderStudio {
     /// Stops.
     #[serde(default)]
     pub exposure: f32,
+    /// How much nearer than fitting the model the camera is (1 fits it, 2 shows it twice as
+    /// large): the view's zoom, dragged or wheeled in the Render tab.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub zoom: f32,
+    /// Where the camera looks, from the model's centre (mm): the view's pan.
+    #[serde(default, skip_serializing_if = "is_zero3")]
+    pub pan: [f32; 3],
 }
 
 fn yes() -> bool {
     true
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+fn is_one(x: &f32) -> bool {
+    *x == 1.0
+}
+
+fn is_zero3(x: &[f32; 3]) -> bool {
+    *x == [0.0; 3]
 }
 
 impl RenderStudio {
@@ -226,7 +257,17 @@ impl RenderStudio {
             seed: 1,
             denoise: true,
             exposure: 0.0,
+            zoom: 1.0,
+            pan: [0.0; 3],
         }
+    }
+
+    /// The view framing the whole model again (a named view picked, the view captured).
+    pub fn fitted(mut self, view: RenderView) -> Self {
+        self.view = view;
+        self.zoom = 1.0;
+        self.pan = [0.0; 3];
+        self
     }
 }
 
@@ -491,14 +532,50 @@ pub fn settings(r: &RenderStudio, width: u32, height: u32, samples: u32) -> cadr
 
 /// The camera: the studio's view, framing the scene at `aspect` (width / height).
 pub fn camera(r: &RenderStudio, scene: &cadrs_render::Scene, aspect: f32) -> cadrs_render::Camera {
+    camera_for(r, scene.bounds(), aspect).0
+}
+
+/// The camera for a scene with `bounds` (`None`: empty), and the height (mm) it sees across
+/// the plane through the point it looks at: framing the model from the studio's view, then
+/// nearer by its zoom and moved by its pan.
+pub fn camera_for(
+    r: &RenderStudio,
+    bounds: Option<([f32; 3], [f32; 3])>,
+    aspect: f32,
+) -> (cadrs_render::Camera, f32) {
+    const FOV_Y: f32 = 30.0;
     let (back, up) = r.view.frame();
-    let bounds = scene.bounds().unwrap_or(([-50.0; 3], [50.0; 3]));
+    let bounds = bounds.unwrap_or(([-50.0; 3], [50.0; 3]));
     let projection = if r.perspective {
-        cadrs_render::Projection::Perspective { fov_y: 30.0 }
+        cadrs_render::Projection::Perspective { fov_y: FOV_Y }
     } else {
         cadrs_render::Projection::Orthographic { height: 1.0 }
     };
-    cadrs_render::Camera::fit(bounds, back, up, projection, aspect, 0.08)
+    let mut cam = cadrs_render::Camera::fit(bounds, back, up, projection, aspect, 0.08);
+    let zoom = if r.zoom.is_finite() {
+        r.zoom.clamp(0.01, 1000.0)
+    } else {
+        1.0
+    };
+    let center = [0, 1, 2].map(|i| (bounds.0[i] + bounds.1[i]) * 0.5);
+    let target = [0, 1, 2].map(|i| center[i] + r.pan[i]);
+    let height = match &mut cam.projection {
+        cadrs_render::Projection::Perspective { fov_y } => {
+            let dist = (0..3)
+                .map(|i| (cam.eye[i] - center[i]).powi(2))
+                .sum::<f32>()
+                .sqrt()
+                / zoom;
+            cam.eye = [0, 1, 2].map(|i| target[i] + back[i] * dist);
+            2.0 * dist * (fov_y.to_radians() / 2.0).tan()
+        }
+        cadrs_render::Projection::Orthographic { height } => {
+            *height /= zoom;
+            cam.eye = [0, 1, 2].map(|i| cam.eye[i] + r.pan[i]);
+            *height
+        }
+    };
+    (cam, height)
 }
 
 /// Renders a studio's source at its size and samples on `threads` threads (tests and scripted
@@ -526,6 +603,41 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Zoom brings the camera nearer (the view sees less) and pan moves where it looks; a
+    /// named view picked frames the model again.
+    #[test]
+    fn zoom_and_pan_move_the_camera() {
+        let bounds = Some(([0.0, 0.0, 0.0], [60.0, 40.0, 20.0]));
+        for perspective in [true, false] {
+            let r = RenderStudio {
+                perspective,
+                ..RenderStudio::new(None)
+            };
+            let (c1, h1) = camera_for(&r, bounds, 16.0 / 9.0);
+            let zoomed = RenderStudio {
+                zoom: 2.0,
+                pan: [5.0, 0.0, -3.0],
+                ..r.clone()
+            };
+            let (c2, h2) = camera_for(&zoomed, bounds, 16.0 / 9.0);
+            assert!((h2 - h1 / 2.0).abs() < 1e-3 * h1, "{h1} {h2}");
+            assert_eq!(c1.forward, c2.forward);
+            // Looking at the centre moved by the pan.
+            let center = [30.0, 20.0, 10.0];
+            let to = |c: &cadrs_render::Camera, p: [f32; 3]| {
+                let d: Vec<f32> = (0..3).map(|i| p[i] - c.eye[i]).collect();
+                let along: f32 = (0..3).map(|i| d[i] * c.forward[i]).sum();
+                (0..3)
+                    .map(|i| (d[i] - c.forward[i] * along).powi(2))
+                    .sum::<f32>()
+                    .sqrt()
+            };
+            assert!(to(&c1, center) < 1e-3);
+            assert!(to(&c2, [35.0, 20.0, 7.0]) < 1e-3);
+            assert_eq!(zoomed.fitted(RenderView::Front).zoom, 1.0);
+        }
+    }
 
     #[test]
     fn views_match_the_3d_view() {

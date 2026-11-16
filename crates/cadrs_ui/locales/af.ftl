@@ -2855,6 +2855,7 @@ render-background = Agtergrond
 render-ground-shadow = Grondskaduwee
 render-camera = Kamera
 render-current-view = Huidige aansig
+render-custom-view = Pasgemaak
 render-view = Aansig
 render-perspective = Perspektief
 render-output = Uitset

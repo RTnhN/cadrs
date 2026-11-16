@@ -2855,6 +2855,7 @@ render-background = Фон
 render-ground-shadow = Тень на полу
 render-camera = Камера
 render-current-view = Текущий вид
+render-custom-view = Пользовательский
 render-view = Вид
 render-perspective = Перспектива
 render-output = Вывод

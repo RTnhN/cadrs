@@ -2855,6 +2855,7 @@ render-background = Hintergrund
 render-ground-shadow = Bodenschatten
 render-camera = Kamera
 render-current-view = Aktuelle Ansicht
+render-custom-view = Benutzerdefiniert
 render-view = Ansicht
 render-perspective = Perspektive
 render-output = Ausgabe

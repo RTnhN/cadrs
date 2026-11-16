@@ -1,0 +1,40 @@
+// Moving a Render Studio's camera in its view (`render_ui`'s navigation), on the 60 × 40 plate
+// with a Ø16 hole of `with-hole`; the samples on the GPU when there is one (the caption says
+// so).
+// 01 Create Render Studio: the Trimetric preview.
+// 02 a left drag to the right and down: the camera turned (Camera: Custom).
+// 03 the wheel toward the cursor, right of the plate: nearer, the plate moved left.
+// 04 a middle drag: panned.
+// 05 Ctrl+Z: the pan undone (one step).
+// 06 Camera ▸ Isometric: the whole model framed again.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("with-hole"),
+        Click(ui("insert-tab")),
+        WaitFor("create-render-studio"),
+        Click(ui("create-render-studio")),
+        WaitFor("render-panel"),
+        MoveTo(1420, 1000),
+        Wait(60),
+        Screenshot("01-trimetric"),
+        Drag(at(1000, 500), at(1120, 560)),
+        Wait(60),
+        Screenshot("02-turned"),
+        Scroll(at(1250, 560), 4),
+        Wait(80),
+        Screenshot("03-zoomed"),
+        MiddleDrag(at(1100, 560), at(1000, 480)),
+        Wait(60),
+        Screenshot("04-panned"),
+        Key("Ctrl+Z"),
+        Wait(60),
+        Screenshot("05-pan-undone"),
+        Click(ui("render-view")),
+        Click(ui("render-view-option-2")),
+        MoveTo(1420, 1000),
+        Wait(60),
+        Screenshot("06-isometric"),
+    ],
+)

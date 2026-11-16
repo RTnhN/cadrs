@@ -2855,6 +2855,7 @@ render-background = 背景
 render-ground-shadow = 地面阴影
 render-camera = 相机
 render-current-view = 当前视图
+render-custom-view = 自定义
 render-view = 视图
 render-perspective = 透视
 render-output = 输出
