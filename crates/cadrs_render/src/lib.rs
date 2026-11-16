@@ -10,22 +10,29 @@
 //!   the backdrop darkened by how much of the light the model hides from them (the ratio of
 //!   occluded to unoccluded light, accumulated separately so it converges without noise
 //!   bias), or, on a transparent background, a black shadow of that opacity.
-//! - **Accumulation**: [`Renderer::pass`] adds one sample to every pixel (on a thread pool);
-//!   the image so far is [`Renderer::image`]. Every sample's random numbers come from (seed,
+//! - **Accumulation**: [`Renderer::pass`] adds one sample to every pixel (on a thread pool,
+//!   or with the `gpu` feature on the GPU: [`gpu`], the same path tracer as a compute shader,
+//!   chosen by [`Backend`]); the image so far is [`Renderer::image`]. Every sample's random numbers come from (seed,
 //!   pixel, sample index), so the result is the same whatever the thread count or scheduling:
-//!   **a fixed seed gives identical bytes**.
+//!   **a fixed seed gives identical bytes** (on the GPU too, on the same device; the GPU's
+//!   image matches the CPU's to rounding).
 //! - **Output**: the model's radiance is denoised (an edge-avoiding à-trous filter guided by
 //!   the first hit's normal, albedo and position), exposed and tone mapped (Khronos PBR
 //!   Neutral, which keeps appearance colours), then composited over the backdrop in sRGB.
 
+#![recursion_limit = "512"]
+
 pub mod bsdf;
 pub mod bvh;
 pub mod env;
+#[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+pub mod gpu;
 pub mod math;
 
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use image::{Rgba, RgbaImage};
+use image::RgbaImage;
 use rayon::prelude::*;
 
 pub use bsdf::Material;
@@ -43,6 +50,9 @@ pub struct Scene {
     face_normals: Vec<V3>,
     materials: Vec<Material>,
     bvh: bvh::Bvh,
+    /// Its buffers on the GPU, uploaded by the first GPU render.
+    #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+    gpu: std::sync::OnceLock<gpu::Kept>,
 }
 
 #[derive(Default)]
@@ -125,6 +135,8 @@ impl SceneBuilder {
             face_normals,
             materials,
             bvh,
+            #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+            gpu: Default::default(),
         }
     }
 }
@@ -350,6 +362,24 @@ enum SampleResult {
     Miss { sky: V3 },
 }
 
+/// Where a render's samples are traced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Backend {
+    #[default]
+    Cpu,
+    /// The GPU when there is one ([`gpu_available`]) and the scene and image fit it, else the
+    /// CPU.
+    Auto,
+}
+
+/// True when [`Backend::Auto`] renders on the GPU (opens it the first time).
+pub fn gpu_available() -> bool {
+    #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+    return gpu::available();
+    #[cfg(not(all(feature = "gpu", not(target_arch = "wasm32"))))]
+    false
+}
+
 /// A render in progress: its accumulated samples.
 pub struct Renderer {
     scene: std::sync::Arc<Scene>,
@@ -364,6 +394,9 @@ pub struct Renderer {
     /// The render's own threads; `None` in a page, which can't start any (rayon's global pool
     /// is then the page's one thread).
     pool: Option<rayon::ThreadPool>,
+    /// The sums on the GPU, when it traces the samples (`accum` and `guide` are then unused).
+    #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+    gpu: Option<gpu::Pass>,
 }
 
 /// The threads a render uses: half the machine's, at most eight (the app stays responsive).
@@ -375,11 +408,22 @@ pub fn default_threads() -> usize {
 }
 
 impl Renderer {
+    /// A render on the CPU.
     pub fn new(
         scene: std::sync::Arc<Scene>,
         camera: Camera,
         settings: Settings,
         threads: usize,
+    ) -> Self {
+        Self::with_backend(scene, camera, settings, threads, Backend::Cpu)
+    }
+
+    pub fn with_backend(
+        scene: std::sync::Arc<Scene>,
+        camera: Camera,
+        settings: Settings,
+        threads: usize,
+        backend: Backend,
     ) -> Self {
         let n = (settings.width as usize) * (settings.height as usize);
         let (ground_z, eps) = match scene.bounds() {
@@ -389,24 +433,59 @@ impl Renderer {
             }
             None => (0.0, 1e-4),
         };
+        let env = env::Environment::new(settings.environment, settings.environment_rotation);
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        let gpu = match backend {
+            Backend::Auto => gpu::Pass::new(&scene, &camera, &settings, &env, ground_z, eps),
+            Backend::Cpu => None,
+        };
+        #[cfg(not(all(feature = "gpu", not(target_arch = "wasm32"))))]
+        let _ = backend;
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        let on_gpu = gpu.is_some();
+        #[cfg(not(all(feature = "gpu", not(target_arch = "wasm32"))))]
+        let on_gpu = false;
         let pool = (!cfg!(target_arch = "wasm32")).then(|| {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(threads.max(1))
                 .build()
                 .expect("render threads")
         });
+        let cells = if on_gpu { 0 } else { n };
         Renderer {
             scene,
             camera,
             settings,
-            env: env::Environment::new(settings.environment, settings.environment_rotation),
-            accum: vec![Accum::default(); n],
-            guide: vec![Guide::default(); n],
+            env,
+            accum: vec![Accum::default(); cells],
+            guide: vec![Guide::default(); cells],
             samples_done: 0,
             ground_z,
             eps,
             pool,
+            #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+            gpu,
         }
+    }
+
+    /// True when the samples are traced on the GPU.
+    pub fn on_gpu(&self) -> bool {
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        return self.gpu.is_some();
+        #[cfg(not(all(feature = "gpu", not(target_arch = "wasm32"))))]
+        false
+    }
+
+    /// The sums so far (read back from the GPU when it traces them; the guides only if
+    /// `guides`, else none).
+    fn sums(&self, guides: bool) -> (Cow<'_, [Accum]>, Cow<'_, [Guide]>) {
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        if let Some(g) = &self.gpu {
+            let (a, g) = g.read(guides);
+            return (Cow::Owned(a), Cow::Owned(g));
+        }
+        let _ = guides;
+        (Cow::Borrowed(&self.accum), Cow::Borrowed(&self.guide))
     }
 
     pub fn settings(&self) -> &Settings {
@@ -432,6 +511,12 @@ impl Renderer {
     /// Adds one sample to every pixel.
     pub fn pass(&mut self) {
         let s = self.samples_done;
+        #[cfg(all(feature = "gpu", not(target_arch = "wasm32")))]
+        if let Some(g) = &mut self.gpu {
+            g.pass(s);
+            self.samples_done += 1;
+            return;
+        }
         let w = self.settings.width as usize;
         let mut accum = std::mem::take(&mut self.accum);
         let mut guide = std::mem::take(&mut self.guide);
@@ -715,9 +800,10 @@ impl Renderer {
         let (w, h) = (self.settings.width as usize, self.settings.height as usize);
         let n = self.samples_done.max(1) as f32;
         let exposure = 2f32.powf(self.settings.exposure);
+        let (accum, guide) = self.sums(denoise && self.samples_done > 1);
+        let (accum, guide) = (&*accum, &*guide);
         // The model's mean radiance where it was hit.
-        let mut model: Vec<V3> = self
-            .accum
+        let mut model: Vec<V3> = accum
             .iter()
             .map(|a| {
                 if a.n_model > 0.0 {
@@ -728,77 +814,84 @@ impl Renderer {
             })
             .collect();
         if denoise && self.samples_done > 1 {
-            model = self.denoise(&model);
+            model = self.denoise(&model, guide);
         }
-        let shadows = self.shadows();
-        let mut out = RgbaImage::new(w as u32, h as u32);
+        let shadows = self.shadows(accum);
         let background = self.settings.background;
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
-                let a = &self.accum[i];
-                let coverage = a.n_model / n;
-                let m = tonemap(model[i] * exposure);
-                let rest = 1.0 - coverage;
-                // The shadow: how much of the ground's light the model takes, over the pixel's
-                // background samples.
-                let bg_samples = (n - a.n_model).max(0.0);
-                let shadow = if a.n_ground > 0.0 && bg_samples > 0.0 {
-                    shadows[i] * 0.85 * (a.n_ground / bg_samples)
-                } else {
-                    0.0
-                };
-                let (sx, sy) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
-                let (rgb, alpha) = match background {
-                    Background::Transparent => {
-                        // Premultiplied: the model over a black shadow of opacity `shadow`.
-                        let alpha = coverage + rest * shadow;
-                        let c = if alpha > 0.0 {
-                            m * (coverage / alpha)
+        // Row by row on the render's threads.
+        let mut bytes = vec![0u8; w * h * 4];
+        let model = &model;
+        let shadows = &shadows;
+        self.install(|| {
+            bytes
+                .par_chunks_mut(w * 4)
+                .enumerate()
+                .for_each(|(y, row)| {
+                    for x in 0..w {
+                        let i = y * w + x;
+                        let a = &accum[i];
+                        let coverage = a.n_model / n;
+                        let m = tonemap(model[i] * exposure);
+                        let rest = 1.0 - coverage;
+                        // The shadow: how much of the ground's light the model takes, over the pixel's
+                        // background samples.
+                        let bg_samples = (n - a.n_model).max(0.0);
+                        let shadow = if a.n_ground > 0.0 && bg_samples > 0.0 {
+                            shadows[i] * 0.85 * (a.n_ground / bg_samples)
                         } else {
-                            V3::ZERO
+                            0.0
                         };
-                        (c, alpha)
-                    }
-                    _ => {
-                        let back = match (background, self.env.backdrop(sx, sy)) {
-                            (Background::White, _) => V3::ONE,
-                            (_, Some(c)) => c,
-                            (_, None) => {
-                                let s = if bg_samples > 0.0 {
-                                    v3(a.sky[0], a.sky[1], a.sky[2]) / bg_samples
+                        let (sx, sy) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+                        let (rgb, alpha) = match background {
+                            Background::Transparent => {
+                                // Premultiplied: the model over a black shadow of opacity `shadow`.
+                                let alpha = coverage + rest * shadow;
+                                let c = if alpha > 0.0 {
+                                    m * (coverage / alpha)
                                 } else {
                                     V3::ZERO
                                 };
-                                tonemap(s * exposure)
+                                (c, alpha)
+                            }
+                            _ => {
+                                let back = match (background, self.env.backdrop(sx, sy)) {
+                                    (Background::White, _) => V3::ONE,
+                                    (_, Some(c)) => c,
+                                    (_, None) => {
+                                        let s = if bg_samples > 0.0 {
+                                            v3(a.sky[0], a.sky[1], a.sky[2]) / bg_samples
+                                        } else {
+                                            V3::ZERO
+                                        };
+                                        tonemap(s * exposure)
+                                    }
+                                };
+                                (m * coverage + back * (rest * (1.0 - shadow)), 1.0)
                             }
                         };
-                        (m * coverage + back * (rest * (1.0 - shadow)), 1.0)
+                        let px = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+                        row[x * 4..x * 4 + 4].copy_from_slice(&[
+                            px(rgb.x),
+                            px(rgb.y),
+                            px(rgb.z),
+                            px(alpha),
+                        ]);
                     }
-                };
-                let px = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
-                out.put_pixel(
-                    x as u32,
-                    y as u32,
-                    Rgba([px(rgb.x), px(rgb.y), px(rgb.z), px(alpha)]),
-                );
-            }
-        }
-        out
+                });
+        });
+        RgbaImage::from_raw(w as u32, h as u32, bytes).expect("the image's size")
     }
 
     /// How much light the model takes from each ground pixel (0–1), smoothed over the ground
     /// (three à-trous steps over the ground's pixels only): the shadow is smooth, its samples
     /// are not.
-    fn shadows(&self) -> Vec<f32> {
+    fn shadows(&self, accum: &[Accum]) -> Vec<f32> {
         let (w, h) = (self.settings.width as usize, self.settings.height as usize);
-        let ground: Vec<bool> = self
-            .accum
+        let ground: Vec<bool> = accum
             .iter()
             .map(|a| a.n_ground > 0.0 && a.open > 0.0)
             .collect();
-        let mut cur: Vec<f32> = self
-            .accum
+        let mut cur: Vec<f32> = accum
             .iter()
             .map(|a| {
                 if a.open > 0.0 {
@@ -821,10 +914,10 @@ impl Renderer {
             let src = &cur;
             let ground = &ground;
             cur = self.install(|| {
-                (0..h)
-                    .into_par_iter()
-                    .flat_map_iter(|y| {
-                        (0..w).map(move |x| {
+                let mut out = vec![Default::default(); w * h];
+                out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+                    for (x, cell) in row.iter_mut().enumerate() {
+                        *cell = (|| {
                             let i = y * w + x;
                             if !ground[i] {
                                 return src[i];
@@ -848,9 +941,10 @@ impl Renderer {
                                 }
                             }
                             if wsum > 0.0 { sum / wsum } else { src[i] }
-                        })
-                    })
-                    .collect()
+                        })();
+                    }
+                });
+                out
             });
         }
         cur
@@ -858,9 +952,8 @@ impl Renderer {
 
     /// An edge-avoiding à-trous filter (Dammertz et al. 2010) over the model's radiance divided
     /// by its albedo, guided by the first hit's normal and position and the luminance.
-    fn denoise(&self, input: &[V3]) -> Vec<V3> {
+    fn denoise(&self, input: &[V3], guide: &[Guide]) -> Vec<V3> {
         let (w, h) = (self.settings.width as usize, self.settings.height as usize);
-        let guide = &self.guide;
         let albedo = |i: usize| guide[i].albedo.max(V3::splat(0.02));
         let mut cur: Vec<V3> = input
             .iter()
@@ -880,10 +973,10 @@ impl Renderer {
             let sigma_l = noise * 4.0 / (1u32 << iteration) as f32;
             let src = &cur;
             let next: Vec<V3> = self.install(|| {
-                (0..h)
-                    .into_par_iter()
-                    .flat_map_iter(|y| {
-                        (0..w).map(move |x| {
+                let mut out = vec![Default::default(); w * h];
+                out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+                    for (x, cell) in row.iter_mut().enumerate() {
+                        *cell = (|| {
                             let i = y * w + x;
                             let g = &guide[i];
                             if !g.hit {
@@ -922,9 +1015,10 @@ impl Renderer {
                                 }
                             }
                             if wsum > 0.0 { sum / wsum } else { src[i] }
-                        })
-                    })
-                    .collect()
+                        })();
+                    }
+                });
+                out
             });
             cur = next;
         }

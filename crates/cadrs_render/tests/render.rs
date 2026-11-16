@@ -246,3 +246,95 @@ fn fitting_frames_the_model() {
         );
     }
 }
+
+/// The GPU's render matches the CPU's: the same paths (the same random numbers), so the
+/// images differ only by rounding (`cargo test -r -p cadrs_render -F gpu`; skipped without a
+/// GPU).
+#[cfg(feature = "gpu")]
+#[test]
+fn the_gpu_renders_what_the_cpu_does() {
+    if !gpu_available() {
+        eprintln!("no GPU: skipped");
+        return;
+    }
+    let mut b = SceneBuilder::new();
+    let blue = b.material(Material::from_srgb([0x9b, 0xc1, 0xd8], 0.0, 0.45, 1.0));
+    let steel = b.material(Material::from_srgb([0xc8, 0xc8, 0xcc], 1.0, 0.3, 1.0));
+    let glass = b.material(Material::from_srgb([0xe0, 0x60, 0x40], 0.0, 0.2, 0.5));
+    cuboid(&mut b, [0.0, 0.0, 0.0], [60.0, 40.0, 20.0], blue);
+    sphere(&mut b, [30.0, 20.0, 35.0], 15.0, steel);
+    cuboid(&mut b, [-30.0, 0.0, 0.0], [-5.0, 20.0, 30.0], glass);
+    let sc = Arc::new(b.build());
+    for (name, env, background, projection) in [
+        (
+            "studio",
+            EnvironmentPreset::Studio,
+            Background::Environment,
+            Projection::Perspective { fov_y: 30.0 },
+        ),
+        (
+            "soft",
+            EnvironmentPreset::SoftLight,
+            Background::Transparent,
+            Projection::Orthographic { height: 1.0 },
+        ),
+        (
+            "outdoor",
+            EnvironmentPreset::Outdoor,
+            Background::Environment,
+            Projection::Perspective { fov_y: 30.0 },
+        ),
+        (
+            "sunset",
+            EnvironmentPreset::Sunset,
+            Background::White,
+            Projection::Perspective { fov_y: 30.0 },
+        ),
+    ] {
+        let s = Settings {
+            width: 240,
+            height: 135,
+            samples: 16,
+            seed: 7,
+            environment: env,
+            background,
+            denoise: false,
+            ..Settings::default()
+        };
+        let cam = camera(&sc, &s, projection);
+        let run = |backend| {
+            let mut r = Renderer::with_backend(sc.clone(), cam, s, 4, backend);
+            while !r.is_done() {
+                r.pass();
+            }
+            (r.on_gpu(), r.image())
+        };
+        let (cpu_on_gpu, cpu) = run(Backend::Cpu);
+        let (on_gpu, gpu) = run(Backend::Auto);
+        assert!(
+            !cpu_on_gpu && on_gpu,
+            "{name}: the GPU didn't take the render"
+        );
+        gpu.save(out_dir().join(format!("gpu-{name}.png"))).unwrap();
+        cpu.save(out_dir().join(format!("cpu-{name}.png"))).unwrap();
+        // Rounding moves a few paths (a bounce past a threshold): nearly every pixel is the
+        // same, and the images are alike on average.
+        let (mut sum, mut far) = (0u64, 0usize);
+        for (a, b) in cpu.as_raw().iter().zip(gpu.as_raw()) {
+            let d = a.abs_diff(*b);
+            sum += d as u64;
+            if d > 24 {
+                far += 1;
+            }
+        }
+        let n = cpu.as_raw().len();
+        let mean = sum as f64 / n as f64;
+        assert!(mean < 1.5, "{name}: mean difference {mean}");
+        assert!(
+            far * 100 < n,
+            "{name}: {far} of {n} channels differ by more than 24"
+        );
+        // The same seed on the same GPU gives the same bytes.
+        assert_eq!(gpu.as_raw(), run(Backend::Auto).1.as_raw(), "{name}");
+    }
+}

@@ -59,12 +59,12 @@ pub struct Tri {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Node {
-    bounds: Aabb,
+pub(crate) struct Node {
+    pub(crate) bounds: Aabb,
     /// A leaf's first triangle, or an inner node's first child (the second follows it).
-    first: u32,
+    pub(crate) first: u32,
     /// Triangles in a leaf; 0 for an inner node.
-    count: u32,
+    pub(crate) count: u32,
 }
 
 /// Where a ray hits: the triangle, the distance and the barycentric coordinates.
@@ -77,8 +77,8 @@ pub struct Hit {
 }
 
 pub struct Bvh {
-    nodes: Vec<Node>,
-    tris: Vec<Tri>,
+    pub(crate) nodes: Vec<Node>,
+    pub(crate) tris: Vec<Tri>,
     /// The scene's index of each of `tris`.
     pub order: Vec<u32>,
 }

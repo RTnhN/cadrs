@@ -2696,8 +2696,11 @@ dependencies = [
 name = "cadrs_render"
 version = "0.2.6"
 dependencies = [
+ "bytemuck",
+ "futures-lite",
  "image",
  "rayon",
+ "wgpu",
 ]
 
 [[package]]

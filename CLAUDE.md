@@ -46,6 +46,10 @@ Onshape-style CAD in Rust + Bevy 0.20.1. Local notes in `docs/` (git-ignored: `P
 - Kernel debugging: `CADRS_PROFILE=1`, `CADRS_BOOL_DEBUG=1` and `CADRS_DUMP_DIR=<dir>` (inputs of
   failing shells/fillets, replayed by `crates/cadrs_kernel/tests/native_debug.rs`); see the
   kernel README. The kernel is pure Rust (`cadrs_kernel::native`); there is no OCCT any more.
+- Render Studio's path tracer runs on the GPU when there is one (`cadrs_render::gpu`, a WGSL
+  compute shader that must stay in step with the CPU tracer in `cadrs_render/src/lib.rs`);
+  `CADRS_RENDER_GPU=0` keeps it on the CPU. `cargo test -r -p cadrs_render -F gpu` compares
+  the two.
 - App debugging: `CADRS_SLOW_FRAMES=<ms>` logs every frame slower than that with its slowest
   systems (`cadrs_app::debug_tools`; add further env-switched aids there). `CADRS_NO_VSYNC=1`
   shows a frame's real cost; `CADRS_UI_CHANGES=1` names the UI nodes that change every frame

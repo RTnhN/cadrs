@@ -9,3 +9,12 @@ description = "Photorealistic rendering for cadrs (P3F.6): a small CPU path trac
 [dependencies]
 rayon.workspace = true
 image.workspace = true
+
+# The path tracer on the GPU (`gpu`, `trace.wgsl`); without a GPU renders stay on the CPU.
+[features]
+gpu = ["dep:wgpu", "dep:bytemuck", "dep:futures-lite"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, optional = true, features = ["wgsl"] }
+bytemuck = { workspace = true, optional = true }
+futures-lite = { workspace = true, optional = true }

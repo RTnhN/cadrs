@@ -87,9 +87,9 @@ pub struct Environment {
     pub preset: EnvironmentPreset,
     pub lights: Vec<ConeLight>,
     /// The dome: zenith, horizon and ground radiance.
-    zenith: V3,
-    horizon: V3,
-    ground: V3,
+    pub(crate) zenith: V3,
+    pub(crate) horizon: V3,
+    pub(crate) ground: V3,
     /// The backdrop the camera sees (display colours, sRGB 0–1): centre and edge of a
     /// vignette for the studio looks, or the sky itself.
     backdrop: Backdrop,
