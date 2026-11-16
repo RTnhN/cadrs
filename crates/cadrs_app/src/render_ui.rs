@@ -1249,17 +1249,28 @@ pub fn render_toolbar(tb: &mut ChildSpawnerCommands, t: &Theme) {
 }
 
 /// The panel's host, spawned by the document shell for a Render tab.
-pub fn render_panel(p: &mut ChildSpawnerCommands, _t: &Theme) {
-    p.spawn((
-        Name::new("render-panel-host"),
-        RenderPanelHost,
-        Node {
-            flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
-            min_height: Val::Px(0.0),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        },
+pub fn render_panel(p: &mut ChildSpawnerCommands, t: &Theme) {
+    // Scrolls (the wheel, the scrollbar) when the settings and the materials are taller than
+    // the panel.
+    let host = p
+        .spawn((
+            Name::new("render-panel-host"),
+            RenderPanelHost,
+            cadrs_ui::WheelScroll,
+            cadrs_ui::scrollbar::ScrollGutter(8.0),
+            Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+        ))
+        .id();
+    p.spawn(cadrs_ui::vertical_scrollbar(
+        t,
+        "render-panel-scrollbar",
+        host,
     ));
 }
 
@@ -1671,69 +1682,8 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
                 .build(t),
         );
 
-        section(b, t, "render-materials-heading", &tr("render-materials"));
-        if m.materials.is_empty() {
-            b.spawn((
-                Name::new("render-materials-empty"),
-                t.text(
-                    tr("render-no-parts"),
-                    11.0,
-                    FontWeight::NORMAL,
-                    t.muted_foreground,
-                ),
-                Translated("render-no-parts"),
-                Node {
-                    margin: UiRect::horizontal(Val::Px(10.0)),
-                    ..default()
-                },
-            ));
-        }
-        for (k, (rgb, name, detail)) in m.materials.iter().enumerate() {
-            b.spawn((
-                Name::new(format!("render-material-{}", k + 1)),
-                Node {
-                    column_gap: Val::Px(8.0),
-                    margin: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(3.0), Val::Px(3.0)),
-                    ..default()
-                },
-            ))
-            .with_children(|r| {
-                r.spawn((
-                    Node {
-                        width: Val::Px(14.0),
-                        height: Val::Px(14.0),
-                        flex_shrink: 0.0,
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(3.0)),
-                        margin: UiRect::top(Val::Px(1.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb_u8(rgb[0], rgb[1], rgb[2])),
-                    cadrs_ui::KeepFill,
-                    BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
-                ));
-                r.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(1.0),
-                    ..default()
-                })
-                .with_children(|c| {
-                    c.spawn(t.text(name.clone(), 11.5, FontWeight::MEDIUM, t.foreground));
-                    c.spawn((
-                        t.text(detail.clone(), 10.5, FontWeight::NORMAL, t.muted_foreground),
-                        Node {
-                            width: Val::Px(PANEL_W - 50.0),
-                            ..default()
-                        },
-                    ))
-                    .insert(TextLayout::new(
-                        bevy::text::Justify::Left,
-                        bevy::text::LineBreak::WordBoundary,
-                    ));
-                });
-            });
-        }
-
+        // Render… under the settings it uses, before the materials (a long list would push it
+        // out of reach).
         b.spawn(Node {
             column_gap: Val::Px(6.0),
             margin: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(14.0), Val::Px(4.0)),
@@ -1822,6 +1772,69 @@ fn panel_body(b: &mut ChildSpawnerCommands, t: &Theme, m: &PanelModel) {
                 bevy::text::Justify::Left,
                 bevy::text::LineBreak::WordBoundary,
             ));
+        }
+
+        section(b, t, "render-materials-heading", &tr("render-materials"));
+        if m.materials.is_empty() {
+            b.spawn((
+                Name::new("render-materials-empty"),
+                t.text(
+                    tr("render-no-parts"),
+                    11.0,
+                    FontWeight::NORMAL,
+                    t.muted_foreground,
+                ),
+                Translated("render-no-parts"),
+                Node {
+                    margin: UiRect::horizontal(Val::Px(10.0)),
+                    ..default()
+                },
+            ));
+        }
+        for (k, (rgb, name, detail)) in m.materials.iter().enumerate() {
+            b.spawn((
+                Name::new(format!("render-material-{}", k + 1)),
+                Node {
+                    column_gap: Val::Px(8.0),
+                    margin: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(3.0), Val::Px(3.0)),
+                    ..default()
+                },
+            ))
+            .with_children(|r| {
+                r.spawn((
+                    Node {
+                        width: Val::Px(14.0),
+                        height: Val::Px(14.0),
+                        flex_shrink: 0.0,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        margin: UiRect::top(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb_u8(rgb[0], rgb[1], rgb[2])),
+                    cadrs_ui::KeepFill,
+                    BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                ));
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(1.0),
+                    ..default()
+                })
+                .with_children(|c| {
+                    c.spawn(t.text(name.clone(), 11.5, FontWeight::MEDIUM, t.foreground));
+                    c.spawn((
+                        t.text(detail.clone(), 10.5, FontWeight::NORMAL, t.muted_foreground),
+                        Node {
+                            width: Val::Px(PANEL_W - 50.0),
+                            ..default()
+                        },
+                    ))
+                    .insert(TextLayout::new(
+                        bevy::text::Justify::Left,
+                        bevy::text::LineBreak::WordBoundary,
+                    ));
+                });
+            });
         }
     });
 }

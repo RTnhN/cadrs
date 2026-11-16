@@ -1,0 +1,25 @@
+// The Render Studio panel scrolls (the wheel, its scrollbar) when the settings and the
+// materials are taller than it: the Hydraulic Brake Unit assembly of `hand-brake`, its parts
+// listed under Materials.
+// 01 the model picked: Render… under Output, then the materials, the panel full, its
+//    scrollbar.
+// 02 the wheel over the panel: scrolled to the end of the materials.
+Scenario(
+    start: Some("document"),
+    steps: [
+        WaitFor("document-shell"),
+        Custom("hand-brake"),
+        Click(ui("insert-tab")),
+        WaitFor("create-render-studio"),
+        Click(ui("create-render-studio")),
+        WaitFor("render-panel"),
+        Click(ui("render-source")),
+        Click(ui("render-source-option-1")),
+        MoveTo(140, 700),
+        Wait(60),
+        Screenshot("01-assembly"),
+        Scroll(at(140, 700), -20),
+        Wait(10),
+        Screenshot("02-scrolled"),
+    ],
+)
